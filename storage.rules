@@ -1,0 +1,42 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isProjectMember(projectId) {
+      return isSignedIn() && 
+        firestore.exists(/databases/(default)/documents/projects/$(projectId)/team/$(request.auth.uid));
+    }
+    
+    function hasRole(projectId, role) {
+      return isSignedIn() && 
+        firestore.get(/databases/(default)/documents/projects/$(projectId)/team/$(request.auth.uid)).data.role == role;
+    }
+
+    // Allow read access to project members
+    match /folders/{folderId}/{allPaths=**} {
+      allow read: if isSignedIn() && 
+        isProjectMember(firestore.get(/databases/(default)/documents/folders/$(folderId)).data.projectId);
+    }
+
+    // Allow upload of PDF files by project members
+    match /folders/{folderId}/documents/{fileName} {
+      allow write: if isSignedIn() &&
+        isProjectMember(firestore.get(/databases/(default)/documents/folders/$(folderId)).data.projectId) &&
+        request.resource.contentType.matches('application/pdf') &&
+        request.resource.size <= 50 * 1024 * 1024; // 50MB max
+    }
+
+    // Allow deletion by admins and managers
+    match /folders/{folderId}/documents/{fileName} {
+      allow delete: if isSignedIn() && (
+        hasRole(firestore.get(/databases/(default)/documents/folders/$(folderId)).data.projectId, 'admin') ||
+        hasRole(firestore.get(/databases/(default)/documents/folders/$(folderId)).data.projectId, 'manager')
+      );
+    }
+  }
+}

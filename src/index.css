@@ -1,0 +1,89 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --primary-color: #2563eb;
+  --secondary-color: #1e40af;
+  --accent-color: #3b82f6;
+  --background-color: #f8fafc;
+  --text-color: #1e293b;
+  --toolbar-width: 16rem;
+}
+
+body {
+  font-family: 'Inter', sans-serif;
+  background-color: var(--background-color);
+  color: var(--text-color);
+  overflow: hidden; /* Prevent scrolling on the body */
+}
+
+/* Fixed size layout elements */
+.toolbar-fixed {
+  width: var(--toolbar-width);
+  flex-shrink: 0;
+  height: 100%;
+  overflow-y: auto;
+}
+
+.pdf-container-fixed {
+  flex: 1;
+  height: 100%;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.pdf-content-scrollable {
+  flex: 1;
+  overflow: auto;
+  position: relative;
+  padding: 20px; /* Add more padding to ensure content isn't clipped */
+}
+
+.pdf-canvas-wrapper {
+  margin: 0 auto;
+  background-color: white;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  /* Ensure rendering at higher quality */
+  image-rendering: -webkit-optimize-contrast;
+  image-rendering: crisp-edges;
+}
+
+/* Prevent zoom from affecting UI controls */
+.zoom-invariant {
+  transform-origin: top left;
+  will-change: transform;
+}
+
+.glass-effect {
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.hover-scale {
+  transition: transform 0.2s ease-in-out;
+}
+
+.hover-scale:hover {
+  transform: scale(1.02);
+}
+
+.card-shadow {
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1),
+              0 2px 4px -1px rgba(0, 0, 0, 0.06);
+}
+
+.gradient-bg {
+  background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%);
+}
+
+.text-gradient {
+  background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
