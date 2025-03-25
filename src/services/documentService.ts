@@ -11,7 +11,8 @@ import {
   query,
   where,
   orderBy,
-  setDoc
+  setDoc,
+  Timestamp
 } from 'firebase/firestore';
 import {
   ref,
@@ -22,6 +23,9 @@ import {
 import { db, storage } from '../lib/firebase';
 import { Document, DocumentComment } from '../types';
 import { folderService } from './folderService';
+import { userService } from './userService';
+import { createCommentMentionNotifications } from './notificationService';
+import { extractMentions, extractUserIds, resolveUserMentions, UserMention } from '../utils/textUtils';
 
 export const documentService = {
   // Get all documents in a folder

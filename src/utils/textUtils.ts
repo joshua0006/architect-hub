@@ -1,5 +1,192 @@
 import { Annotation, Point } from "../types/annotation";
 
+// Interface for a user mention
+export interface UserMention {
+  username: string;  // The username without the @ symbol
+  userId?: string;   // The user ID if resolved
+  startIndex: number; // Starting position in the text
+  endIndex: number;   // Ending position in the text
+}
+
+/**
+ * Extracts mentions from text (format: @username)
+ * @param text The text to parse for mentions
+ * @returns Array of UserMention objects
+ */
+export const extractMentions = (text: string): UserMention[] => {
+  if (!text) return [];
+  
+  const mentions: UserMention[] = [];
+  
+  // Find all potential mentions - just the @symbol followed by text until whitespace or punctuation
+  const basicMentionRegex = /@\S+/g;
+  let match;
+  
+  while ((match = basicMentionRegex.exec(text)) !== null) {
+    // Starting position of the mention
+    const startIndex = match.index;
+    
+    // Basic mention without spaces (e.g., "@John")
+    const basicMention = match[0];
+    let endIndex = startIndex + basicMention.length;
+    
+    // Check if this might be a multi-word name (e.g., "@John Doe")
+    const remainingText = text.substring(endIndex);
+    
+    // This will match ONE additional word after "@John"
+    // We limit to just one additional word to avoid including trailing text
+    const followingWordMatch = /^\s+([^\s.,!?;:()\[\]{}@"]+)/.exec(remainingText);
+    
+    if (followingWordMatch) {
+      // Only include the next word if it looks like part of a name
+      const followingWord = followingWordMatch[0];
+      const word = followingWordMatch[1];
+      
+      // Only add the word if it looks like a proper name part (first letter uppercase)
+      // or if it's short (like a middle initial)
+      if (word.length < 3 || /^[A-Z]/.test(word)) {
+        endIndex += followingWord.length;
+      }
+    }
+    
+    // Get the mention text without the @ symbol
+    const username = text.substring(startIndex + 1, endIndex).trim();
+    
+    // Skip empty mentions
+    if (!username) continue;
+    
+    mentions.push({
+      username,
+      startIndex,
+      endIndex
+    });
+  }
+  
+  return mentions;
+};
+
+/**
+ * Resolves usernames to user IDs using a provided mapping function
+ * @param mentions Array of UserMention objects
+ * @param resolveUserId Function that takes a username and returns a Promise with the user ID
+ * @returns Array of UserMention objects with resolved user IDs
+ */
+export const resolveUserMentions = async (
+  mentions: UserMention[],
+  resolveUserId: (username: string) => Promise<string | null>
+): Promise<UserMention[]> => {
+  if (!mentions.length) {
+    console.log('No mentions to resolve');
+    return [];
+  }
+  
+  console.log(`Attempting to resolve ${mentions.length} mentions`);
+  
+  const resolvedMentions = await Promise.all(
+    mentions.map(async (mention) => {
+      try {
+        // Sanitize username
+        const username = mention.username.trim();
+        
+        if (!username) {
+          console.log('Skipping empty username');
+          return { ...mention, userId: undefined };
+        }
+        
+        console.log(`Resolving user mention: @${username}`);
+        const userId = await resolveUserId(username);
+        
+        if (userId) {
+          console.log(`Successfully resolved @${username} to user ID: ${userId}`);
+          return {
+            ...mention,
+            userId
+          };
+        } else {
+          console.log(`Could not resolve @${username} to a valid user ID`);
+          return {
+            ...mention,
+            userId: undefined
+          };
+        }
+      } catch (error) {
+        console.error(`Error resolving user ID for ${mention.username}:`, error);
+        return {
+          ...mention, 
+          userId: undefined
+        };
+      }
+    })
+  );
+  
+  // Filter out mentions that couldn't be resolved to actual users
+  const validMentions = resolvedMentions.filter(mention => mention.userId);
+  console.log(`Successfully resolved ${validMentions.length} out of ${mentions.length} mentions`);
+  
+  return validMentions;
+};
+
+/**
+ * Extract user IDs from resolved mentions
+ * @param mentions Array of UserMention objects with resolved user IDs
+ * @returns Array of user IDs
+ */
+export const extractUserIds = (mentions: UserMention[]): string[] => {
+  // Filter out mentions that couldn't be resolved to actual users
+  // and ensure we remove any duplicates to prevent multiple notifications
+  const uniqueUserIds = new Set<string>();
+  
+  mentions
+    .filter(mention => mention.userId && mention.userId.trim() !== '')
+    .forEach(mention => {
+      if (mention.userId) {
+        uniqueUserIds.add(mention.userId);
+      }
+    });
+  
+  return Array.from(uniqueUserIds);
+};
+
+/**
+ * Format text with highlighted mentions
+ * @param text The original text
+ * @param mentions Array of UserMention objects
+ * @returns HTML string with styled mentions
+ */
+export const formatTextWithMentions = (text: string, mentions: UserMention[]): string => {
+  if (!text || !mentions.length) return text;
+  
+  let result = '';
+  let lastIndex = 0;
+  
+  // Sort mentions by startIndex to process them in order
+  const sortedMentions = [...mentions].sort((a, b) => a.startIndex - b.startIndex);
+  
+  for (const mention of sortedMentions) {
+    // Add text before this mention
+    result += text.substring(lastIndex, mention.startIndex);
+    
+    // Extract just the actual username part (not including trailing text)
+    const mentionText = text.substring(mention.startIndex, mention.endIndex);
+    
+    // Get username words (likely "John Doe" but could be just "John")
+    const usernameText = mentionText;
+    
+    // Wrap only the username part in the styled span
+    result += `<span class="text-blue-500 font-medium">${usernameText}</span>`;
+    
+    // Update the last position
+    lastIndex = mention.endIndex;
+  }
+  
+  // Add any remaining text
+  if (lastIndex < text.length) {
+    result += text.substring(lastIndex);
+  }
+  
+  return result;
+};
+
 /**
  * Renders text annotation on canvas
  */

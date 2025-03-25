@@ -6,6 +6,8 @@ import { validateUploadToken, uploadFileWithToken } from '../services/uploadToke
 import { UploadToken } from '../services/uploadTokenService';
 import { collection, getDocs, query, where, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../lib/firebase';
+import { createFileUploadNotification } from '../services/notificationService';
+import { userService } from '../services/userService';
 
 const TokenUpload: React.FC = () => {
   const [searchParams] = useSearchParams();
@@ -120,49 +122,36 @@ const TokenUpload: React.FC = () => {
         
         console.log(`Creating notification with folder ID: ${token.folderId}`);
         
-        // Create notification directly using Firestore
-        try {
-          // Create the link to the document with proper context
-          let link = `/documents`;
-          
-          if (token.metadata?.projectId) {
-            link = `/documents/projects/${token.metadata.projectId}`;
+        // Get project members to notify if we have a project ID
+        if (token.metadata?.projectId) {
+          try {
+            // Get all project members for this project
+            const projectMembers = await userService.getUsersByProject(token.metadata.projectId);
+            const memberIds = projectMembers.map(member => member.id);
             
-            if (token.folderId) {
-              link += `/folders/${token.folderId}`;
+            if (memberIds.length > 0) {
+              // Create notifications for all project members
+              const notificationIds = await createFileUploadNotification(
+                file.name,
+                guestName,
+                file.type,
+                token.folderId,
+                folderName,
+                result?.documentId || '',
+                token.metadata.projectId,
+                new Date().toISOString(),
+                memberIds
+              );
               
-              if (result?.documentId) {
-                link += `/files/${result.documentId}`;
-              }
+              console.log(`Created ${notificationIds.length} token upload notifications for project members`);
+            } else {
+              console.log('No project members to notify about token upload');
             }
-          } else if (token.folderId) {
-            link += `/folders/${token.folderId}`;
+          } catch (error) {
+            console.error('Error getting project members for token upload notifications:', error);
           }
-          
-          // Create notification in Firestore
-          const notificationsRef = collection(db, 'notifications');
-          await addDoc(notificationsRef, {
-            iconType: 'file-upload',
-            type: 'info',
-            message: `${guestName} uploaded "${file.name}" to ${folderName}`,
-            link: link,
-            read: false,
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-            metadata: {
-              contentType: file.type,
-              fileName: file.name,
-              folderId: token.folderId,
-              folderName: folderName,
-              guestName: guestName,
-              uploadDate: new Date().toISOString(),
-              projectId: token.metadata?.projectId || ''
-            }
-          });
-          
-          console.log('Notification created successfully');
-        } catch (firestoreError) {
-          console.error('Error creating notification in Firestore:', firestoreError);
+        } else {
+          console.log('No project ID in token, skipping notifications');
         }
       } catch (notificationError) {
         console.error('Error creating notification:', notificationError);

@@ -99,5 +99,21 @@ service cloud.firestore {
         hasRole(resource.data.projectId, 'manager')
       );
     }
+
+    // Notifications collection
+    match /notifications/{notificationId} {
+      // Users can read and update their own notifications
+      allow read: if isSignedIn() && request.auth.uid == resource.data.userId;
+      
+      // Allow creating notifications targeting a specific user
+      allow create: if isSignedIn() && 
+        (request.resource.data.userId != null);
+      
+      // Allow updating a notification (e.g., marking as read) if you own it
+      allow update: if isSignedIn() && request.auth.uid == resource.data.userId;
+      
+      // Allow deleting a notification if you own it
+      allow delete: if isSignedIn() && request.auth.uid == resource.data.userId;
+    }
   }
 }

@@ -378,13 +378,11 @@ export default function DocumentList({
     const handleNotificationUpdate = (event: CustomEvent) => {
       console.log('Notification document update event received:', event.detail);
       
-      const { fileId, folderId, projectId: notificationProjectId } = event.detail;
+      const { fileId, folderId, notificationType, forceDirect } = event.detail;
       
-      // Only process events relevant to the current project
-      if (notificationProjectId && notificationProjectId !== projectId) {
-        console.log('Notification is for a different project, ignoring');
-        return;
-      }
+      // Handle forced direct navigation (from cross-project notifications)
+      // No longer check if projectId matches - we always process all notifications
+      // since we are now handling direct navigation across projects
       
       // If we have a refresh function, call it to update the document list
       if (onRefresh) {
@@ -400,12 +398,28 @@ export default function DocumentList({
               }
             } else {
               console.log('File not found in current document list, may need to fetch');
+              
               // If the file is in a different folder, we may need to navigate to that folder first
               if (folderId && folderId !== currentFolder?.id) {
                 const targetFolder = folders.find(folder => folder.id === folderId);
                 if (targetFolder && onFolderSelect) {
                   console.log('Navigating to folder from notification:', targetFolder.name);
                   onFolderSelect(targetFolder);
+                  
+                  // After navigating to the folder, we need to find the file again
+                  // Set a timeout to give time for the folder navigation to complete
+                  setTimeout(() => {
+                    // Try to find the file again after folder navigation
+                    const updatedFileToSelect = documents.find(doc => doc.id === fileId);
+                    if (updatedFileToSelect && onPreview) {
+                      console.log('Found file after folder navigation:', updatedFileToSelect.name);
+                      onPreview(updatedFileToSelect);
+                    } else {
+                      console.log('File still not found after folder navigation');
+                    }
+                  }, 500);
+                } else {
+                  console.log('Target folder not found in current folder list');
                 }
               }
             }
@@ -415,6 +429,8 @@ export default function DocumentList({
             if (targetFolder && onFolderSelect) {
               console.log('Navigating to folder from notification:', targetFolder.name);
               onFolderSelect(targetFolder);
+            } else {
+              console.log('Target folder not found in current folder list');
             }
           }
         });
@@ -434,7 +450,7 @@ export default function DocumentList({
         handleNotificationUpdate as EventListener
       );
     };
-  }, [onRefresh, documents, folders, currentFolder, onFolderSelect, onPreview, projectId]);
+  }, [onRefresh, documents, folders, currentFolder, onFolderSelect, onPreview]);
 
   return (
     <div
@@ -469,6 +485,10 @@ export default function DocumentList({
             folders={folders.map(f => ({ id: f.id, name: f.name }))}
             onNavigateToFolder={handleBreadcrumbNavigation}
             viewerHeight={600}
+            setViewerHeight={(height: number) => {
+              console.log('Viewer height updated:', height);
+              // You can add state for this if needed
+            }}
           />
         </div>
       ) : (

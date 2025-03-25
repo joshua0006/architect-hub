@@ -8,6 +8,13 @@ export interface DocumentComment {
   createdAt: string;
   updatedAt?: string;
   replyTo?: string;
+  mentions?: string[];
+  userPhotoURL?: string | null;
+  position?: {
+    x: number;
+    y: number;
+    pageNumber: number;
+  };
 }
 
 export interface Document {
@@ -24,6 +31,19 @@ export interface Document {
     size?: number;
     contentType?: string;
     originalFilename?: string;
+  };
+}
+
+export interface DocumentVersion {
+  id: string;
+  version: number;
+  url: string;
+  uploadedAt: string;
+  accessible?: boolean;
+  metadata: {
+    originalFilename: string;
+    contentType: string;
+    size: number;
   };
 }
 
@@ -184,7 +204,7 @@ export interface ShareToken {
   id: string;
   resourceId: string;
   type: 'file' | 'folder';
-  expiresAt: Date | firebase.firestore.Timestamp;
+  expiresAt: Date | any;
   permissions: string[];
   creatorId: string;
   createdAt: Date;

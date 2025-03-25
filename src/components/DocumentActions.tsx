@@ -6,6 +6,9 @@ import GenerateUploadToken from './GenerateUploadToken';
 import { useAuth } from '../contexts/AuthContext';
 import { collection, addDoc, serverTimestamp, getDocs, query, where } from 'firebase/firestore';
 import { db } from '../lib/firebase';
+import { createFileUploadNotification } from '../services/notificationService';
+import { userService } from '../services/userService';
+import { User } from '../types';
 
 interface DocumentActionsProps {
   projectId: string;
@@ -366,7 +369,7 @@ export default function DocumentActions({
       
       // Create a notification for the file upload - for guests or token uploads
       try {
-        // Create notifications for guest uploads or token-based uploads
+        // Only create notifications for guest uploads or token-based uploads
         if (!user || isTokenUpload) {
           // Get folder name
           const folderName = targetFolderName;
@@ -374,52 +377,52 @@ export default function DocumentActions({
           // For guest uploads, we'll use the entered uploader name
           const uploader = uploaderName.trim();
           
-          // Create the link to the document with proper context
-          let link = `/documents`;
+          // Get document ID from the upload if available
+          let documentId = '';
           
-          if (projectId) {
-            link = `/documents/projects/${projectId}`;
-            
-            if (selectedFolderId) {
-              link += `/folders/${selectedFolderId}`;
-            }
-          } else if (selectedFolderId) {
-            link += `/folders/${selectedFolderId}`;
-          }
-          
-          // Create notification for guest uploads or token-based uploads
+          // Get all project members to notify
           await ensureFirebaseSync(async () => {
-            const notificationsRef = collection(db, 'notifications');
-            await addDoc(notificationsRef, {
-              iconType: 'file-upload',
-              type: 'info',
-              message: `${uploader} uploaded "${newFileName.trim()}" to ${folderName}`,
-              link: link,
-              read: false,
-              createdAt: serverTimestamp(),
-              updatedAt: serverTimestamp(),
-              metadata: {
-                contentType: selectedFile.type,
-                fileName: selectedFile.name,
-                folderId: selectedFolderId || '',
-                folderName: folderName,
-                isRootUpload: !selectedFolderId,
-                guestName: uploader,
-                uploadDate: new Date().toISOString(),
-                projectId: projectId || '',
-                isGuestUpload: !user,
-                isTokenUpload: isTokenUpload
+            try {
+              // Get all project members if we have a project ID
+              if (projectId) {
+                const projectMembers = await userService.getUsersByProject(projectId);
+                const memberIds = projectMembers.map(member => member.id);
+                
+                console.log(`Found ${memberIds.length} project members to notify about file upload`);
+                
+                if (memberIds.length > 0) {
+                  // Create file upload notifications for all project members
+                  const notificationIds = await createFileUploadNotification(
+                    newFileName.trim(),
+                    uploader,
+                    selectedFile.type,
+                    selectedFolderId || '',
+                    folderName,
+                    documentId, // This might be empty for now
+                    projectId,
+                    new Date().toISOString(),
+                    memberIds
+                  );
+                  
+                  console.log(`Created ${notificationIds.length} file upload notifications for project members`);
+                } else {
+                  console.log('No project members to notify about file upload');
+                }
+              } else {
+                console.log('No project ID, skipping notifications');
               }
-            });
-            
-            const uploadType = !user ? 'Guest' : isTokenUpload ? 'Token-based' : 'User';
-            console.log(`${uploadType} upload notification successfully created in Firebase`);
+            } catch (error) {
+              console.error('Error getting project members for notifications:', error);
+            }
           });
+          
+          const uploadType = !user ? 'Guest' : isTokenUpload ? 'Token-based' : 'User';
+          console.log(`${uploadType} upload notifications created via notification service`);
         } else {
           console.log('Skipping notification creation for standard logged-in user upload');
         }
       } catch (notificationError) {
-        console.error('Error creating upload notification in Firebase:', notificationError);
+        console.error('Error creating upload notification:', notificationError);
         // Continue even if notification fails - don't block the main upload
       }
       

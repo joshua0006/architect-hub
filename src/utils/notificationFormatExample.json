@@ -1,0 +1,33 @@
+{
+  "comment": "Great job on the project! @userB, what do you think about the latest design changes?",
+  "notifications": [
+    {
+      "user": "userB",
+      "message": "You were mentioned in a comment!",
+      "type": "mention",
+      "documentName": "Project Design Document",
+      "projectName": "City Center Redesign",
+      "sender": "userA",
+      "read": false
+    },
+    {
+      "user": "userC",
+      "message": "UserA commented on a document you're collaborating on",
+      "type": "comment",
+      "documentName": "Project Design Document",
+      "projectName": "City Center Redesign",
+      "sender": "userA",
+      "read": false
+    },
+    {
+      "user": "userD",
+      "message": "UserA commented on a document you're collaborating on",
+      "type": "comment",
+      "documentName": "Project Design Document",
+      "projectName": "City Center Redesign",
+      "sender": "userA",
+      "read": false
+    }
+  ],
+  "timestamp": "2023-10-15T10:00:00Z"
+} 

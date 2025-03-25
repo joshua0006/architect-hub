@@ -69,7 +69,6 @@ export const App: React.FC = () => {
                   element={<TokenUpload />}
                 />
               </Routes>
-          
             
             {isShortcutGuideOpen && (
               <KeyboardShortcutGuide

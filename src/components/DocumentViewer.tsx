@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, memo } from "react";
+import { useLocation, useSearchParams } from "react-router-dom";
 
 import {
   ChevronDown,
@@ -43,6 +44,24 @@ import { PDFViewer } from "./PDFViewer";
 import { Toolbar } from "./Toolbar";
 import { Button } from "./ui/button";
 import { MediaViewer, isImage, isVideo, isAudio, isPDF, getMediaTypeInfo } from "../utils/mediaUtils";
+import { useOrganization } from '../contexts/OrganizationContext';
+import { 
+  extractMentions, 
+  resolveUserMentions, 
+  extractUserIds,
+  UserMention
+} from '../utils/textUtils';
+import { userService } from '../services/userService';
+import { 
+  createCommentMentionNotifications, 
+  createCommentNotifications,
+  resetNotificationSystem,
+  notifyMentionedUsers
+} from '../services/notificationService';
+import CommentText from './CommentText';
+import EnhancedCommentInput from './EnhancedCommentInput';
+import { DocumentVersion, DocumentComment } from "../types";
+import { NOTIFICATION_DOCUMENT_UPDATE_EVENT } from './NotificationIcon';
 
 interface Document {
   id: string;
@@ -52,24 +71,10 @@ interface Document {
   url: string;
   dateModified: string;
   folderId?: string;
-  projectId: string;
   metadata?: {
     contentType?: string;
     size?: number;
     originalFilename?: string;
-  };
-}
-
-interface DocumentComment {
-  id: string;
-  userId: string;
-  userName: string;
-  text: string;
-  createdAt: string;
-  position: {
-    x: number;
-    y: number;
-    pageNumber: number;
   };
 }
 
@@ -78,24 +83,8 @@ interface Folder {
   name: string;
 }
 
-interface DocumentVersion {
-  id: string;
-  version: number;
-  url: string;
-  uploadedAt: string;
-  metadata: {
-    originalFilename: string;
-    contentType: string;
-    size: number;
-  };
-}
-
-interface Comment {
-  id: string;
-  userId: string;
-  userName: string;
-  text: string;
-  createdAt: string;
+interface Comment extends DocumentComment {
+  userPhotoURL?: string | null;
 }
 
 interface DocumentViewerProps {
@@ -106,6 +95,7 @@ interface DocumentViewerProps {
   onNavigateToFolder: (folder?: Folder) => void;
   isShared?: boolean;
   viewerHeight: number;
+  setViewerHeight: (height: number) => void;
 }
 
 interface CommentMarkerProps {
@@ -127,8 +117,8 @@ const CommentMarker = ({
   <div
     className="absolute group"
     style={{
-      left: `${comment.position.x}%`,
-      top: `${comment.position.y}%`,
+      left: `${comment.position?.x || 0}%`,
+      top: `${comment.position?.y || 0}%`,
     }}
   >
     <div className="relative">
@@ -196,12 +186,15 @@ const CommentSection = memo(
     handleUpdateComment,
     handleDeleteComment,
     setEditingCommentId,
+    document,
+    highlightedCommentId,
+    commentRefs
   }: {
     user: any;
     newComment: string;
-    handleCommentChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+    handleCommentChange: (value: string) => void;
     handleAddComment: () => void;
-    comments: DocumentComment[];
+    comments: Comment[];
     loadingComments: boolean;
     submittingComment: boolean;
     editingCommentId: string | null;
@@ -210,33 +203,57 @@ const CommentSection = memo(
     handleUpdateComment: (id: string) => void;
     handleDeleteComment: (id: string) => void;
     setEditingCommentId: (id: string | null) => void;
+    document: Document;
+    highlightedCommentId: string | null;
+    commentRefs: React.MutableRefObject<Record<string, HTMLDivElement | null>>;
   }) => (
     <div className="mt-8">
       <h3 className="text-sm font-medium text-gray-900 mb-4 flex items-center">
         <MessageSquare className="w-4 h-4 mr-1" /> Comments
       </h3>
 
-      {/* Add comment form */}
-      <div className="mb-6">
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={newComment}
-            onChange={handleCommentChange}
-            placeholder="Add a comment..."
-            className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            disabled={!user || submittingComment}
-          />
-          <button
-            onClick={() => {
-              handleAddComment();
-            }}
-            disabled={!user || !newComment.trim() || submittingComment}
-            className="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors disabled:opacity-50"
-          >
-            <Send className="w-4 h-4" />
-          </button>
+      {/* Debug info - only visible in development */}
+      {process.env.NODE_ENV === 'development' && (
+        <div className="mb-4 p-2 border border-gray-200 rounded bg-gray-50 text-xs">
+          <p>Comment Debug Info:</p>
+          <p>Document: <strong>{document.name}</strong></p>
+          <p>Document ID: <strong>{document.id}</strong></p>
+          <p>Folder ID: <strong>{document.folderId || 'NONE'}</strong></p>
+          <p>User logged in: {user ? 'Yes ✅' : 'No ❌'}</p>
+          {highlightedCommentId && (
+            <p>Highlighted Comment: <strong>{highlightedCommentId}</strong></p>
+          )}
+          <div className="mt-1 flex space-x-2">
+            <button 
+              onClick={() => console.log('Current document:', document)}
+              className="text-blue-500 underline"
+            >
+              Log Document
+            </button>
+            <button 
+              onClick={() => {
+                console.log('Loading all users');
+                userService.getAllUsers().then(users => 
+                  console.log(`Loaded ${users.length} users`)
+                ).catch(err => console.error('User load failed:', err));
+              }}
+              className="text-blue-500 underline"
+            >
+              Test User Lookup
+            </button>
+          </div>
         </div>
+      )}
+
+      {/* Add comment form */}
+      <div className="mb-6 w-full">
+        <EnhancedCommentInput
+          value={newComment}
+          onChange={handleCommentChange}
+          onSubmit={handleAddComment}
+          disabled={!user || submittingComment}
+          projectId="" // Set empty projectId since it's not used
+        />
       </div>
 
       {/* Comments list */}
@@ -249,7 +266,8 @@ const CommentSection = memo(
           comments.map((comment) => (
             <div
               key={comment.id}
-              className="bg-white rounded-lg border border-gray-200 p-4"
+              ref={el => commentRefs.current[comment.id] = el}
+              className={`bg-white rounded-lg border ${highlightedCommentId === comment.id ? 'border-blue-300 shadow-md' : 'border-gray-200'} p-4`}
             >
               <div className="flex justify-between items-start">
                 <div className="flex items-center gap-3">
@@ -281,7 +299,7 @@ const CommentSection = memo(
                       <>
                         <button
                           onClick={() => handleUpdateComment(comment.id)}
-                          disabled={submittingComment}
+                                disabled={submittingComment}
                           className="p-1 text-green-600 hover:text-green-700 rounded-full hover:bg-green-50 disabled:opacity-50"
                         >
                           <Send className="w-4 h-4" />
@@ -322,15 +340,21 @@ const CommentSection = memo(
                 )}
               </div>
               {editingCommentId === comment.id ? (
-                <input
-                  type="text"
-                  value={editText}
-                  onChange={(e) => setEditText(e.target.value)}
-                  className="mt-2 w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  disabled={submittingComment}
-                />
+                <div className="w-full mt-2">
+                  <EnhancedCommentInput
+                    value={editText}
+                    onChange={setEditText}
+                    onSubmit={() => handleUpdateComment(comment.id)}
+                    disabled={submittingComment}
+                    projectId="" // Set empty projectId since it's not used
+                    placeholder="Edit comment..."
+                  />
+                </div>
               ) : (
-                <p className="mt-2 text-gray-600">{comment.text}</p>
+                <CommentText 
+                  text={comment.text} 
+                  className="mt-2 text-gray-600" 
+                />
               )}
             </div>
           ))
@@ -346,6 +370,8 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
   document,
   viewerHeight,
   isShared,
+  setViewerHeight,
+  onRefresh
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -369,6 +395,30 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
   const { user } = useAuth();
   const commentInputRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
+  const isSubmittingRef = useRef(false);
+  const lastSubmissionTimeRef = useRef(0);
+  const [lastCommentId, setLastCommentId] = useState<string | null>(null);
+  const lastCommentTime = useRef<number>(0);
+  const [highlightedCommentId, setHighlightedCommentId] = useState<string | null>(null);
+  const location = useLocation();
+  const [searchParams] = useSearchParams();
+  const commentRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const [showToast, setShowToast] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
+  
+  // Add CSS for highlight animation in JSX
+  const highlightStyles = `
+    @keyframes pulse-highlight {
+      0% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.5); }
+      70% { box-shadow: 0 0 0 10px rgba(59, 130, 246, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
+    }
+    .highlight-document {
+      animation: pulse-highlight 2s ease-in-out;
+      border: 2px solid #3b82f6 !important;
+      transition: all 0.3s ease;
+    }
+  `;
 
   useEffect(() => {
     if (!document.id) return;
@@ -407,44 +457,540 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
     }
   }, [document]);
 
+  useEffect(() => {
+    // Check if we have a commentId in the URL
+    const commentId = searchParams.get('comment');
+    if (commentId) {
+      console.log(`Found commentId in URL: ${commentId}, setting it as highlighted`);
+      setHighlightedCommentId(commentId);
+      
+      // Wait for comments to load before trying to scroll
+      const scrollTimeout = setTimeout(() => {
+        const commentElement = commentRefs.current[commentId];
+        if (commentElement) {
+          console.log(`Scrolling to comment: ${commentId}`);
+          commentElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          
+          // Add a flash effect for the highlighted comment
+          commentElement.classList.add('bg-blue-50');
+          commentElement.classList.add('border-blue-300');
+          
+          setTimeout(() => {
+            commentElement.classList.remove('bg-blue-50');
+            commentElement.classList.remove('border-blue-300');
+            // Add transition to make the highlight fade smoothly
+            commentElement.classList.add('transition-all');
+            commentElement.classList.add('duration-500');
+          }, 2000);
+        } else {
+          console.log(`Comment element not found for ID: ${commentId}`);
+        }
+      }, 500); // Short delay to ensure comments have loaded
+      
+      return () => clearTimeout(scrollTimeout);
+    }
+  }, [searchParams, comments.length]);
+
+  // Add a new useEffect to listen for notification events
+  useEffect(() => {
+    // Listen for notification document update events
+    const handleNotificationUpdate = (event: CustomEvent) => {
+      const { documentId, fileId, commentId, notificationType, fileName } = event.detail;
+      console.log(`Received notification update event for document ${documentId}, comment ${commentId}, file ${fileId}`);
+      console.log(`Notification type: ${notificationType}, fileName: ${fileName}`);
+      
+      // Only process if this is the same document we're viewing
+      if (documentId && document.id === documentId) {
+        // Handle comment notifications
+        if (commentId) {
+          console.log(`Setting highlighted comment ID to: ${commentId}`);
+          setHighlightedCommentId(commentId);
+          
+          // Give time for state to update, then scroll
+          setTimeout(() => {
+            const commentElement = commentRefs.current[commentId];
+            if (commentElement) {
+              console.log('Scrolling to comment from notification event');
+              commentElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              
+              // Add a flash effect
+              commentElement.classList.add('bg-blue-50');
+              commentElement.classList.add('border-blue-300');
+              
+              setTimeout(() => {
+                commentElement.classList.remove('bg-blue-50');
+                commentElement.classList.remove('border-blue-300');
+                commentElement.classList.add('transition-all');
+                commentElement.classList.add('duration-500');
+              }, 2000);
+            }
+          }, 100);
+        }
+        // Handle file upload notifications - animate or highlight the document view
+        else if (notificationType === 'file-upload') {
+          console.log('Handling file upload notification');
+          
+          // Set toast message and show it
+          setToastMessage(`Viewing uploaded file: ${fileName || document.name}`);
+          setShowToast(true);
+          
+          // Hide after 5 seconds
+          setTimeout(() => {
+            setShowToast(false);
+          }, 5000);
+          
+          // Apply highlight via DOM (since the document viewer is complex)
+          const documentViewer = window.document.querySelector('.document-content') as HTMLElement;
+          if (documentViewer) {
+            documentViewer.classList.add('highlight-document');
+            setTimeout(() => {
+              documentViewer.classList.remove('highlight-document');
+            }, 3000);
+          }
+        }
+      }
+    };
+    
+    // Add event listener
+    window.document.addEventListener(
+      NOTIFICATION_DOCUMENT_UPDATE_EVENT,
+      handleNotificationUpdate as EventListener
+    );
+    
+    // Cleanup
+    return () => {
+      window.document.removeEventListener(
+        NOTIFICATION_DOCUMENT_UPDATE_EVENT,
+        handleNotificationUpdate as EventListener
+      );
+    };
+  }, [document.id, document.name]);
+
+  // Add a useEffect to handle the navigation coming from notifications
+  useEffect(() => {
+    // Check if we're navigating from a notification and need to handle special project switching
+    const locationState = location.state as any;
+    if (locationState?.fromNotification && locationState?.forceDirect) {
+      console.log('Handling notification navigation with forceDirect:', locationState);
+      
+      // If this is a direct navigation from a notification, we might need to handle project context
+      // This ensures proper context switching even when coming from a different project
+      
+      // You could trigger any necessary project initialization here
+      // For example, loading project data based on the current document/folder
+      
+      // Clear the navigation state after handling to prevent loops
+      const clearedState = {...locationState, handled: true};
+      window.history.replaceState(clearedState, '');
+    }
+  }, [location]);
+
   const handleAddComment = async () => {
     if (!user || !newComment.trim() || submittingComment) return;
-
+    
+    const now = Date.now();
+    
+    // Prevent multiple submissions within a short timeframe
+    if (now - lastSubmissionTimeRef.current < 2000) {
+      console.log('Preventing rapid resubmission');
+      return;
+    }
+    
+    // Prevent concurrent submissions
+    if (isSubmittingRef.current) {
+      console.log('Submission already in progress, preventing duplicate');
+      return;
+    }
+    
+    // Check if this exact comment was recently added
+    if (now - lastCommentTime.current < 10000 && lastCommentId) {
+      console.log(`Recent comment already exists (${lastCommentId}), preventing duplicate`);
+      return;
+    }
+    
+    // Log document data for debugging
+    console.log("Comment document data:", { 
+      id: document.id,
+      name: document.name,
+      folderId: document.folderId
+    });
+    
+    // Set all the submission lock flags
+    isSubmittingRef.current = true;
+    lastSubmissionTimeRef.current = now;
+    lastCommentTime.current = now;
+    
+    const submissionId = now.toString();
+    const commentText = newComment.trim();
+    
     try {
       setSubmittingComment(true);
+      
+      // Clear input immediately to prevent accidental resubmission
+      setNewComment("");
+      
+      console.log(`Starting comment submission with ID: ${submissionId}`);
+      console.log(`Comment text: "${commentText}"`);
+      
+      // Extract mentions - detect @username patterns in the text
+      const mentions = extractMentions(commentText);
+      console.log(`Extracted ${mentions.length} raw mentions:`, mentions);
+      
+      // Improve the mentions for display by limiting them to valid users
+      const limitedMentions = mentions.map(mention => {
+        // Keep track of the original mention
+        const originalMention = mention;
+        
+        // Try to limit the mention to just the username part
+        const nameParts = mention.username.split(/\s+/);
+        
+        // If it's a multi-word mention, check if the first part is a valid user
+        if (nameParts.length > 1) {
+          // For debug purposes
+          console.log(`Multi-word mention detected: "${mention.username}", parts:`, nameParts);
+        }
+        
+        return originalMention;
+      });
+
+      console.log(`Processed ${limitedMentions.length} mentions for user lookup:`, limitedMentions);
+      
+      let resolvedMentions: UserMention[] = [];
+      try {
+        resolvedMentions = await resolveUserMentions(limitedMentions, async (username) => {
+          try {
+            const trimmedUsername = username.trim();
+            
+            if (!trimmedUsername) {
+              return null;
+            }
+            
+            // Get all users at once to prevent multiple calls
+            const allUsers = await userService.getAllUsers();
+            
+            // First try strict case-insensitive match on the full display name
+            let match = allUsers.find(u => 
+              u.displayName.toLowerCase() === trimmedUsername.toLowerCase()
+            );
+            
+            if (match) {
+              console.log(`Found exact display name match for @${trimmedUsername}: ${match.id}`);
+              return match.id;
+            }
+            
+            // Check if the mention is just the first part of a multi-word name
+            // For example, when "@John Doe" is mentioned as "@John"
+            const firstWord = trimmedUsername.split(/\s+/)[0].toLowerCase();
+            
+            match = allUsers.find(u => {
+              const nameParts = u.displayName.toLowerCase().split(/\s+/);
+              return nameParts[0] === firstWord; // Match first name
+            });
+            
+            if (match) {
+              console.log(`Found first name match for @${trimmedUsername}: ${match.id} (${match.displayName})`);
+              return match.id;
+            }
+            
+            // Try partial match where display name starts with mention text
+            match = allUsers.find(u => 
+              u.displayName.toLowerCase().startsWith(trimmedUsername.toLowerCase())
+            );
+            
+            if (match) {
+              console.log(`Found display name starts with @${trimmedUsername}: ${match.id} (${match.displayName})`);
+              return match.id;
+            }
+            
+            // Try finding any user whose display name contains the mention text completely
+            match = allUsers.find(u => {
+              const displayName = u.displayName.toLowerCase();
+              return displayName.includes(trimmedUsername.toLowerCase());
+            });
+            
+            if (match) {
+              console.log(`Found display name contains @${trimmedUsername}: ${match.id} (${match.displayName})`);
+              return match.id;
+            }
+            
+            console.log(`Could not resolve mention @${trimmedUsername}`);
+            return null;
+          } catch (error) {
+            console.error(`Error resolving username ${username}:`, error);
+            return null;
+          }
+        });
+      } catch (resolveError) {
+        console.error('Error resolving mentions:', resolveError);
+        resolvedMentions = [];
+      }
+      
+      const mentionedUserIds = extractUserIds(resolvedMentions);
+      console.log(`Resolved mentions to ${mentionedUserIds.length} user IDs:`, mentionedUserIds);
+      
+      const validMentionedUserIds = mentionedUserIds.filter(id => id && typeof id === 'string' && id.trim() !== '');
+      console.log(`Valid mentioned user IDs: ${validMentionedUserIds.length}`);
+      
+      // Add the comment to Firestore
+      console.log(`Adding comment to Firestore with submission ID: ${submissionId}`);
+      
       const commentsRef = collection(db, `documents/${document.id}/comments`);
-      await addDoc(commentsRef, {
+      const commentDocRef = await addDoc(commentsRef, {
         userId: user.id,
         userName: user.displayName,
-        text: newComment.trim(),
+        text: commentText,
         createdAt: serverTimestamp(),
         userPhotoURL: user.profile?.photoURL || null,
+        mentions: validMentionedUserIds,
+        submissionId
       });
-      setNewComment("");
+      
+      const commentId = commentDocRef.id;
+      
+      // Store this comment ID to prevent duplicates
+      setLastCommentId(commentId);
+      
+      console.log(`Comment created with ID: ${commentId}`);
+      
+      // Get folder name for notification context
+      let folderName = 'folder';
+      if (document.folderId) {
+        try {
+          const folderDoc = await getDoc(doc(db, `folders/${document.folderId}`));
+          if (folderDoc.exists()) {
+            folderName = folderDoc.data().name || 'folder';
+          }
+        } catch (folderError) {
+          console.error('Error fetching folder name:', folderError);
+        }
+      }
+      
+      // Fetch complete user objects for mentioned users to include usernames
+      if (validMentionedUserIds.length > 0) {
+        try {
+          // Get all users in one query to avoid multiple requests
+          const allUsers = await userService.getAllUsers();
+          
+          // Filter to just the mentioned users and format with usernames
+          const mentionedUsers = allUsers
+            .filter(u => validMentionedUserIds.includes(u.id))
+            .map(u => ({ 
+              id: u.id, 
+              username: u.displayName || u.email || `user-${u.id.substring(0, 6)}`
+            }));
+          
+          console.log(`Found ${mentionedUsers.length} mentioned users with usernames`);
+          console.log("Mentioned users:", mentionedUsers);
+          
+          // Create notifications using the function
+          await createNotificationsForComment(
+            document.id, 
+            document.name, 
+            document.folderId || '', 
+            folderName,
+            commentId, 
+            commentText, 
+            user.id, 
+            user.displayName,
+            mentionedUsers
+          );
+        } catch (error) {
+          console.error('Error fetching mentioned users:', error);
+        }
+      } else {
+        console.log('No mentioned users to notify');
+      }
     } catch (error) {
       console.error("Error adding comment:", error);
     } finally {
       setSubmittingComment(false);
+      isSubmittingRef.current = false;
     }
+  };
+
+  const createNotificationsForComment = async (
+    documentId: string,
+    documentName: string,
+    folderId: string,
+    folderName: string,
+    commentId: string,
+    commentText: string,
+    authorId: string,
+    authorName: string,
+    mentionedUsers: Array<{ id: string, username: string }>
+  ) => {
+    console.log("-------- NOTIFICATION CREATION START --------");
+    console.log(`Creating notifications for comment ${commentId}`);
+    
+    // Document and author info for context
+    console.log("Document info:", { documentId, documentName, folderId, folderName });
+    console.log("Author info:", { authorId, authorName });
+    console.log("Mentioned users:", mentionedUsers);
+    
+    try {
+      // Use the new notification function that properly checks comment text for mentions
+      const notificationResult = await notifyMentionedUsers(
+        commentText,
+        documentId,
+        documentName,
+        folderId,
+        folderName,
+        commentId,
+        authorId,
+        authorName,
+        mentionedUsers
+      );
+      
+      console.log(`NOTIFICATION RESULTS: ${notificationResult.notificationIds.length} notifications sent`);
+      if (notificationResult.notifiedUsers.length > 0) {
+        console.log(`Notified users: ${notificationResult.notifiedUsers.join(', ')}`);
+      } else {
+        console.log('No users were notified');
+      }
+    } catch (error) {
+      console.error('Error creating notifications:', error);
+    }
+    
+    console.log("-------- NOTIFICATION CREATION END --------");
   };
 
   const handleUpdateComment = async (commentId: string) => {
     if (!editText.trim() || submittingComment) return;
-
+    
     try {
       setSubmittingComment(true);
+      
+      const mentions = extractMentions(editText.trim());
+      
+      let resolvedMentions: UserMention[] = [];
+      try {
+        resolvedMentions = await resolveUserMentions(mentions, async (username) => {
+          try {
+            const trimmedUsername = username.trim();
+            
+            if (!trimmedUsername) {
+              return null;
+            }
+            
+            // Get all users at once to prevent multiple calls
+            const allUsers = await userService.getAllUsers();
+            
+            // First try strict case-insensitive match on the full display name
+            let match = allUsers.find(u => 
+              u.displayName.toLowerCase() === trimmedUsername.toLowerCase()
+            );
+            
+            if (match) {
+              console.log(`Found exact display name match for @${trimmedUsername}: ${match.id}`);
+              return match.id;
+            }
+            
+            // Check if the mention is just the first part of a multi-word name
+            // For example, when "@John Doe" is mentioned as "@John"
+            const firstWord = trimmedUsername.split(/\s+/)[0].toLowerCase();
+            
+            match = allUsers.find(u => {
+              const nameParts = u.displayName.toLowerCase().split(/\s+/);
+              return nameParts[0] === firstWord; // Match first name
+            });
+            
+            if (match) {
+              console.log(`Found first name match for @${trimmedUsername}: ${match.id} (${match.displayName})`);
+              return match.id;
+            }
+            
+            // Try partial match where display name starts with mention text
+            match = allUsers.find(u => 
+              u.displayName.toLowerCase().startsWith(trimmedUsername.toLowerCase())
+            );
+            
+            if (match) {
+              console.log(`Found display name starts with @${trimmedUsername}: ${match.id} (${match.displayName})`);
+              return match.id;
+            }
+            
+            // Try finding any user whose display name contains the mention text completely
+            match = allUsers.find(u => {
+              const displayName = u.displayName.toLowerCase();
+              return displayName.includes(trimmedUsername.toLowerCase());
+            });
+            
+            if (match) {
+              console.log(`Found display name contains @${trimmedUsername}: ${match.id} (${match.displayName})`);
+              return match.id;
+            }
+            
+            console.log(`Could not resolve mention @${trimmedUsername}`);
+            return null;
+          } catch (error) {
+            console.error(`Error resolving username ${username}:`, error);
+            return null;
+          }
+        });
+      } catch (resolveError) {
+        console.error('Error resolving mentions:', resolveError);
+        resolvedMentions = [];
+      }
+      
+      const mentionedUserIds = extractUserIds(resolvedMentions);
+      
+      const validMentionedUserIds = mentionedUserIds.filter(id => id && typeof id === 'string' && id.trim() !== '');
+      
       const commentRef = doc(
         db,
         `documents/${document.id}/comments/${commentId}`
       );
+      
       await updateDoc(commentRef, {
         text: editText.trim(),
         updatedAt: serverTimestamp(),
+        mentions: validMentionedUserIds
       });
+      
+      const updatedCommentDoc = await getDoc(commentRef);
+      if (!updatedCommentDoc.exists()) {
+        throw new Error('Comment no longer exists');
+      }
+      
+      const updatedComment = updatedCommentDoc.data() as DocumentComment;
+      const oldMentions = updatedComment.mentions || [];
+      
+      const newMentions = validMentionedUserIds.filter(id => !oldMentions.includes(id));
+      
+      if (newMentions.length > 0) {
+        let folderName = 'folder';
+        if (document.folderId) {
+          try {
+            const folderDoc = await getDoc(doc(db, `folders/${document.folderId}`));
+            if (folderDoc.exists()) {
+              folderName = folderDoc.data().name || 'folder';
+            }
+          } catch (folderError) {
+            console.error('Error fetching folder name:', folderError);
+          }
+        }
+        
+        try {
+          await createCommentMentionNotifications(
+            document.id,
+            document.name,
+            document.folderId || '',
+            folderName,
+            commentId,
+            editText.trim(),
+            user?.id || '',
+            user?.displayName || 'User',
+            newMentions
+          );
+        } catch (notificationError) {
+          console.error('Error creating mention notifications for updated comment:', notificationError);
+        }
+      }
+      
       setEditingCommentId(null);
       setEditText("");
     } catch (error) {
-      console.error("Error updating comment:", error);
+      console.error('Error updating comment:', error);
     } finally {
       setSubmittingComment(false);
     }
@@ -469,7 +1015,7 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
   };
 
   const documentService = {
-    getVersions: async (projectId: string, docId: string) => {
+    getVersions: async (docId: string) => {
       try {
         const versionsRef = collection(db, `documents/${docId}/versions`);
         const q = query(versionsRef, orderBy("version", "desc"));
@@ -514,19 +1060,16 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
         const uploadResult = await uploadBytes(storageRef, file);
         const downloadURL = await getDownloadURL(uploadResult.ref);
 
-        // Add CORS headers to the download URL
         const corsEnabledURL = `${downloadURL}?alt=media`;
 
-        // Get current document data
         const docRef = doc(db, "documents", docId);
         const docSnap = await getDoc(docRef);
         const currentVersion = docSnap.data()?.version || 0;
 
-        // Create new version in versions subcollection
         const versionsRef = collection(db, `documents/${docId}/versions`);
         await addDoc(versionsRef, {
           version: currentVersion + 1,
-          url: corsEnabledURL, // Use the CORS-enabled URL
+          url: corsEnabledURL,
           uploadedAt: serverTimestamp(),
           metadata: {
             originalFilename: file.name,
@@ -535,9 +1078,8 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
           },
         });
 
-        // Update main document
         await updateDoc(docRef, {
-          url: corsEnabledURL, // Use the CORS-enabled URL
+          url: corsEnabledURL,
           version: currentVersion + 1,
           dateModified: serverTimestamp(),
           name: file.name,
@@ -579,10 +1121,7 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
   const loadVersions = async () => {
     try {
       setLoadingVersions(true);
-      const fetchedVersions = await documentService.getVersions(
-        document.projectId,
-        document.id
-      );
+      const fetchedVersions = await documentService.getVersions(document.id);
       setVersions(fetchedVersions.sort((a, b) => b.version - a.version));
     } finally {
       setLoadingVersions(false);
@@ -655,8 +1194,8 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
     if (file) await handleFileUpload(file);
   };
 
-  const handleCommentChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setNewComment(e.target.value);
+  const handleCommentChange = (newValue: string) => {
+    setNewComment(newValue);
   };
 
   const handleAddAnnotation = () => {
@@ -669,6 +1208,28 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
 
   return (
     <div className="flex flex-col h-full">
+      {/* Add style tag for highlight animation */}
+      <style>{highlightStyles}</style>
+      
+      {/* Toast notification */}
+      {showToast && (
+        <div 
+          id="document-toast" 
+          className="fixed top-4 right-4 z-50 bg-blue-500 text-white px-4 py-2 rounded-md shadow-lg flex items-center"
+        >
+          <div className="mr-2">
+            <FileUp className="w-4 h-4" />
+          </div>
+          <span>{toastMessage}</span>
+          <button 
+            onClick={() => setShowToast(false)} 
+            className="ml-2 text-white hover:text-gray-200"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+      
       {/* Document Header */}
       <div
         className={`bg-white border-b border-gray-200 transition-all ${
@@ -875,6 +1436,9 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
               handleUpdateComment={handleUpdateComment}
               handleDeleteComment={handleDeleteComment}
               setEditingCommentId={setEditingCommentId}
+              document={document}
+              highlightedCommentId={highlightedCommentId}
+              commentRefs={commentRefs}
             />
           </div>
         )}
@@ -886,14 +1450,14 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
           <div className="flex h-full gap-4">
             <Toolbar />
             <div
-              className="relative bg-white rounded-lg shadow-sm p-4 flex-1"
+              className="relative bg-white rounded-lg shadow-sm p-4 flex-1 document-content"
               style={{ height: "100%" }}
             >
               <PDFViewer file={document.url} documentId={document.id} />
             </div>
           </div>
         ) : isImage(document.name, document.metadata?.contentType) ? (
-          <div className="h-full flex items-center justify-center bg-white rounded-lg shadow-sm p-4">
+          <div className="h-full flex items-center justify-center bg-white rounded-lg shadow-sm p-4 document-content">
             <img 
               src={document.url} 
               alt={document.name} 
@@ -902,7 +1466,7 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
             />
           </div>
         ) : isVideo(document.name, document.metadata?.contentType) ? (
-          <div className="h-full flex items-center justify-center bg-white rounded-lg shadow-sm p-4">
+          <div className="h-full flex items-center justify-center bg-white rounded-lg shadow-sm p-4 document-content">
             <video 
               src={document.url} 
               controls 
@@ -913,7 +1477,7 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
             </video>
           </div>
         ) : isAudio(document.name, document.metadata?.contentType) ? (
-          <div className="h-full flex items-center justify-center bg-white rounded-lg shadow-sm p-4">
+          <div className="h-full flex items-center justify-center bg-white rounded-lg shadow-sm p-4 document-content">
             <div className="flex flex-col items-center">
               <p className="mb-2 text-gray-700">{document.name}</p>
               <audio 
@@ -927,7 +1491,7 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
             </div>
           </div>
         ) : (
-          <div className="h-full flex items-center justify-center bg-white rounded-lg shadow-sm">
+          <div className="h-full flex items-center justify-center bg-white rounded-lg shadow-sm document-content">
             <div className="text-center">
               <p className="text-gray-500 mb-4">
                 This file type cannot be previewed directly
@@ -943,8 +1507,6 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
           </div>
         )}
       </div>
-
-      
     </div>
   );
 };
