@@ -212,39 +212,6 @@ const CommentSection = memo(
         <MessageSquare className="w-4 h-4 mr-1" /> Comments
       </h3>
 
-      {/* Debug info - only visible in development */}
-      {process.env.NODE_ENV === 'development' && (
-        <div className="mb-4 p-2 border border-gray-200 rounded bg-gray-50 text-xs">
-          <p>Comment Debug Info:</p>
-          <p>Document: <strong>{document.name}</strong></p>
-          <p>Document ID: <strong>{document.id}</strong></p>
-          <p>Folder ID: <strong>{document.folderId || 'NONE'}</strong></p>
-          <p>User logged in: {user ? 'Yes ✅' : 'No ❌'}</p>
-          {highlightedCommentId && (
-            <p>Highlighted Comment: <strong>{highlightedCommentId}</strong></p>
-          )}
-          <div className="mt-1 flex space-x-2">
-            <button 
-              onClick={() => console.log('Current document:', document)}
-              className="text-blue-500 underline"
-            >
-              Log Document
-            </button>
-            <button 
-              onClick={() => {
-                console.log('Loading all users');
-                userService.getAllUsers().then(users => 
-                  console.log(`Loaded ${users.length} users`)
-                ).catch(err => console.error('User load failed:', err));
-              }}
-              className="text-blue-500 underline"
-            >
-              Test User Lookup
-            </button>
-          </div>
-        </div>
-      )}
-
       {/* Add comment form */}
       <div className="mb-6 w-full">
         <EnhancedCommentInput
@@ -592,28 +559,18 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
     
     // Prevent multiple submissions within a short timeframe
     if (now - lastSubmissionTimeRef.current < 2000) {
-      console.log('Preventing rapid resubmission');
       return;
     }
     
     // Prevent concurrent submissions
     if (isSubmittingRef.current) {
-      console.log('Submission already in progress, preventing duplicate');
       return;
     }
     
     // Check if this exact comment was recently added
     if (now - lastCommentTime.current < 10000 && lastCommentId) {
-      console.log(`Recent comment already exists (${lastCommentId}), preventing duplicate`);
       return;
     }
-    
-    // Log document data for debugging
-    console.log("Comment document data:", { 
-      id: document.id,
-      name: document.name,
-      folderId: document.folderId
-    });
     
     // Set all the submission lock flags
     isSubmittingRef.current = true;
@@ -629,12 +586,8 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
       // Clear input immediately to prevent accidental resubmission
       setNewComment("");
       
-      console.log(`Starting comment submission with ID: ${submissionId}`);
-      console.log(`Comment text: "${commentText}"`);
-      
       // Extract mentions - detect @username patterns in the text
       const mentions = extractMentions(commentText);
-      console.log(`Extracted ${mentions.length} raw mentions:`, mentions);
       
       // Improve the mentions for display by limiting them to valid users
       const limitedMentions = mentions.map(mention => {
@@ -644,16 +597,8 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
         // Try to limit the mention to just the username part
         const nameParts = mention.username.split(/\s+/);
         
-        // If it's a multi-word mention, check if the first part is a valid user
-        if (nameParts.length > 1) {
-          // For debug purposes
-          console.log(`Multi-word mention detected: "${mention.username}", parts:`, nameParts);
-        }
-        
         return originalMention;
       });
-
-      console.log(`Processed ${limitedMentions.length} mentions for user lookup:`, limitedMentions);
       
       let resolvedMentions: UserMention[] = [];
       try {
@@ -674,7 +619,6 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
             );
             
             if (match) {
-              console.log(`Found exact display name match for @${trimmedUsername}: ${match.id}`);
               return match.id;
             }
             
@@ -688,7 +632,6 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
             });
             
             if (match) {
-              console.log(`Found first name match for @${trimmedUsername}: ${match.id} (${match.displayName})`);
               return match.id;
             }
             
@@ -698,7 +641,6 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
             );
             
             if (match) {
-              console.log(`Found display name starts with @${trimmedUsername}: ${match.id} (${match.displayName})`);
               return match.id;
             }
             
@@ -709,11 +651,9 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
             });
             
             if (match) {
-              console.log(`Found display name contains @${trimmedUsername}: ${match.id} (${match.displayName})`);
               return match.id;
             }
             
-            console.log(`Could not resolve mention @${trimmedUsername}`);
             return null;
           } catch (error) {
             console.error(`Error resolving username ${username}:`, error);
@@ -726,14 +666,10 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
       }
       
       const mentionedUserIds = extractUserIds(resolvedMentions);
-      console.log(`Resolved mentions to ${mentionedUserIds.length} user IDs:`, mentionedUserIds);
       
       const validMentionedUserIds = mentionedUserIds.filter(id => id && typeof id === 'string' && id.trim() !== '');
-      console.log(`Valid mentioned user IDs: ${validMentionedUserIds.length}`);
       
       // Add the comment to Firestore
-      console.log(`Adding comment to Firestore with submission ID: ${submissionId}`);
-      
       const commentsRef = collection(db, `documents/${document.id}/comments`);
       const commentDocRef = await addDoc(commentsRef, {
         userId: user.id,
@@ -749,8 +685,6 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
       
       // Store this comment ID to prevent duplicates
       setLastCommentId(commentId);
-      
-      console.log(`Comment created with ID: ${commentId}`);
       
       // Get folder name for notification context
       let folderName = 'folder';
@@ -779,9 +713,6 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
               username: u.displayName || u.email || `user-${u.id.substring(0, 6)}`
             }));
           
-          console.log(`Found ${mentionedUsers.length} mentioned users with usernames`);
-          console.log("Mentioned users:", mentionedUsers);
-          
           // Create notifications using the function
           await createNotificationsForComment(
             document.id, 
@@ -797,8 +728,6 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
         } catch (error) {
           console.error('Error fetching mentioned users:', error);
         }
-      } else {
-        console.log('No mentioned users to notify');
       }
     } catch (error) {
       console.error("Error adding comment:", error);
@@ -819,17 +748,9 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
     authorName: string,
     mentionedUsers: Array<{ id: string, username: string }>
   ) => {
-    console.log("-------- NOTIFICATION CREATION START --------");
-    console.log(`Creating notifications for comment ${commentId}`);
-    
-    // Document and author info for context
-    console.log("Document info:", { documentId, documentName, folderId, folderName });
-    console.log("Author info:", { authorId, authorName });
-    console.log("Mentioned users:", mentionedUsers);
-    
     try {
       // Use the new notification function that properly checks comment text for mentions
-      const notificationResult = await notifyMentionedUsers(
+      await notifyMentionedUsers(
         commentText,
         documentId,
         documentName,
@@ -840,18 +761,9 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
         authorName,
         mentionedUsers
       );
-      
-      console.log(`NOTIFICATION RESULTS: ${notificationResult.notificationIds.length} notifications sent`);
-      if (notificationResult.notifiedUsers.length > 0) {
-        console.log(`Notified users: ${notificationResult.notifiedUsers.join(', ')}`);
-      } else {
-        console.log('No users were notified');
-      }
     } catch (error) {
       console.error('Error creating notifications:', error);
     }
-    
-    console.log("-------- NOTIFICATION CREATION END --------");
   };
 
   const handleUpdateComment = async (commentId: string) => {

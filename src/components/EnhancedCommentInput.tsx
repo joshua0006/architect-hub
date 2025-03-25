@@ -38,43 +38,24 @@ const EnhancedCommentInput: React.FC<EnhancedCommentInputProps> = ({
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Debug flag to help troubleshoot
-  const [debugInfo, setDebugInfo] = useState({
-    mentionTriggered: false,
-    usersLoaded: 0,
-    projectIdValid: Boolean(projectId)
-  });
-
-  // Log when component mounts
-  useEffect(() => {
-    console.log(`EnhancedCommentInput mounted with projectId: ${projectId || 'none'}`);
-  }, []);
-
   // Load project members when component mounts
   useEffect(() => {
     if (projectId) {
-      console.log(`Project ID changed to: ${projectId}, loading members...`);
-      setDebugInfo(prev => ({ ...prev, projectIdValid: Boolean(projectId) }));
       loadProjectMembers();
     } else {
       // If no project ID, we'll fall back to all users
-      console.warn('No project ID available, will load all users when needed');
-      // Try to load all users right away instead of waiting
       loadAllUsers();
     }
   }, [projectId]);
 
   const loadProjectMembers = async () => {
     try {
-      console.log(`Loading members for project: ${projectId}`);
-      
       let members: User[] = [];
       
       if (projectId) {
         try {
           members = await userService.getUsersByProject(projectId);
         } catch (projectError) {
-          console.error('Error loading project members:', projectError);
           // Fall back to all users
           members = await userService.getAllUsers();
         }
@@ -86,10 +67,7 @@ const EnhancedCommentInput: React.FC<EnhancedCommentInputProps> = ({
       // Pre-load members into state (we'll filter them when user types)
       setSuggestedUsers(members);
       setHasLoadedUsers(true);
-      setDebugInfo(prev => ({ ...prev, usersLoaded: members.length }));
-      console.log(`Loaded ${members.length} users for mention suggestions`);
     } catch (error) {
-      console.error('Error loading users for mentions:', error);
       // Set empty array to avoid undefined errors
       setSuggestedUsers([]);
     }
@@ -98,14 +76,10 @@ const EnhancedCommentInput: React.FC<EnhancedCommentInputProps> = ({
   // Add a dedicated method to load all users
   const loadAllUsers = async () => {
     try {
-      console.log('Loading all users (no projectId available)');
       const members = await userService.getAllUsers();
       setSuggestedUsers(members);
       setHasLoadedUsers(true);
-      setDebugInfo(prev => ({ ...prev, usersLoaded: members.length }));
-      console.log(`Loaded ${members.length} users for mention suggestions (all users mode)`);
     } catch (error) {
-      console.error('Error loading all users:', error);
       setSuggestedUsers([]);
     }
   };
@@ -134,7 +108,6 @@ const EnhancedCommentInput: React.FC<EnhancedCommentInputProps> = ({
                 users = await userService.getAllUsers();
               }
             } catch (error) {
-              console.error('Error fetching users:', error);
               users = await userService.getAllUsers();
             }
           }
@@ -147,10 +120,7 @@ const EnhancedCommentInput: React.FC<EnhancedCommentInputProps> = ({
           
           setSuggestedUsers(filteredMembers);
           setHighlightedIndex(0);
-          
-          console.log(`Found ${filteredMembers.length} suggestions for "@${mentionState.mentionQuery}"`);
         } catch (error) {
-          console.error('Error fetching user mention suggestions:', error);
           // Set empty array to avoid undefined errors
           setSuggestedUsers([]);
         }
@@ -176,11 +146,6 @@ const EnhancedCommentInput: React.FC<EnhancedCommentInputProps> = ({
       setInputPosition({
         top: inputRect.bottom + window.scrollY,
         left: inputRect.left + approximateOffset + window.scrollX
-      });
-      
-      console.log('Mention dropdown position updated', {
-        top: inputRect.bottom,
-        left: inputRect.left + approximateOffset
       });
     }
   }, [mentionState.isMentioning, mentionState.cursorPosition, value]);
@@ -258,7 +223,6 @@ const EnhancedCommentInput: React.FC<EnhancedCommentInputProps> = ({
         
         if (isValidStart && !textAfterAt.includes(' ')) {
           console.log('Starting mention mode at position', lastAtSymbol);
-          setDebugInfo(prev => ({ ...prev, mentionTriggered: true }));
           
           setMentionState({
             isMentioning: true,
@@ -283,7 +247,6 @@ const EnhancedCommentInput: React.FC<EnhancedCommentInputProps> = ({
       cursorPosition: 0,
       startPosition: 0
     });
-    setDebugInfo(prev => ({ ...prev, mentionTriggered: false }));
   };
 
   const handleSelectUser = (user: User) => {
@@ -315,7 +278,6 @@ const EnhancedCommentInput: React.FC<EnhancedCommentInputProps> = ({
     // Prevent rapid re-submissions (within 2 seconds)
     const now = Date.now();
     if (now - lastSubmitTime.current < 2000) {
-      console.log('Preventing rapid comment resubmission');
       return;
     }
     
@@ -334,13 +296,6 @@ const EnhancedCommentInput: React.FC<EnhancedCommentInputProps> = ({
 
   return (
     <div ref={containerRef} className="relative flex w-full">
-      {/* Debug output - only visible in development */}
-      {process.env.NODE_ENV === 'development' && mentionState.isMentioning && (
-        <div className="absolute top-0 right-0 transform -translate-y-full bg-gray-800 text-white text-xs p-1 rounded">
-          @mentions active
-        </div>
-      )}
-      
       <div className="relative flex items-center w-full">
         <input
           ref={inputRef}

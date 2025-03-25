@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { Folder, ExternalLink, File, User, MessageSquare, AtSign } from 'lucide-react';
 import { Notification } from '../services/notificationService';
 
@@ -42,20 +42,6 @@ const NotificationContent: React.FC<NotificationContentProps> = ({
   const message = notification.message || 'New notification';
   const type = notification.type || 'info';
   const createdAt = notification.createdAt || new Date();
-  
-  // Log notification details for debugging when it mounts
-  useEffect(() => {
-    if (isMentionNotification) {
-      console.log(`Rendering mention notification with ID: ${notification.id} for user: ${notification.userId}`);
-      console.log('Notification data:', {
-        id: notification.id,
-        message: notification.message,
-        link: notification.link,
-        metadata: notification.metadata,
-        read: notification.read
-      });
-    }
-  }, [notification, isMentionNotification]);
   
   return (
     <div className="flex items-start">

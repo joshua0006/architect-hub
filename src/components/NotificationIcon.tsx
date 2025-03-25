@@ -617,23 +617,6 @@ export const NotificationIcon: React.FC = () => {
                       );
                     })}
                   </ul>
-                  
-                  {/* Debug button in development mode */}
-                  {process.env.NODE_ENV === 'development' && (
-                    <div className="p-2 flex justify-center border-t border-gray-100">
-                      <button 
-                        onClick={() => {
-                          console.log('Current notifications state:', notifications);
-                          console.log('User ID:', user?.id);
-                          console.log('Triggering manual refresh...');
-                          fetchNotifications();
-                        }}
-                        className="text-xs text-blue-500 hover:text-blue-700 px-2 py-1"
-                      >
-                        Debug Notifications
-                      </button>
-                    </div>
-                  )}
                 </>
               )}
             </div>

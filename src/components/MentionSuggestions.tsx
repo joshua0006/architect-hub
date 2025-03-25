@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { User } from '../types';
 
 interface MentionSuggestionsProps {
@@ -16,27 +16,9 @@ const MentionSuggestions: React.FC<MentionSuggestionsProps> = ({
   onSelectUser,
   inputPosition
 }) => {
-  // Log when component visibility changes
-  useEffect(() => {
-    if (isOpen) {
-      console.log('MentionSuggestions opened with', users.length, 'users');
-    }
-  }, [isOpen, users.length]);
-
   // Early return if dropdown shouldn't be visible
   if (!isOpen || users.length === 0) {
     return null;
-  }
-
-  // Log for debugging
-  console.log('Rendering mention suggestions', { 
-    userCount: users.length, 
-    position: inputPosition 
-  });
-
-  // Make sure we actually have a position
-  if (!inputPosition) {
-    console.warn('No position provided for mention suggestions');
   }
 
   // Ensure we stay within viewport bounds
