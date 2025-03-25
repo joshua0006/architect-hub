@@ -34,6 +34,9 @@ const SHORTCUT_SECTIONS: ShortcutSection[] = [
       { label: "Delete", shortcut: KEYBOARD_SHORTCUTS.actions.delete },
       { label: "Select All", shortcut: KEYBOARD_SHORTCUTS.actions.selectAll },
       { label: "Cancel/Deselect", shortcut: KEYBOARD_SHORTCUTS.actions.escape },
+      { label: "Zoom In", shortcut: KEYBOARD_SHORTCUTS.actions.zoomIn },
+      { label: "Zoom Out", shortcut: KEYBOARD_SHORTCUTS.actions.zoomOut },
+      { label: "Reset Zoom", shortcut: KEYBOARD_SHORTCUTS.actions.resetZoom },
     ],
   },
 ];

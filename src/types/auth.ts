@@ -42,5 +42,12 @@ export interface AuthContextType extends AuthState {
   canUpdateMilestones: () => boolean;
   canUpdateTaskStatus: (taskId: string) => boolean;
   canUploadDocuments: () => boolean;
+  canEditDocuments: () => boolean;
+  canDeleteDocuments: () => boolean;
+  canShareDocuments: () => boolean;
   canComment: () => boolean;
+  canManageTeam: () => boolean;
+  canEditProject: () => boolean;
+  canEditTask: () => boolean;
+  canDeleteTask: () => boolean;
 }

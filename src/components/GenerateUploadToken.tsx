@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { createUploadToken, UploadToken, generateUploadUrl } from '../services/uploadTokenService';
-import { Check, Copy, RefreshCw } from 'lucide-react';
+import { Check, Copy, RefreshCw, Share2 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
 interface TokenFormData {
@@ -103,57 +103,101 @@ const GenerateUploadToken: React.FC<GenerateUploadTokenProps> = ({
   return (
     <div className="bg-white rounded-lg shadow-md overflow-hidden max-w-md w-full">
       <div className="bg-blue-500 p-4 text-white">
-        <h2 className="text-xl font-semibold">Generate Upload Link</h2>
+        <h2 className="text-xl font-semibold">Create Guest Upload Link</h2>
         <p className="text-sm opacity-90">
-          Create a shareable link that allows guests to upload files to this folder
+          Create a shareable link that lets guests upload files directly to this folder
         </p>
       </div>
 
       {generatedToken ? (
         <div className="p-6">
-          <div className="mb-4">
+          <div className="mb-6">
             <h3 className="font-medium text-gray-700 mb-1">Upload link generated</h3>
-            <p className="text-sm text-gray-500 mb-3">
-              Share this link with anyone you want to upload files to this folder
+            <p className="text-sm text-gray-500 mb-4">
+              Share this link with anyone you want to upload files to this folder. 
+              They can upload {generatedToken.maxUploads === 1 ? 'only one file' : `up to ${generatedToken.maxUploads} files`}.
             </p>
             
-            <div className="flex items-center gap-2 mb-4">
-              <div className="relative flex-grow">
-                <input
-                  type="text"
-                  readOnly
-                  value={generateUploadUrl(generatedToken, window.location.origin)}
-                  className="w-full p-2 pr-10 border border-gray-300 rounded bg-gray-50 text-sm font-mono"
-                />
-                <button
+            {/* Upload Link Card */}
+            <div className="bg-white border border-blue-300 rounded-lg shadow-lg overflow-hidden mb-6">
+              <div className="bg-blue-500 px-4 py-3 text-white">
+                <h4 className="font-medium flex items-center">
+                  <Share2 className="mr-2 h-5 w-5" />
+                  Guest Upload Link
+                </h4>
+              </div>
+              <div className="p-4">
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Link URL</label>
+                  <div className="relative flex items-center mb-2">
+                    <input
+                      type="text"
+                      readOnly
+                      value={generateUploadUrl(generatedToken, window.location.origin)}
+                      className="w-full p-3 pr-16 border border-gray-300 rounded bg-gray-50 text-sm font-mono"
+                    />
+                    <button
+                      onClick={copyTokenLink}
+                      className="absolute right-2 px-3 py-1 bg-blue-100 text-blue-700 hover:bg-blue-200 rounded text-sm transition-colors flex items-center"
+                      title={showCopied ? "Copied!" : "Copy to clipboard"}
+                    >
+                      {showCopied ? <Check size={14} className="mr-1" /> : <Copy size={14} className="mr-1" />}
+                      {showCopied ? "Copied" : "Copy"}
+                    </button>
+                  </div>
+                  
+                  <p className="text-xs text-gray-500 mb-2">
+                    Anyone with this link can upload files to <span className="font-medium">{folderName || "this folder"}</span>
+                  </p>
+                  
+                  <div className="grid grid-cols-2 gap-4 text-sm border-t border-gray-200 pt-3 mt-3">
+                    <div>
+                      <span className="block text-gray-500">Max files:</span>
+                      <span className="font-medium">{generatedToken.maxUploads || 'Unlimited'}</span>
+                    </div>
+                    <div>
+                      <span className="block text-gray-500">File size limit:</span>
+                      <span className="font-medium">
+                        {generatedToken.maxFileSize 
+                          ? `${(generatedToken.maxFileSize / (1024 * 1024)).toFixed(1)} MB` 
+                          : 'Unlimited'}
+                      </span>
+                    </div>
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-4 text-sm mt-3">
+                    <div>
+                      <span className="block text-gray-500">Expires:</span>
+                      <span className="font-medium">{generatedToken.expiresAt.toLocaleString()}</span>
+                    </div>
+                    <div>
+                      <span className="block text-gray-500">Allowed file types:</span>
+                      <span className="font-medium truncate block">
+                        {generatedToken.allowedFileTypes && generatedToken.allowedFileTypes.length > 0 
+                          ? generatedToken.allowedFileTypes.join(', ')
+                          : 'All types'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <button 
                   onClick={copyTokenLink}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-blue-500"
+                  className="w-full flex items-center justify-center py-2.5 px-4 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
                 >
-                  {showCopied ? <Check size={18} /> : <Copy size={18} />}
+                  {showCopied ? 
+                    <>
+                      <Check size={18} className="mr-2" /> 
+                      Copied to clipboard!
+                    </> : 
+                    <>
+                      <Copy size={18} className="mr-2" /> 
+                      Copy link to clipboard
+                    </>
+                  }
                 </button>
               </div>
             </div>
-          </div>
-
-          <div className="space-y-2 text-sm text-gray-600 mb-6">
-            <p><span className="font-medium">Expires:</span> {generatedToken.expiresAt.toLocaleString()}</p>
-            {generatedToken.maxUploads && (
-              <p><span className="font-medium">Max uploads:</span> {generatedToken.maxUploads}</p>
-            )}
-            {generatedToken.maxFileSize && (
-              <p>
-                <span className="font-medium">Max file size:</span> {(generatedToken.maxFileSize / (1024 * 1024)).toFixed(1)} MB
-              </p>
-            )}
-            {generatedToken.allowedFileTypes && generatedToken.allowedFileTypes.length > 0 ? (
-              <p>
-                <span className="font-medium">File types:</span> {generatedToken.allowedFileTypes.join(', ')}
-              </p>
-            ) : (
-              <p>
-                <span className="font-medium">File types:</span> All file types allowed
-              </p>
-            )}
           </div>
 
           <div className="flex gap-3">
@@ -209,9 +253,12 @@ const GenerateUploadToken: React.FC<GenerateUploadTokenProps> = ({
                 max="720"
                 className="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
+              <p className="mt-1 text-xs text-gray-500">
+                Link will expire after this time
+              </p>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Max uploads</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Max file uploads</label>
               <input
                 type="number"
                 name="maxUploads"
@@ -221,6 +268,9 @@ const GenerateUploadToken: React.FC<GenerateUploadTokenProps> = ({
                 max="100"
                 className="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
+              <p className="mt-1 text-xs text-gray-500">
+                Maximum number of files a guest can upload
+              </p>
             </div>
           </div>
 
@@ -235,6 +285,9 @@ const GenerateUploadToken: React.FC<GenerateUploadTokenProps> = ({
               max="1000"
               className="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
+            <p className="mt-1 text-xs text-gray-500">
+              Maximum allowed size for each uploaded file
+            </p>
           </div>
 
           <div>
@@ -248,8 +301,50 @@ const GenerateUploadToken: React.FC<GenerateUploadTokenProps> = ({
               placeholder="Leave empty to allow all file types"
             />
             <p className="mt-1 text-xs text-gray-500">
-              Comma-separated list of MIME types (e.g., application/pdf,image/jpeg). Leave empty to allow all file types.
+              Comma-separated list of MIME types (e.g., application/pdf,image/jpeg,image/png). Leave empty to allow all file types.
             </p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <button 
+                type="button" 
+                onClick={() => setFormData(prev => ({
+                  ...prev, 
+                  allowedFileTypes: 'application/pdf'
+                }))}
+                className="px-2 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded-full text-gray-700"
+              >
+                PDF only
+              </button>
+              <button 
+                type="button" 
+                onClick={() => setFormData(prev => ({
+                  ...prev, 
+                  allowedFileTypes: 'image/jpeg,image/png,image/gif'
+                }))}
+                className="px-2 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded-full text-gray-700"
+              >
+                Images only
+              </button>
+              <button 
+                type="button" 
+                onClick={() => setFormData(prev => ({
+                  ...prev, 
+                  allowedFileTypes: 'application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+                }))}
+                className="px-2 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded-full text-gray-700"
+              >
+                Documents only
+              </button>
+              <button 
+                type="button" 
+                onClick={() => setFormData(prev => ({
+                  ...prev, 
+                  allowedFileTypes: ''
+                }))}
+                className="px-2 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded-full text-gray-700"
+              >
+                All types
+              </button>
+            </div>
           </div>
 
           <div className="flex gap-3 pt-2">

@@ -7,9 +7,16 @@ import { userService } from "../services/userService";
 import { formatDateToTimezone } from "../utils/dateUtils";
 import { useOrganization } from "../contexts/OrganizationContext";
 import { useNavigate, useLocation } from "react-router-dom";
+import { TeamMemberType } from "../types";
 
 interface PeopleListProps {
   projects: Project[];
+  teamMembers: User[];
+  onCreateMember: (name: string, email: string, phone: string, role: string, type: TeamMemberType, projectIds?: string[]) => Promise<void>;
+  onUpdateMember: (id: string, updates: Partial<User>) => Promise<void>;
+  onDeleteMember: (id: string) => Promise<void>;
+  onAssignToProject: (userId: string, projectId: string) => Promise<void>;
+  onRemoveFromProject: (userId: string, projectId: string) => Promise<void>;
 }
 
 interface ProjectsPopupProps {
@@ -59,7 +66,7 @@ const ProjectsPopup = ({
   </motion.div>
 );
 
-export default function PeopleList({ projects }: PeopleListProps) {
+export default function PeopleList({ projects, teamMembers, onCreateMember, onUpdateMember, onDeleteMember, onAssignToProject, onRemoveFromProject }: PeopleListProps) {
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -124,7 +131,6 @@ export default function PeopleList({ projects }: PeopleListProps) {
     const groups = {
       Staff: [] as User[],
       Client: [] as User[],
-      Contractor: [] as User[],
     };
 
     users.forEach((user) => {
@@ -149,8 +155,6 @@ export default function PeopleList({ projects }: PeopleListProps) {
         return "bg-blue-100 text-blue-800";
       case "Client":
         return "bg-green-100 text-green-800";
-      case "Contractor":
-        return "bg-purple-100 text-purple-800";
     }
   };
 
@@ -269,7 +273,7 @@ export default function PeopleList({ projects }: PeopleListProps) {
                                             id: project.id,
                                             name: project.name,
                                             details:
-                                              project.description ||
+                                              project.name ||
                                               project.status ||
                                               undefined,
                                           }
@@ -292,7 +296,7 @@ export default function PeopleList({ projects }: PeopleListProps) {
                           Last active:{" "}
                           {user.metadata?.lastLogin
                             ? formatDateToTimezone(
-                                user.metadata.lastLogin.toDate(),
+                                new Date(user.metadata.lastLogin),
                                 settings.timezone
                               )
                             : "Never"}

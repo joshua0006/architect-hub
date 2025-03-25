@@ -2,8 +2,10 @@ import React, { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { UserPlus, Camera, AlertCircle, Building2 } from 'lucide-react';
 import { authService } from '../../services/authService';
-import { UserRole } from '../../types/auth';
 import { useOrganization } from '../../contexts/OrganizationContext';
+
+// Define the UserRole type locally since it's not exported from types/auth
+type UserRole = 'Staff' | 'Client';
 
 export default function SignUp() {
   const navigate = useNavigate();
@@ -14,7 +16,7 @@ export default function SignUp() {
     confirmPassword: '',
     displayName: '',
     title: '',
-    role: 'Staff' as UserRole,
+    role: 'Client' as UserRole,
   });
   const [profilePicture, setProfilePicture] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -78,7 +80,7 @@ export default function SignUp() {
         formData.email,
         formData.password,
         formData.displayName,
-        formData.role,
+        'Client',
         profilePicture
       );
       navigate('/signin');
@@ -175,24 +177,6 @@ export default function SignUp() {
                 className="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all"
                 placeholder="john@example.com"
               />
-            </div>
-
-            <div>
-              <label htmlFor="role" className="block text-sm font-medium text-gray-700 mb-1">
-                Role
-              </label>
-              <select
-                id="role"
-                name="role"
-                required
-                value={formData.role}
-                onChange={handleChange}
-                className="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all"
-              >
-                <option value="Staff">Staff</option>
-                <option value="Contractor">Contractor</option>
-                <option value="Client">Client</option>
-              </select>
             </div>
 
             <div>

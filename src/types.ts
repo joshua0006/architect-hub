@@ -31,6 +31,7 @@ export interface Document {
     size?: number;
     contentType?: string;
     originalFilename?: string;
+    access?: 'ALL' | 'STAFF_ONLY' | 'CONTRACTORS_WRITE' | 'CLIENTS_READ';
   };
 }
 
@@ -83,6 +84,7 @@ export interface Folder {
     level?: number;
     documentCount?: number;
     lastUpdated?: string;
+    access?: 'ALL' | 'STAFF_ONLY' | 'CONTRACTORS_WRITE' | 'CLIENTS_READ';
   };
 }
 
@@ -174,6 +176,7 @@ export interface User {
   displayName: string;
   role: UserRole;
   projectIds: string[];
+  groupIds: string[];
   profile: UserProfile;
   metadata: {
     lastLogin: string;
@@ -197,7 +200,14 @@ export interface AuthContextType extends AuthState {
   canUpdateMilestones: () => boolean;
   canUpdateTaskStatus: (taskId: string) => boolean;
   canUploadDocuments: () => boolean;
+  canEditDocuments: () => boolean;
+  canDeleteDocuments: () => boolean;
+  canShareDocuments: () => boolean;
   canComment: () => boolean;
+  canManageTeam: () => boolean;
+  canEditProject: () => boolean;
+  canEditTask: () => boolean;
+  canDeleteTask: () => boolean;
 }
 
 export interface ShareToken {
@@ -208,4 +218,57 @@ export interface ShareToken {
   permissions: string[];
   creatorId: string;
   createdAt: Date;
+}
+
+// Permission types for RBAC
+export type PermissionAction = 'view' | 'edit' | 'delete' | 'manage';
+export type PermissionResource = 'project' | 'folder' | 'file' | 'team';
+
+export interface Permission {
+  id: string;
+  action: PermissionAction;
+  resource: PermissionResource;
+  resourceId: string; // Specific project/folder/file ID or '*' for all
+  description: string;
+}
+
+export interface UserGroup {
+  id: string;
+  name: string;
+  description: string;
+  permissions: Permission[];
+  userIds: string[];
+  createdBy: string;
+  metadata: {
+    createdAt: string;
+    updatedAt: string;
+  };
+}
+
+// Access log for audit trail
+export interface AccessLog {
+  id: string;
+  userId: string;
+  userName: string;
+  resourceType: PermissionResource;
+  resourceId: string;
+  resourceName: string;
+  action: PermissionAction;
+  timestamp: string;
+  ipAddress?: string;
+  userAgent?: string;
+}
+
+// Folder Permission types
+export interface FolderPermission {
+  id: string;
+  folderId: string;
+  projectId: string;
+  accessLevel: 'ALL' | 'STAFF_ONLY';
+  customAccessUsers?: string[]; // User IDs with custom access
+  overrideDefault: boolean; // Whether this overrides the default template permissions
+  createdBy: string;
+  updatedBy?: string;
+  createdAt: string;
+  updatedAt?: string;
 }

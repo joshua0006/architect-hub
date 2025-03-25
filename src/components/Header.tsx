@@ -1,4 +1,4 @@
-import { Building2, FileText, ListTodo, Users, LogOut, Settings as SettingsIcon } from 'lucide-react';
+import { Building2, FileText, ListTodo, Users, LogOut, Settings as SettingsIcon, Shield } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useOrganization } from '../contexts/OrganizationContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -50,6 +50,9 @@ export default function Header() {
     { path: '/documents', icon: FileText, label: 'Documents' },
     { path: '/tasks', icon: ListTodo, label: 'Tasks' },
   ];
+  
+  // Add admin routes for Staff and Admin users
+  const isAdminUser = user?.role === 'Admin' || user?.role === 'Staff';
   
   return (
     <header className="fixed top-0 left-0 right-0 h-16 glass-effect z-50">

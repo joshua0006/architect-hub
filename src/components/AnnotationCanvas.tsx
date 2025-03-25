@@ -1245,7 +1245,14 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
 
   // Re-render when scale changes or page changes
   useEffect(() => {
-    render();
+    // Request animation frame for smoother transitions during scale changes
+    const animationFrame = requestAnimationFrame(() => {
+      render();
+    });
+    
+    return () => {
+      cancelAnimationFrame(animationFrame);
+    };
   }, [
     scale,
     width,

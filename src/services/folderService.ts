@@ -15,6 +15,7 @@ import {
 import { db } from '../lib/firebase';
 import { Folder } from '../types';
 import { documentService } from './documentService';
+import { folderPermissionService } from './folderPermissionService';
 
 const COLLECTION = 'folders';
 
@@ -94,6 +95,7 @@ export const folderService = {
         metadata: {
           path: folder.parentId ? `${folder.parentId}/${generatedFolderId}` : generatedFolderId,
           level: folder.parentId ? 1 : 0, // Track nesting level
+          access: folder.metadata?.access || 'STAFF_ONLY' // Ensure access is set from template
         }
       };
 
@@ -137,7 +139,12 @@ export const folderService = {
         id: generatedFolderId,
         projectId: folder.projectId,
         name: folder.name,
-        parentId: folder.parentId
+        parentId: folder.parentId,
+        metadata: {
+          access: cleanFolder.metadata.access,
+          path: cleanFolder.metadata.path,
+          level: cleanFolder.metadata.level
+        }
       };
     } catch (error) {
       console.error('Error creating folder:', error);
@@ -209,6 +216,42 @@ export const folderService = {
     } catch (error) {
       console.error('Error deleting folder:', error);
       throw error;
+    }
+  },
+
+  /**
+   * Check if a user has access to a folder
+   */
+  async checkUserAccess(folderId: string, userId: string, userRole: 'Staff' | 'Client'): Promise<boolean> {
+    return folderPermissionService.hasAccess(folderId, userId, userRole);
+  },
+
+  /**
+   * Get all folders a user has access to in a project
+   */
+  async getAccessibleFolders(projectId: string, userId: string, userRole: 'Staff' | 'Client'): Promise<Folder[]> {
+    try {
+      const allFolders = await this.getByProjectId(projectId);
+      
+      if (userRole === 'Staff') {
+        // Staff can access all folders
+        return allFolders;
+      }
+      
+      // For clients, filter folders they have access to
+      const accessibleFolders: Folder[] = [];
+      
+      for (const folder of allFolders) {
+        const hasAccess = await folderPermissionService.hasAccess(folder.id, userId, userRole);
+        if (hasAccess) {
+          accessibleFolders.push(folder);
+        }
+      }
+      
+      return accessibleFolders;
+    } catch (error) {
+      console.error('Error getting accessible folders:', error);
+      throw new Error('Failed to get accessible folders');
     }
   }
 };

@@ -20,6 +20,46 @@ service cloud.firestore {
       return isSignedIn() && 
         get(/databases/$(database)/documents/projects/$(projectId)/team/$(request.auth.uid)).data.role == role;
     }
+    
+    // New permission helper functions
+    function hasPermission(resource, action) {
+      let userId = request.auth.uid;
+      let user = get(/databases/$(database)/documents/users/$(userId)).data;
+      
+      // Check if user is Admin (admins have all permissions)
+      if (user.role == 'Admin') {
+        return true;
+      }
+      
+      // If user has no groups, check their role and project membership
+      if (!('groupIds' in user) || user.groupIds.length == 0) {
+        // Default permissions based on role
+        if (resource == 'project' && action == 'view' && 
+            user.projectIds.hasAny([resourceId])) {
+          return true;
+        }
+        return false;
+      }
+      
+      // Check user's groups for permissions
+      for (let i in user.groupIds) {
+        let groupId = user.groupIds[i];
+        let group = get(/databases/$(database)/documents/userGroups/$(groupId)).data;
+        
+        // Check each permission in the group
+        for (let j in group.permissions) {
+          let permission = group.permissions[j];
+          
+          if (permission.resource == resource && 
+              permission.action == action && 
+              (permission.resourceId == resourceId || permission.resourceId == '*')) {
+            return true;
+          }
+        }
+      }
+      
+      return false;
+    }
 
     // Users collection
     match /users/{userId} {
@@ -29,74 +69,154 @@ service cloud.firestore {
       allow delete: if false; // Prevent user deletion
     }
 
+    // User Groups collection
+    match /userGroups/{groupId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isSignedIn() && 
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'Admin' || 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'Staff');
+    }
+    
+    // Permissions collection
+    match /permissions/{permissionId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isSignedIn() && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'Admin';
+    }
+    
+    // Access Logs collection
+    match /accessLogs/{logId} {
+      allow read: if isSignedIn() && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'Admin';
+      allow create: if isSignedIn();
+      allow update, delete: if false; // Prevent modification of access logs
+    }
+
     // Organization settings
     match /settings/organization {
       allow read: if isSignedIn();
-      allow write: if hasRole('admin', 'admin');
+      allow write: if isSignedIn() && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'Admin';
     }
 
     // Projects collection
     match /projects/{projectId} {
-      allow read: if isSignedIn() && isProjectMember(projectId);
-      allow create: if isSignedIn();
-      allow update, delete: if isSignedIn() && (
+      allow read: if isSignedIn() && (
+        isProjectMember(projectId) || 
+        hasPermission('project', 'view')
+      );
+      allow create: if isSignedIn() && (
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'Admin' ||
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'Staff' ||
+        hasPermission('project', 'create')
+      );
+      allow update: if isSignedIn() && (
         hasRole(projectId, 'admin') || 
-        hasRole(projectId, 'manager')
+        hasRole(projectId, 'manager') ||
+        hasPermission('project', 'edit')
+      );
+      allow delete: if isSignedIn() && (
+        hasRole(projectId, 'admin') ||
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'Admin' ||
+        hasPermission('project', 'delete')
       );
 
       // Team members subcollection
       match /team/{userId} {
-        allow read: if isSignedIn() && isProjectMember(projectId);
-        allow write: if isSignedIn() && hasRole(projectId, 'admin');
+        allow read: if isSignedIn() && (
+          isProjectMember(projectId) ||
+          hasPermission('team', 'view')
+        );
+        allow write: if isSignedIn() && (
+          hasRole(projectId, 'admin') ||
+          hasPermission('team', 'edit')
+        );
       }
     }
 
     // Folders collection
     match /folders/{folderId} {
-      allow read: if isSignedIn() && isProjectMember(resource.data.projectId);
-      allow create: if isSignedIn() && isProjectMember(request.resource.data.projectId);
-      allow update, delete: if isSignedIn() && (
+      allow read: if isSignedIn() && (
+        isProjectMember(resource.data.projectId) ||
+        hasPermission('folder', 'view')
+      );
+      allow create: if isSignedIn() && (
+        isProjectMember(request.resource.data.projectId) ||
+        hasPermission('folder', 'edit')
+      );
+      allow update: if isSignedIn() && (
         hasRole(resource.data.projectId, 'admin') || 
-        hasRole(resource.data.projectId, 'manager')
+        hasRole(resource.data.projectId, 'manager') ||
+        hasPermission('folder', 'edit')
+      );
+      allow delete: if isSignedIn() && (
+        hasRole(resource.data.projectId, 'admin') ||
+        hasPermission('folder', 'delete')
       );
 
       // Documents subcollection
       match /documents/{documentId} {
-        allow read: if isSignedIn() && isProjectMember(get(/databases/$(database)/documents/folders/$(folderId)).data.projectId);
-        allow create: if isSignedIn() && isProjectMember(get(/databases/$(database)/documents/folders/$(folderId)).data.projectId);
-        allow update, delete: if isSignedIn() && (
+        allow read: if isSignedIn() && (
+          isProjectMember(get(/databases/$(database)/documents/folders/$(folderId)).data.projectId) ||
+          hasPermission('file', 'view')
+        );
+        allow create: if isSignedIn() && (
+          isProjectMember(get(/databases/$(database)/documents/folders/$(folderId)).data.projectId) ||
+          hasPermission('file', 'edit')
+        );
+        allow update: if isSignedIn() && (
           hasRole(get(/databases/$(database)/documents/folders/$(folderId)).data.projectId, 'admin') ||
           hasRole(get(/databases/$(database)/documents/folders/$(folderId)).data.projectId, 'manager') ||
-          request.auth.uid == resource.data.createdBy
+          request.auth.uid == resource.data.createdBy ||
+          hasPermission('file', 'edit')
+        );
+        allow delete: if isSignedIn() && (
+          hasRole(get(/databases/$(database)/documents/folders/$(folderId)).data.projectId, 'admin') ||
+          hasPermission('file', 'delete')
         );
       }
     }
 
     // Tasks collection
     match /tasks/{taskId} {
-      allow read: if isSignedIn() && isProjectMember(resource.data.projectId);
-      allow create: if isSignedIn() && isProjectMember(request.resource.data.projectId);
+      allow read: if isSignedIn() && (
+        isProjectMember(resource.data.projectId) ||
+        hasPermission('project', 'view')
+      );
+      allow create: if isSignedIn() && (
+        isProjectMember(request.resource.data.projectId) ||
+        hasPermission('project', 'edit')
+      );
       allow update: if isSignedIn() && (
         isProjectMember(resource.data.projectId) &&
         (
           resource.data.assignedTo == request.auth.uid ||
           hasRole(resource.data.projectId, 'manager') ||
-          hasRole(resource.data.projectId, 'admin')
+          hasRole(resource.data.projectId, 'admin') ||
+          hasPermission('project', 'edit')
         )
       );
       allow delete: if isSignedIn() && (
         hasRole(resource.data.projectId, 'admin') ||
-        hasRole(resource.data.projectId, 'manager')
+        hasRole(resource.data.projectId, 'manager') ||
+        hasPermission('project', 'delete')
       );
     }
 
     // Milestones collection
     match /milestones/{milestoneId} {
-      allow read: if isSignedIn() && isProjectMember(resource.data.projectId);
-      allow create: if isSignedIn() && isProjectMember(request.resource.data.projectId);
+      allow read: if isSignedIn() && (
+        isProjectMember(resource.data.projectId) ||
+        hasPermission('project', 'view')
+      );
+      allow create: if isSignedIn() && (
+        isProjectMember(request.resource.data.projectId) ||
+        hasPermission('project', 'edit')
+      );
       allow update, delete: if isSignedIn() && (
         hasRole(resource.data.projectId, 'admin') ||
-        hasRole(resource.data.projectId, 'manager')
+        hasRole(resource.data.projectId, 'manager') ||
+        hasPermission('project', 'edit')
       );
     }
 

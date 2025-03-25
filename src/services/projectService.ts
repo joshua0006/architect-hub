@@ -25,53 +25,39 @@ import {
   deleteObject,
 } from "firebase/storage";
 import { db, storage } from "../lib/firebase";
-import { Document, Project } from "../types";
+import { Document, Project, Task } from "../types";
+import { folderTemplateService } from './folderTemplateService';
 
 const COLLECTION = "projects";
 
 export const projectService = {
   async getAll(): Promise<Project[]> {
-    const snapshot = await getDocs(collection(db, COLLECTION));
-    
-    // Process the data to ensure consistent structure
-    return snapshot.docs.map((doc) => {
-      const data = doc.data();
+    try {
+      const snapshot = await getDocs(collection(db, COLLECTION));
+      const projects: Project[] = [];
       
-      // Ensure metadata is properly structured
-      const metadata = data.metadata || {};
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        projects.push({
+          id: doc.id,
+          name: data.name || "",
+          client: data.client || "",
+          status: data.status || "active",
+          progress: data.progress || 0,
+          startDate: data.startDate || "",
+          endDate: data.endDate || "",
+          teamMemberIds: data.teamMemberIds || [],
+          metadata: data.metadata || {},
+          createdAt: data.createdAt,
+          updatedAt: data.updatedAt,
+        });
+      });
       
-      // Handle location specifically
-      const location = metadata.location || { city: '', state: '', country: '' };
-      // Convert string location (if any) to object format
-      const structuredLocation = typeof location === 'string' 
-        ? { 
-            city: location.split(',')[0]?.trim() || '',
-            state: location.split(',')[1]?.trim() || '',
-            country: location.split(',')[2]?.trim() || ''
-          }
-        : location;
-      
-      // Create a properly structured project object
-      return {
-        id: doc.id,
-        name: data.name || '',
-        client: data.client || '',
-        status: data.status || 'active',
-        progress: data.progress || 0,
-        startDate: data.startDate || '',
-        endDate: data.endDate || '',
-        teamMemberIds: data.teamMemberIds || [],
-        metadata: {
-          industry: metadata.industry || '',
-          projectType: metadata.projectType || '',
-          location: structuredLocation,
-          budget: metadata.budget || '',
-          scope: metadata.scope || '',
-          ...(metadata.archivedAt && { archivedAt: metadata.archivedAt }),
-          ...(metadata.lastMilestoneUpdate && { lastMilestoneUpdate: metadata.lastMilestoneUpdate })
-        }
-      } as Project;
-    });
+      return projects;
+    } catch (error) {
+      console.error("Error getting projects:", error);
+      throw new Error("Failed to get projects");
+    }
   },
 
   async getByUserId(userId: string): Promise<Project[]> {
@@ -133,12 +119,35 @@ export const projectService = {
 
   async create(project: Omit<Project, "id">): Promise<Project> {
     try {
+      // Ensure teamMemberIds is an array
+      const teamMemberIds = Array.isArray(project.teamMemberIds) ? project.teamMemberIds : [];
+      
+      console.log("Creating project with team members:", teamMemberIds);
+      
       const docRef = await addDoc(collection(db, COLLECTION), {
         ...project,
-        teamMemberIds: [],
+        teamMemberIds, // Use the validated teamMemberIds
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
+
+      // If there are team members assigned, update their projectIds array
+      if (teamMemberIds.length > 0) {
+        const batch = writeBatch(db);
+        
+        // Add this project to each team member's projectIds array
+        for (const userId of teamMemberIds) {
+          const userRef = doc(db, "users", userId);
+          batch.update(userRef, {
+            projectIds: arrayUnion(docRef.id),
+            updatedAt: serverTimestamp()
+          });
+        }
+        
+        // Commit the batch
+        await batch.commit();
+        console.log(`Added project ${docRef.id} to team members:`, teamMemberIds);
+      }
 
       const documentsCollectionRef = collection(
         db,
@@ -155,7 +164,20 @@ export const projectService = {
         },
       });
 
-      return { id: docRef.id, ...project };
+      // Create default folder structure
+      try {
+        await folderTemplateService.createFolderStructure(docRef.id);
+        console.log("Default folder structure created for project:", docRef.id);
+      } catch (folderError) {
+        console.error("Error creating folder structure:", folderError);
+        // Continue even if folder creation fails
+      }
+
+      return { 
+        id: docRef.id, 
+        ...project,
+        teamMemberIds // Return the validated teamMemberIds
+      };
     } catch (error) {
       console.error("Error creating project:", error);
       throw new Error(
@@ -698,24 +720,102 @@ export const projectService = {
     },
   },
 
+  // This functionality is already implemented in the 'delete' method above
   async deleteProject(projectId: string): Promise<void> {
-    const project = await this.getProject(projectId);
+    return this.delete(projectId);
+  },
 
-    if (!project) {
-      throw new Error("Project not found");
-    }
-
-    // If project is archived, activate it first
-    if (project.status === "archived") {
-      await this.prisma.project.update({
-        where: { id: projectId },
-        data: { status: "active" },
+  // Get projects that a specific user has access to
+  async getUserProjects(userId: string): Promise<Project[]> {
+    try {
+      const snapshot = await getDocs(
+        query(
+          collection(db, COLLECTION),
+          where('teamMemberIds', 'array-contains', userId)
+        )
+      );
+      
+      const projects: Project[] = [];
+      
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        projects.push({
+          id: doc.id,
+          name: data.name || "",
+          client: data.client || "",
+          status: data.status || "active",
+          progress: data.progress || 0,
+          startDate: data.startDate || "",
+          endDate: data.endDate || "",
+          teamMemberIds: data.teamMemberIds || [],
+          metadata: data.metadata || {},
+          createdAt: data.createdAt,
+          updatedAt: data.updatedAt,
+        });
       });
+      
+      return projects;
+    } catch (error) {
+      console.error("Error getting user projects:", error);
+      throw new Error("Failed to get user projects");
     }
+  },
 
-    // Delete the project immediately
-    await this.prisma.project.delete({
-      where: { id: projectId },
-    });
+  // Add a team member to a project
+  async addTeamMember(projectId: string, userId: string): Promise<void> {
+    try {
+      const projectRef = doc(db, COLLECTION, projectId);
+      
+      // Get current project data
+      const projectDoc = await getDoc(projectRef);
+      if (!projectDoc.exists()) {
+        throw new Error("Project not found");
+      }
+      
+      const projectData = projectDoc.data();
+      const teamMemberIds = Array.isArray(projectData.teamMemberIds) 
+        ? projectData.teamMemberIds 
+        : [];
+      
+      // Only add if not already a member
+      if (!teamMemberIds.includes(userId)) {
+        await updateDoc(projectRef, {
+          teamMemberIds: [...teamMemberIds, userId],
+          updatedAt: serverTimestamp()
+        });
+      }
+    } catch (error) {
+      console.error("Error adding team member to project:", error);
+      throw new Error("Failed to add team member to project");
+    }
+  },
+
+  // Remove a team member from a project
+  async removeTeamMember(projectId: string, userId: string): Promise<void> {
+    try {
+      const projectRef = doc(db, COLLECTION, projectId);
+      
+      // Get current project data
+      const projectDoc = await getDoc(projectRef);
+      if (!projectDoc.exists()) {
+        throw new Error("Project not found");
+      }
+      
+      const projectData = projectDoc.data();
+      const teamMemberIds = Array.isArray(projectData.teamMemberIds) 
+        ? projectData.teamMemberIds 
+        : [];
+      
+      // Filter out the user ID
+      const updatedTeamMemberIds = teamMemberIds.filter(id => id !== userId);
+      
+      await updateDoc(projectRef, {
+        teamMemberIds: updatedTeamMemberIds,
+        updatedAt: serverTimestamp()
+      });
+    } catch (error) {
+      console.error("Error removing team member from project:", error);
+      throw new Error("Failed to remove team member from project");
+    }
   },
 };

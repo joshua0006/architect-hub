@@ -62,6 +62,9 @@ export const KEYBOARD_SHORTCUTS = {
     cut: "Ctrl+X",
     bringToFront: "Ctrl+]",
     sendToBack: "Ctrl+[",
+    zoomIn: "Ctrl++",
+    zoomOut: "Ctrl+-",
+    resetZoom: "Ctrl+0",
   },
 } as const;
 

@@ -34,6 +34,11 @@ const alreadyRenderedFiles = new Map<string, Set<number>>();
 const fileLoadTimestamps = new Map<string, number>();
 let currentlyRenderingFile: string | null = null;
 
+// Add these cache-related variables outside the component to persist across renders
+const pageCanvasCache = new Map<string, Map<number, ImageData>>();
+const pageCacheTimestamps = new Map<string, Map<number, number>>();
+const MAX_CACHED_PAGES = 20; // Maximum number of pages to keep in cache per document
+
 // Function to determine if a PDF has mostly text (for better export strategy)
 async function isTextBasedPDF(pdfDocument: any) {
   try {
@@ -124,6 +129,9 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
 
   // Add this state variable at the top with other state declarations
   const [currentAnnotations, setCurrentAnnotations] = useState<any[]>([]);
+
+  // Add a new ref for caching
+  const cachedPagesRef = useRef<Set<number>>(new Set());
 
   // Early file identification
   const fileId = useMemo(() => {
@@ -313,7 +321,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
   // Add this at the top, right after refs
   let hasLoggedRenderSkip = false;
 
-  // Update the renderPdfPage function to properly reset pageChangeInProgress
+  // Update the renderPdfPage function to implement caching
   const renderPdfPage = useCallback(() => {
     try {
       // Skip if we're in the middle of a page change or the page is not properly set
@@ -344,6 +352,66 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
         console.error('[PDFViewer] Failed to get canvas context');
         setPageChangeInProgress(false); // Reset page change state if we can't get context
         return;
+      }
+
+      // Generate a cache key based on fileId and scale
+      const cacheKey = `${fileId}_${scale.toFixed(2)}`;
+      
+      // Check if we have this page cached
+      if (pageCanvasCache.has(cacheKey)) {
+        const pageCache = pageCanvasCache.get(cacheKey)!;
+        if (pageCache.has(currentPage)) {
+          console.log(`[PDFViewer] Using cached page ${currentPage}`);
+          
+          // Draw the cached image data
+          ctx.putImageData(pageCache.get(currentPage)!, 0, 0);
+          
+          // Update timestamp to mark this page as recently used
+          const timestampMap = pageCacheTimestamps.get(cacheKey) || new Map<number, number>();
+          timestampMap.set(currentPage, Date.now());
+          pageCacheTimestamps.set(cacheKey, timestampMap);
+          
+          // Mark this page as rendered
+          if (!hasRenderedOnceRef.current[currentPage]) {
+            hasRenderedOnceRef.current[currentPage] = true;
+          }
+          renderedPagesRef.current.add(currentPage);
+          cachedPagesRef.current.add(currentPage);
+          
+          // Update states to reflect completion
+          setPageChangeInProgress(false);
+          setIsRendering(false);
+          setRenderComplete(true);
+          
+          // Dispatch annotation rendering event
+          let annotations: any[] = [];
+          try {
+            if (documentId && currentPage) {
+              annotations = annotationStore.documents[documentId]?.annotations?.filter(
+                (a: any) => a.pageNumber === currentPage
+              ) || [];
+            }
+          } catch (err) {
+            console.warn('[PDFViewer] Error accessing annotations:', err);
+          }
+          
+          setCurrentAnnotations(annotations);
+          document.dispatchEvent(
+            new CustomEvent('renderAnnotations', {
+              detail: { 
+                pageNumber: currentPage,
+                annotations 
+              },
+            })
+          );
+          
+          // Center the document after a brief delay
+          setTimeout(() => {
+            scrollToCenterDocument();
+          }, 50);
+          
+          return;
+        }
       }
 
       // Cancel any in-progress render tasks
@@ -398,6 +466,47 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
             // Handle successful render
             renderTaskRef.current.promise.then(
               () => {
+                // Cache the rendered page
+                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                const cacheKey = `${fileId}_${scale.toFixed(2)}`;
+                
+                // Initialize cache maps if needed
+                if (!pageCanvasCache.has(cacheKey)) {
+                  pageCanvasCache.set(cacheKey, new Map<number, ImageData>());
+                  pageCacheTimestamps.set(cacheKey, new Map<number, number>());
+                }
+                
+                const pageCache = pageCanvasCache.get(cacheKey)!;
+                const timestampMap = pageCacheTimestamps.get(cacheKey)!;
+                
+                // Add the page to cache
+                pageCache.set(currentPage, imageData);
+                timestampMap.set(currentPage, Date.now());
+                
+                // Prune cache if it's getting too large
+                if (pageCache.size > MAX_CACHED_PAGES) {
+                  // Find the oldest page
+                  let oldestPage = currentPage;
+                  let oldestTime = Date.now();
+                  
+                  timestampMap.forEach((timestamp, page) => {
+                    if (timestamp < oldestTime) {
+                      oldestTime = timestamp;
+                      oldestPage = page;
+                    }
+                  });
+                  
+                  // Remove the oldest page from cache
+                  if (oldestPage !== currentPage) {
+                    pageCache.delete(oldestPage);
+                    timestampMap.delete(oldestPage);
+                    console.log(`[PDFViewer] Removed page ${oldestPage} from cache to free up space`);
+                  }
+                }
+                
+                // Mark this page as cached
+                cachedPagesRef.current.add(currentPage);
+                
                 // Reset render lock
                 renderLockRef.current = false;
                 
@@ -483,7 +592,31 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
       setIsRendering(false);
       setPageChangeInProgress(false);
     }
-  }, [pdf, currentPage, fileId, pageChangeInProgress, setIsRendering, annotationStore, setCurrentAnnotations, documentId, scrollToCenterDocument, setRenderComplete]);
+  }, [pdf, currentPage, fileId, pageChangeInProgress, setIsRendering, annotationStore, setCurrentAnnotations, documentId, scrollToCenterDocument, setRenderComplete, scale]);
+
+  // Add an effect to clear cache when file changes
+  useEffect(() => {
+    return () => {
+      // If this component is unmounting, clear this document's cache
+      const fileSpecificKeys = Array.from(pageCanvasCache.keys())
+        .filter(key => key.startsWith(fileId || ''));
+      
+      fileSpecificKeys.forEach(key => {
+        pageCanvasCache.delete(key);
+        pageCacheTimestamps.delete(key);
+      });
+      
+      console.log(`[PDFViewer] Cleared cache for file ${fileId}`);
+    };
+  }, [fileId]);
+
+  // Add effect to invalidate cache when scale changes
+  useEffect(() => {
+    // When scale changes, we can keep the cache but need to mark pages as not rendered
+    hasRenderedOnceRef.current = {};
+    renderedPagesRef.current.clear();
+    cachedPagesRef.current.clear();
+  }, [scale]);
 
   // Update the useEffect for page changes
   useEffect(() => {
@@ -646,6 +779,114 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     console.log(`[PDFViewer] Fit to width: scale=${newScale}`);
   }, [page, scrollToCenterDocument]);
 
+  // Define zoom functions
+  const handleZoomIn = useCallback(() => {
+    if (!page || !containerRef.current) return;
+    
+    // Save current scroll position and dimensions before zooming
+    const scrollContainer = containerRef.current.querySelector('.overflow-auto');
+    if (!scrollContainer) return;
+    
+    const viewportWidth = scrollContainer.clientWidth;
+    const viewportHeight = scrollContainer.clientHeight;
+    const scrollLeft = scrollContainer.scrollLeft;
+    const scrollTop = scrollContainer.scrollTop;
+    
+    // Calculate center point of the current view in document coordinates
+    const centerX = scrollLeft + viewportWidth / 2;
+    const centerY = scrollTop + viewportHeight / 2;
+    
+    // Increase scale by 25% (1.25x)
+    const newScale = scale * 1.25;
+    
+    // Limit maximum zoom to 5x (500%)
+    const cappedScale = Math.min(newScale, 5.0);
+    
+    // Update the scale
+    setScale(cappedScale);
+    
+    // Disable automatic fit to width for future page changes
+    disableFitToWidthRef.current = true;
+    
+    // After scale change, update scroll position to keep the center point
+    setTimeout(() => {
+      if (!scrollContainer) return;
+      
+      // Calculate the new center point with the new scale
+      const scaleFactor = cappedScale / scale;
+      const newCenterX = centerX * scaleFactor;
+      const newCenterY = centerY * scaleFactor;
+      
+      // Set new scroll position to keep the same center point
+      scrollContainer.scrollLeft = newCenterX - viewportWidth / 2;
+      scrollContainer.scrollTop = newCenterY - viewportHeight / 2;
+    }, 50);
+    
+    console.log(`[PDFViewer] Zoom in: scale=${cappedScale}`);
+  }, [page, scale]);
+
+  const handleZoomOut = useCallback(() => {
+    if (!page || !containerRef.current) return;
+    
+    // Save current scroll position and dimensions before zooming
+    const scrollContainer = containerRef.current.querySelector('.overflow-auto');
+    if (!scrollContainer) return;
+    
+    const viewportWidth = scrollContainer.clientWidth;
+    const viewportHeight = scrollContainer.clientHeight;
+    const scrollLeft = scrollContainer.scrollLeft;
+    const scrollTop = scrollContainer.scrollTop;
+    
+    // Calculate center point of the current view in document coordinates
+    const centerX = scrollLeft + viewportWidth / 2;
+    const centerY = scrollTop + viewportHeight / 2;
+    
+    // Decrease scale by 20% (0.8x)
+    const newScale = scale * 0.8;
+    
+    // Limit minimum zoom to 0.25x (25%)
+    const cappedScale = Math.max(newScale, 0.25);
+    
+    // Update the scale
+    setScale(cappedScale);
+    
+    // Disable automatic fit to width for future page changes
+    disableFitToWidthRef.current = true;
+    
+    // After scale change, update scroll position to keep the center point
+    setTimeout(() => {
+      if (!scrollContainer) return;
+      
+      // Calculate the new center point with the new scale
+      const scaleFactor = cappedScale / scale;
+      const newCenterX = centerX * scaleFactor;
+      const newCenterY = centerY * scaleFactor;
+      
+      // Set new scroll position to keep the same center point
+      scrollContainer.scrollLeft = newCenterX - viewportWidth / 2;
+      scrollContainer.scrollTop = newCenterY - viewportHeight / 2;
+    }, 50);
+    
+    console.log(`[PDFViewer] Zoom out: scale=${cappedScale}`);
+  }, [page, scale]);
+
+  const handleResetZoom = useCallback(() => {
+    if (!page || !containerRef.current) return;
+    
+    // Reset to 100%
+    setScale(1.0);
+    
+    // Disable automatic fit to width for future page changes
+    disableFitToWidthRef.current = true;
+    
+    // Center the document after resetting zoom
+    setTimeout(() => {
+      scrollToCenterDocument();
+    }, 100);
+    
+    console.log(`[PDFViewer] Reset zoom: scale=1.0`);
+  }, [page, scrollToCenterDocument]);
+
   // Setup container dimensions
   useEffect(() => {
     if (!containerRef.current) return;
@@ -687,8 +928,96 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     };
   }, [page, handleFitToWidth]);
 
+  // Handle zooming with mouse wheel + Ctrl key
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container || !page) return;
+
+    // Throttle function to prevent too many zoom operations
+    let lastWheelTimestamp = 0;
+    const WHEEL_THROTTLE_MS = 50; // Throttle wheel events to 50ms intervals
+
+    const handleWheel = (e: WheelEvent) => {
+      // Only handle zooming when Ctrl key is pressed
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        
+        // Throttle wheel events
+        const now = Date.now();
+        if (now - lastWheelTimestamp < WHEEL_THROTTLE_MS) {
+          return;
+        }
+        lastWheelTimestamp = now;
+        
+        // Get the scroll container and dimensions
+        const scrollContainer = container.querySelector('.overflow-auto');
+        if (!scrollContainer) return;
+        
+        const viewportWidth = scrollContainer.clientWidth;
+        const viewportHeight = scrollContainer.clientHeight;
+        
+        // Get current scroll position
+        const scrollLeft = scrollContainer.scrollLeft;
+        const scrollTop = scrollContainer.scrollTop;
+        
+        // Get the position of the mouse relative to the document
+        const rect = scrollContainer.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left + scrollLeft;
+        const mouseY = e.clientY - rect.top + scrollTop;
+        
+        // Store the current scale for calculating scale factor
+        const oldScale = scale;
+        
+        // Calculate new scale based on wheel direction
+        let newScale;
+        if (e.deltaY < 0) {
+          // Zoom in - use a smaller increment for smoother zooming with wheel
+          newScale = scale * 1.1; // 10% increase
+          newScale = Math.min(newScale, 5.0); // max 500%
+        } else {
+          // Zoom out - use a smaller decrement for smoother zooming with wheel
+          newScale = scale * 0.9; // 10% decrease
+          newScale = Math.max(newScale, 0.25); // min 25%
+        }
+        
+        // Update the scale
+        setScale(newScale);
+        
+        // Disable automatic fit to width
+        disableFitToWidthRef.current = true;
+        
+        // After scale change, update scroll position to keep mouse position stable
+        setTimeout(() => {
+          if (!scrollContainer) return;
+          
+          // Calculate scale factor between old and new scale
+          const scaleFactor = newScale / oldScale;
+          
+          // Calculate new mouse position with new scale
+          const newMouseX = mouseX * scaleFactor;
+          const newMouseY = mouseY * scaleFactor;
+          
+          // Calculate difference to adjust scroll position
+          const dx = newMouseX - mouseX;
+          const dy = newMouseY - mouseY;
+          
+          // Set new scroll position to keep mouse over the same content
+          scrollContainer.scrollLeft = scrollLeft + dx;
+          scrollContainer.scrollTop = scrollTop + dy;
+        }, 0);
+      }
+    };
+
+    // Add passive: false to prevent default browser behavior when Ctrl is pressed
+    container.addEventListener('wheel', handleWheel, { passive: false });
+    
+    return () => {
+      container.removeEventListener('wheel', handleWheel);
+    };
+  }, [page, containerRef, scale]);
+
   // Add keyboard shortcuts with documentId and current page
-  useKeyboardShortcuts(documentId, currentPage);
+  useKeyboardShortcuts(documentId, currentPage, handleZoomIn, handleZoomOut, handleResetZoom);
 
   // Update cursor based on current tool
   useEffect(() => {
@@ -1491,6 +1820,33 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     };
   }, [currentTool, handleStampAnnotation]);
 
+  // Add this useEffect right after the mouse wheel zoom handler
+  // Synchronize annotation canvas with PDF canvas on scale changes
+  useEffect(() => {
+    if (!page || !viewport || !isViewerReady) return;
+    
+    // Dispatch an event to notify annotation canvas about scale change
+    document.dispatchEvent(new CustomEvent('annotationChanged', {
+      detail: {
+        pageNumber: currentPage,
+        source: 'scaleChange',
+        forceRender: true,
+        scale: scale
+      }
+    }));
+    
+    // Re-render PDF content after scale change
+    if (!pageChangeInProgress) {
+      // Force a fresh render if scale changed and we're not already changing pages
+      hasRenderedOnceRef.current[currentPage] = false;
+      renderedPagesRef.current.delete(currentPage);
+      
+      setTimeout(() => {
+        renderPdfPage();
+      }, 0);
+    }
+  }, [scale, page, viewport, isViewerReady, currentPage, pageChangeInProgress, renderPdfPage]);
+
   return (
     <div className="relative flex flex-col h-full">
       {isShortcutGuideOpen && (
@@ -1514,6 +1870,9 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
           onExportAnnotations={handleExportAnnotations}
           onImportAnnotations={handleImportAnnotations}
           onFitToWidth={handleFitToWidth}
+          onZoomIn={handleZoomIn}
+          onZoomOut={handleZoomOut}
+          onResetZoom={handleResetZoom}
         />
       )}
       
@@ -1633,7 +1992,8 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
               maxWidth: '100%',
               marginBottom: '20px',
               opacity: isRendering ? 0.7 : 1,
-              transition: 'opacity 0.2s ease-in-out',
+              transition: 'opacity 0.2s ease-in-out, width 0.15s ease-out, height 0.15s ease-out',
+              transformOrigin: 'top left',
             }}
           >
             {page && (
@@ -1643,6 +2003,8 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
                   className="absolute top-0 left-0 z-10"
                   style={{
                     margin: '0 auto',
+                    width: `${viewport.width}px`,
+                    height: `${viewport.height}px`,
                   }}
                 />
                 {/* Always render the annotation canvas once the PDF is initially loaded */}
@@ -1694,20 +2056,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
               </div>
             )}
             
-            {/* Center content button */}
-            {page && (
-              <button 
-                onClick={scrollToCenterDocument}
-                className="absolute bottom-2 right-2 bg-white bg-opacity-80 rounded-full p-2 z-50 shadow-md hover:bg-opacity-100"
-                title="Center Document in View"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="12" cy="12" r="10"></circle>
-                  <line x1="12" y1="8" x2="12" y2="16"></line>
-                  <line x1="8" y1="12" x2="16" y2="12"></line>
-                </svg>
-              </button>
-            )}
+        
             
             {isExporting && (
               <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">

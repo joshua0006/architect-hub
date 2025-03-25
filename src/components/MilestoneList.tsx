@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Milestone } from '../types';
 import { Flag, Calendar, Pencil, Trash2, Plus, X, ChevronDown } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useAuth } from '../contexts/AuthContext';
 
 interface MilestoneListProps {
   projectId: string;
@@ -18,6 +19,7 @@ export default function MilestoneList({
   onUpdateMilestone,
   onDeleteMilestone
 }: MilestoneListProps) {
+  const { user, canUpdateMilestones } = useAuth();
   const [showForm, setShowForm] = useState(false);
   const [editingMilestone, setEditingMilestone] = useState<Milestone | null>(null);
   const [showStatusMenu, setShowStatusMenu] = useState<string | null>(null);
@@ -102,13 +104,16 @@ export default function MilestoneList({
     <div className="mt-6">
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-lg font-medium text-gray-900">Project Milestones</h2>
-        <button
-          onClick={() => setShowForm(true)}
-          className="flex items-center space-x-2 px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors"
-        >
-          <Plus className="w-4 h-4" />
-          <span>Add Milestone</span>
-        </button>
+        {/* Only show Add Milestone button for staff and contractors */}
+        {canUpdateMilestones() && (
+          <button
+            onClick={() => setShowForm(true)}
+            className="flex items-center space-x-2 px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Add Milestone</span>
+          </button>
+        )}
       </div>
 
       {showForm && (
@@ -237,50 +242,65 @@ export default function MilestoneList({
                   <h3 className="text-lg font-medium text-gray-900">{milestone.title}</h3>
                 </div>
                 <div className="flex items-center space-x-2">
-                  <div className="relative">
-                    <button
-                      onClick={() => setShowStatusMenu(showStatusMenu === milestone.id ? null : milestone.id)}
-                      className={`flex items-center space-x-2 px-3 py-1.5 rounded-md text-sm ${getMilestoneStatusColor(milestone.status)}`}
-                    >
-                      <span className="capitalize">{milestone.status}</span>
-                      <ChevronDown className="w-4 h-4" />
-                    </button>
+                  {/* Only show status change dropdown for staff and contractors */}
+                  {canUpdateMilestones() ? (
+                    <div className="relative">
+                      <button
+                        onClick={() => setShowStatusMenu(showStatusMenu === milestone.id ? null : milestone.id)}
+                        className={`flex items-center space-x-2 px-3 py-1.5 rounded-md text-sm ${getMilestoneStatusColor(milestone.status)}`}
+                      >
+                        <span className="capitalize">{milestone.status}</span>
+                        <ChevronDown className="w-4 h-4" />
+                      </button>
 
-                    <AnimatePresence>
-                      {showStatusMenu === milestone.id && (
-                        <motion.div
-                          initial={{ opacity: 0, y: -10 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          exit={{ opacity: 0, y: -10 }}
-                          className="absolute right-0 mt-2 w-40 bg-white rounded-md shadow-lg z-10 border border-gray-200"
-                        >
-                          {statusOptions.map(option => (
-                            <button
-                              key={option.value}
-                              onClick={() => handleStatusChange(milestone, option.value)}
-                              className={`w-full text-left px-4 py-2 text-sm ${option.color} hover:opacity-80 transition-opacity ${
-                                milestone.status === option.value ? 'font-medium' : ''
-                              }`}
-                            >
-                              {option.label}
-                            </button>
-                          ))}
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  </div>
-                  <button
-                    onClick={() => startEdit(milestone)}
-                    className="p-1 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100"
-                  >
-                    <Pencil className="w-4 h-4" />
-                  </button>
-                  <button
-                    onClick={() => onDeleteMilestone(milestone.id)}
-                    className="p-1 text-gray-400 hover:text-red-600 rounded-full hover:bg-gray-100"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                      <AnimatePresence>
+                        {showStatusMenu === milestone.id && (
+                          <motion.div
+                            initial={{ opacity: 0, y: -10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -10 }}
+                            className="absolute right-0 mt-2 w-40 bg-white rounded-md shadow-lg z-10 border border-gray-200"
+                          >
+                            {statusOptions.map(option => (
+                              <button
+                                key={option.value}
+                                onClick={() => handleStatusChange(milestone, option.value)}
+                                className={`w-full text-left px-4 py-2 text-sm ${option.color} hover:opacity-80 transition-opacity ${
+                                  milestone.status === option.value ? 'font-medium' : ''
+                                }`}
+                              >
+                                {option.label}
+                              </button>
+                            ))}
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
+                  ) : (
+                    <div className={`px-3 py-1.5 rounded-md text-sm ${getMilestoneStatusColor(milestone.status)}`}>
+                      <span className="capitalize">{milestone.status}</span>
+                    </div>
+                  )}
+                  
+                  {/* Only show edit button for staff and contractors */}
+                  {canUpdateMilestones() && (
+                    <button
+                      onClick={() => startEdit(milestone)}
+                      className="p-1 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100"
+                    >
+                      <Pencil className="w-4 h-4" />
+                    </button>
+                  )}
+                  
+                  {/* Only show delete button for staff and contractors */}
+                  {canUpdateMilestones() && (
+                    <button
+                      onClick={() => onDeleteMilestone(milestone.id)}
+                      className="p-1 text-gray-400 hover:text-red-600 rounded-full hover:bg-gray-100"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  )}
                 </div>
               </div>
 

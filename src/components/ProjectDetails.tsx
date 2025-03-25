@@ -4,12 +4,14 @@ import { Project, Task } from "../types";
 import CircularProgress from "./CircularProgress";
 import TaskSummary from "./TaskSummary";
 import MilestoneList from "./MilestoneList";
-import { Calendar, Users, Building2, Edit, MapPin } from "lucide-react";
+import { Calendar, Users, Building2, Edit, MapPin, UserPlus, Shield } from "lucide-react";
 import { useMilestoneManager } from "../hooks/useMilestoneManager";
 import { calculateMilestoneProgress } from "../utils/progressCalculator";
 import EditProject from "./EditProject";
 import { useAuth } from "../contexts/AuthContext";
 import axios from "axios";
+import { userService } from "../services/userService";
+import { projectService } from "../services";
 
 interface ProjectDetailsProps {
   project: Project;
@@ -23,8 +25,11 @@ export default function ProjectDetails({
   onProjectUpdate,
 }: ProjectDetailsProps) {
   const [showEditProject, setShowEditProject] = useState(false);
-  const { canEditProject } = useAuth();
+  const { user, canEditProject } = useAuth();
   const [availablePeople, setAvailablePeople] = useState([]);
+  const [teamMembers, setTeamMembers] = useState<any[]>([]);
+  const [loadingTeamMembers, setLoadingTeamMembers] = useState(false);
+  const [showAddMemberDialog, setShowAddMemberDialog] = useState(false);
 
   const { milestones, createMilestone, updateMilestone, deleteMilestone } =
     useMilestoneManager(project.id);
@@ -44,6 +49,33 @@ export default function ProjectDetails({
         )
       : "Location not specified";
 
+  // Load team members for the project
+  const loadTeamMembers = async () => {
+    if (!project.teamMemberIds?.length) return;
+    
+    try {
+      setLoadingTeamMembers(true);
+      const members = [];
+      
+      for (const userId of project.teamMemberIds) {
+        try {
+          const userData = await userService.getById(userId);
+          if (userData) {
+            members.push(userData);
+          }
+        } catch (err) {
+          console.error(`Error loading user ${userId}:`, err);
+        }
+      }
+      
+      setTeamMembers(members);
+    } catch (error) {
+      console.error("Error loading team members:", error);
+    } finally {
+      setLoadingTeamMembers(false);
+    }
+  };
+
   const fetchAvailablePeople = async () => {
     try {
       const response = await axios.get("/api/people/available");
@@ -55,7 +87,11 @@ export default function ProjectDetails({
 
   useEffect(() => {
     fetchAvailablePeople();
-  }, []);
+    loadTeamMembers();
+  }, [project.teamMemberIds]);
+
+  // Determine if current user is in the project
+  const isCurrentUserInProject = user?.id && project.teamMemberIds?.includes(user.id);
 
   return (
     <div className="p-6">
@@ -81,6 +117,23 @@ export default function ProjectDetails({
           </button>
         )}
       </motion.div>
+
+      {/* Access information - Display if user is not in project */}
+      {!isCurrentUserInProject && user?.role !== 'Staff' && (
+        <motion.div
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="bg-yellow-50 border border-yellow-200 rounded-md p-4 mb-6 flex items-start"
+        >
+          <Shield className="w-5 h-5 text-yellow-500 mr-3 mt-0.5 flex-shrink-0" />
+          <div>
+            <h3 className="font-medium text-yellow-800">Limited Access</h3>
+            <p className="text-yellow-700 text-sm mt-1">
+              You don't have full access to this project. Contact a staff member to request access.
+            </p>
+          </div>
+        </motion.div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Progress Section with Milestones */}
@@ -173,6 +226,54 @@ export default function ProjectDetails({
                 <p className="text-gray-600">{project.metadata.scope}</p>
               </div>
             )}
+
+            {/* Team Members Section */}
+            <div className="mt-6 pt-6 border-t border-gray-100">
+              <div className="flex justify-between items-center mb-3">
+                <h3 className="text-sm font-medium text-gray-900">
+                  Team Members ({project.teamMemberIds?.length || 0})
+                </h3>
+                {user?.role === 'Staff' && (
+                  <button 
+                    onClick={() => setShowAddMemberDialog(true)}
+                    className="text-xs text-blue-600 hover:text-blue-800 flex items-center"
+                  >
+                    <UserPlus className="w-3 h-3 mr-1" />
+                    Add Member
+                  </button>
+                )}
+              </div>
+              
+              {loadingTeamMembers ? (
+                <p className="text-sm text-gray-500">Loading team members...</p>
+              ) : teamMembers.length > 0 ? (
+                <div className="space-y-2">
+                  {teamMembers.map(member => (
+                    <div key={member.id} className="flex items-center justify-between py-1">
+                      <div className="flex items-center">
+                        {member.profile?.photoURL ? (
+                          <img 
+                            src={member.profile.photoURL} 
+                            alt={member.displayName}
+                            className="w-6 h-6 rounded-full mr-2"
+                          />
+                        ) : (
+                          <div className="w-6 h-6 rounded-full bg-gray-200 mr-2 flex items-center justify-center text-xs text-gray-600">
+                            {member.displayName[0]}
+                          </div>
+                        )}
+                        <span className="text-sm">{member.displayName}</span>
+                      </div>
+                      <span className="text-xs px-2 py-1 rounded-full bg-gray-100 text-gray-700">
+                        {member.role}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-gray-500 italic">No team members assigned yet</p>
+              )}
+            </div>
           </div>
         </motion.div>
       </div>

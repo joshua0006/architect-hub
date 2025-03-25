@@ -23,12 +23,14 @@ interface TeamListProps {
   projects: Project[];
   selectedProject?: Project;
   onProjectsChange?: () => void;
+  teamMembers?: User[];
 }
 
 export default function TeamList({
   projects,
   selectedProject,
   onProjectsChange,
+  teamMembers,
 }: TeamListProps) {
   const { user } = useAuth();
   const { settings } = useOrganization();
@@ -259,13 +261,15 @@ export default function TeamList({
           </div>
         </div>
         {selectedProject && (
-          <button
-            onClick={() => setShowUserSelection(true)}
-            className="flex items-center space-x-2 px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors"
-          >
-            <UserPlus className="w-4 h-4" />
-            <span>Add Person</span>
-          </button>
+          user?.role === 'Staff' && (
+            <button
+              onClick={() => setShowUserSelection(true)}
+              className="flex items-center space-x-2 px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors"
+            >
+              <UserPlus className="w-4 h-4" />
+              <span>Add Person</span>
+            </button>
+          )
         )}
       </div>
 
@@ -424,43 +428,47 @@ export default function TeamList({
                           className="p-4 bg-white border border-gray-200 rounded-lg shadow-sm hover:shadow-md transition-shadow relative"
                         >
                           <div className="absolute top-4 right-4">
-                            <div className="relative">
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setShowMemberMenu(
-                                    showMemberMenu === member.id
-                                      ? null
-                                      : member.id
-                                  );
-                                }}
-                                className="p-1 hover:bg-gray-100 rounded-full transition-colors"
-                              >
-                                <MoreVertical className="w-4 h-4 text-gray-400" />
-                              </button>
+                            {/* Only show menu for staff users */}
+                            {user?.role === 'Staff' && (
+                              <div className="relative">
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setShowMemberMenu(
+                                      showMemberMenu === member.id
+                                        ? null
+                                        : member.id
+                                    );
+                                  }}
+                                  className="p-1 hover:bg-gray-100 rounded-full transition-colors"
+                                >
+                                  <MoreVertical className="w-4 h-4 text-gray-400" />
+                                </button>
 
-                              <AnimatePresence>
-                                {showMemberMenu === member.id && (
-                                  <motion.div
-                                    initial={{ opacity: 0, scale: 0.95 }}
-                                    animate={{ opacity: 1, scale: 1 }}
-                                    exit={{ opacity: 0, scale: 0.95 }}
-                                    className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg z-10 border border-gray-200"
-                                  >
-                                    <button
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleRemoveMember(member.id);
-                                      }}
-                                      className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors flex items-center space-x-2"
+                                <AnimatePresence>
+                                  {showMemberMenu === member.id && (
+                                    <motion.div
+                                      initial={{ opacity: 0, scale: 0.95 }}
+                                      animate={{ opacity: 1, scale: 1 }}
+                                      exit={{ opacity: 0, scale: 0.95 }}
+                                      className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg z-10 border border-gray-200"
                                     >
-                                      <UserMinus className="w-4 h-4" />
-                                      <span>Remove from Project</span>
-                                    </button>
-                                  </motion.div>
-                                )}
-                              </AnimatePresence>
-                            </div>
+                                      {/* Only staff can remove users from projects */}
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleRemoveMember(member.id);
+                                        }}
+                                        className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors flex items-center space-x-2"
+                                      >
+                                        <UserMinus className="w-4 h-4" />
+                                        <span>Remove from Project</span>
+                                      </button>
+                                    </motion.div>
+                                  )}
+                                </AnimatePresence>
+                              </div>
+                            )}
                           </div>
                           <div className="flex items-start space-x-4">
                             <div className="flex-shrink-0">
@@ -515,12 +523,10 @@ export default function TeamList({
                                 <div className="pt-2 mt-2 border-t border-gray-100">
                                   <p className="text-xs text-gray-500">
                                     Last active:{" "}
-                                    {member.metadata?.lastLogin
-                                      ? formatDateToTimezone(
-                                          member.metadata.lastLogin.toDate(), // Convert Firestore Timestamp to Date
-                                          settings.timezone
-                                        )
-                                      : "Never"}
+                                    {formatDateToTimezone(
+                                      new Date(member.metadata.lastLogin as string | number | Date),
+                                      settings.timezone
+                                    )}
                                   </p>
                                 </div>
                               ) : null}

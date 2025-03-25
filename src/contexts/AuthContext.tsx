@@ -237,6 +237,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return state.user?.role === 'Staff' || state.user?.role === 'Contractor';
   };
 
+  const isStaffOnly = () => {
+    return state.user?.role === 'Staff';
+  };
+
   const canAssignTasks = () => {
     return isStaffOrContractor();
   };
@@ -250,7 +254,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const canUploadDocuments = () => {
-    return !!state.user; // All authenticated users can upload documents
+    // Only Staff and Contractors can upload documents
+    return isStaffOrContractor();
+  };
+
+  const canEditDocuments = () => {
+    // Only Staff and Contractors can edit documents
+    return isStaffOrContractor();
+  };
+
+  const canDeleteDocuments = () => {
+    // Only Staff can delete documents
+    return isStaffOnly();
+  };
+
+  const canShareDocuments = () => {
+    // Only Staff and Contractors can share documents
+    return isStaffOrContractor();
   };
 
   const canComment = () => {
@@ -258,11 +278,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const canManageTeam = () => {
-    return isStaffOrContractor();
+    // Only Staff can manage the team
+    return isStaffOnly();
   };
 
   const canEditProject = () => {
+    // Only Staff can edit project details
+    return isStaffOnly();
+  };
+
+  const canEditTask = () => {
+    // Only Staff and Contractors can edit tasks
     return isStaffOrContractor();
+  };
+
+  const canDeleteTask = () => {
+    // Only Staff can delete tasks
+    return isStaffOnly();
   };
 
   return (
@@ -276,9 +308,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       canUpdateMilestones,
       canUpdateTaskStatus,
       canUploadDocuments,
+      canEditDocuments,
+      canDeleteDocuments,
+      canShareDocuments,
       canComment,
       canManageTeam,
       canEditProject,
+      canEditTask,
+      canDeleteTask,
     }}>
       {children}
     </AuthContext.Provider>

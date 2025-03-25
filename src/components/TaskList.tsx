@@ -49,7 +49,7 @@ export default function TaskList({
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [showStatusMenu, setShowStatusMenu] = useState<string | null>(null);
   const { settings, isLoading } = useOrganization();
-  const { user, canAssignTasks, canUpdateTaskStatus } = useAuth();
+  const { user, canAssignTasks, canUpdateTaskStatus, canEditTask, canDeleteTask } = useAuth();
   const [allUsers, setAllUsers] = useState<User[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
 
@@ -406,18 +406,22 @@ export default function TaskList({
                         <span>Due: {task.dueDate}</span>
                       </div>
                       <div className="flex items-center space-x-2">
-                        <button
-                          onClick={() => setEditingTask(task)}
-                          className="p-1 hover:text-blue-500 transition-colors"
-                        >
-                          <Pencil className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => onDeleteTask(task.id)}
-                          className="p-1 hover:text-red-500 transition-colors"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        {canEditTask() && (
+                          <button
+                            onClick={() => setEditingTask(task)}
+                            className="p-1 hover:text-blue-500 transition-colors"
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                        )}
+                        {canDeleteTask() && (
+                          <button
+                            onClick={() => onDeleteTask(task.id)}
+                            className="p-1 hover:text-red-500 transition-colors"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
                       </div>
                     </div>
                   </div>

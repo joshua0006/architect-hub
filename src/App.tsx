@@ -13,6 +13,7 @@ import { useKeyboardShortcutGuide } from "./hooks/useKeyboardShortcutGuide";
 import SharedContent from './components/SharedContent';
 import { Toolbar } from './components/Toolbar';
 import TokenUpload from './components/TokenUpload';
+import UserGroupManagement from './components/UserGroupManagement';
 
 // Protected Route Component
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -31,6 +32,40 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   }
 
   return <>{children}</>;
+}
+
+// Admin-only route component
+function AdminRoute({ children }: { children: React.ReactNode }) {
+  const { user, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <Navigate to="/signin" />;
+  }
+
+  if (user.role !== 'Admin' && user.role !== 'Staff') {
+    return <Navigate to="/" />;
+  }
+
+  return <>{children}</>;
+}
+
+// Wrapper for the UserGroupManagement component
+function UserGroupManagementWrapper() {
+  const { user } = useAuth();
+  
+  if (!user) {
+    return <Navigate to="/signin" />;
+  }
+  
+  return <UserGroupManagement currentUser={user} />;
 }
 
 export const App: React.FC = () => {
@@ -52,6 +87,14 @@ export const App: React.FC = () => {
               <Routes>
                 <Route path="/signin" element={<SignIn />} />
                 <Route path="/signup" element={<SignUp />} />
+                <Route
+                  path="/admin/user-groups"
+                  element={
+                    <AdminRoute>
+                      <UserGroupManagementWrapper />
+                    </AdminRoute>
+                  }
+                />
                 <Route
                   path="/*"
                   element={

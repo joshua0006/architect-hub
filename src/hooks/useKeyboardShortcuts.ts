@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useAnnotationStore } from "../store/useAnnotationStore";
 import { AnnotationType } from "../types/annotation";
 import { useToast } from "../contexts/ToastContext";
@@ -16,7 +16,10 @@ interface ShortcutMap {
 
 export const useKeyboardShortcuts = (
   documentId: string,
-  currentPage: number
+  currentPage: number,
+  zoomInFn?: () => void,
+  zoomOutFn?: () => void,
+  resetZoomFn?: () => void
 ) => {
   const {
     setCurrentTool,
@@ -35,6 +38,8 @@ export const useKeyboardShortcuts = (
     selectedAnnotations
   } = useAnnotationStore();
   const { showToast } = useToast();
+
+  const lastToolRef = useRef<string>("select");
 
   useEffect(() => {
     const shortcuts: ShortcutMap = {
@@ -171,6 +176,30 @@ export const useKeyboardShortcuts = (
         },
         ctrl: true,
       },
+      "=": {
+        action: () => {
+          if (zoomInFn) zoomInFn();
+        },
+        ctrl: true,
+      },
+      "+": {
+        action: () => {
+          if (zoomInFn) zoomInFn();
+        },
+        ctrl: true,
+      },
+      "-": {
+        action: () => {
+          if (zoomOutFn) zoomOutFn();
+        },
+        ctrl: true,
+      },
+      "0": {
+        action: () => {
+          if (resetZoomFn) resetZoomFn();
+        },
+        ctrl: true,
+      },
     };
 
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -229,6 +258,9 @@ export const useKeyboardShortcuts = (
     bringToFront,
     sendToBack,
     clipboardAnnotations,
-    selectedAnnotations
+    selectedAnnotations,
+    zoomInFn,
+    zoomOutFn,
+    resetZoomFn
   ]);
 };

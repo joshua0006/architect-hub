@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { doc, setDoc, getDoc, Timestamp, collection, query, where, getDocs, addDoc } from 'firebase/firestore';
+import { doc, setDoc, getDoc, Timestamp, collection, query, where, getDocs, addDoc, serverTimestamp, updateDoc, increment } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage } from '../lib/firebase';
 import { ShareToken } from '../types';
@@ -15,162 +15,147 @@ export interface UploadToken {
   allowedFileTypes?: string[]; // mime types
   maxUploads?: number;
   usedCount: number;
-  metadata?: Record<string, any>;
+  metadata?: {
+    title?: string;
+    description?: string;
+    folderName?: string;
+    projectId?: string;
+  };
+}
+
+interface UploadTokenOptions {
+  expiresInHours: number;
+  maxFileSize?: number; // in bytes
+  allowedFileTypes?: string[];
+  maxUploads?: number;
+  metadata?: {
+    title?: string;
+    description?: string;
+    folderName?: string;
+    projectId?: string;
+  };
 }
 
 /**
- * Creates a token that allows uploading files to a specific folder
- * @param folderId The folder ID where uploads will be stored
- * @param creatorId User ID of the token creator
- * @param options Additional options for the token
- * @returns The created upload token
+ * Creates an upload token for a specific folder
  */
 export const createUploadToken = async (
   folderId: string,
-  creatorId: string,
-  options: {
-    expiresInHours?: number;
-    maxFileSize?: number;
-    allowedFileTypes?: string[];
-    maxUploads?: number;
-    metadata?: Record<string, any>;
-  } = {}
+  userId: string,
+  options: UploadTokenOptions
 ): Promise<UploadToken> => {
-  try {
-    const {
-      expiresInHours = 24,
-      maxFileSize,
-      allowedFileTypes,
-      maxUploads,
-      metadata
-    } = options;
-
-    // Get the folder's project ID
-    let projectId = metadata?.projectId;
-    if (!projectId) {
-      try {
-        const folderDoc = await getDoc(doc(db, 'folders', folderId));
-        if (folderDoc.exists()) {
-          projectId = folderDoc.data().projectId;
-        }
-      } catch (error) {
-        console.error('Error getting folder projectId:', error);
-      }
-    }
-
-    // Calculate expiration date
-    const expiresIn = expiresInHours * 60 * 60 * 1000;
-    const expiresAt = new Date(Date.now() + expiresIn);
-
-    // Prepare token data
-    const tokenData = {
-      folderId,
-      createdBy: creatorId,
-      maxFileSize,
-      allowedFileTypes,
-      maxUploads,
-      usedCount: 0,
-      expiresAt: Timestamp.fromDate(expiresAt),
-      createdAt: Timestamp.now(),
-      metadata: {
-        ...metadata,
-        projectId: projectId || ''
-      }
-    };
-
-    const tokenId = uuidv4();
-    const token: UploadToken = {
-      id: tokenId,
-      folderId,
-      createdBy: creatorId,
-      createdAt: new Date(),
-      expiresAt,
-      maxFileSize,
-      allowedFileTypes,
-      maxUploads,
-      usedCount: 0,
-      metadata: {
-        ...metadata,
-        projectId: projectId || ''
-      }
-    };
-
-    // Store token in Firestore
-    await setDoc(doc(db, 'uploadTokens', tokenId), {
-      ...tokenData
-    });
-    
-    // Convert Firestore Timestamp to Date for the returned token
-    return {
-      ...token,
-      createdAt: tokenData.createdAt.toDate(),
-      expiresAt: tokenData.expiresAt.toDate()
-    };
-  } catch (error) {
-    console.error('Error creating upload token:', error);
-    throw error;
-  }
+  // Calculate expiration date
+  const expiresAt = new Date();
+  expiresAt.setHours(expiresAt.getHours() + options.expiresInHours);
+  
+  // Create token document
+  const tokenData = {
+    folderId,
+    createdBy: userId,
+    expiresAt: Timestamp.fromDate(expiresAt),
+    maxFileSize: options.maxFileSize,
+    allowedFileTypes: options.allowedFileTypes || [],
+    maxUploads: options.maxUploads,
+    usedCount: 0,
+    createdAt: serverTimestamp(),
+    metadata: options.metadata || {}
+  };
+  
+  // Add to Firestore
+  const tokenRef = await addDoc(collection(db, 'uploadTokens'), tokenData);
+  
+  // Return token with ID
+  return {
+    id: tokenRef.id,
+    folderId,
+    createdBy: userId,
+    expiresAt,
+    maxFileSize: options.maxFileSize,
+    allowedFileTypes: options.allowedFileTypes,
+    maxUploads: options.maxUploads,
+    usedCount: 0,
+    createdAt: new Date(),
+    metadata: options.metadata
+  };
 };
 
 /**
- * Validates an upload token and checks if it can be used
- * @param tokenId The token ID to validate
- * @returns The validated token or null if invalid
+ * Generates a URL for uploading using a token
+ */
+export const generateUploadUrl = (token: UploadToken, baseUrl: string): string => {
+  return `${baseUrl}/upload?token=${token.id}`;
+};
+
+/**
+ * Validates if a token is valid for upload
  */
 export const validateUploadToken = async (tokenId: string): Promise<UploadToken | null> => {
   try {
-    // Get token directly by document ID instead of querying 
-    const tokenDocRef = doc(db, 'uploadTokens', tokenId);
-    const tokenSnapshot = await getDoc(tokenDocRef);
-
-    if (!tokenSnapshot.exists()) {
-      console.error('Upload token not found:', tokenId);
-      return null;
+    const tokenDoc = await getDoc(doc(db, 'uploadTokens', tokenId));
+    
+    if (!tokenDoc.exists()) {
+      return null; // Token doesn't exist
     }
-
-    const tokenData = tokenSnapshot.data();
     
-    // Convert timestamps to Date objects
-    const expiresAt = tokenData.expiresAt instanceof Timestamp 
-      ? tokenData.expiresAt.toDate() 
-      : new Date(tokenData.expiresAt);
-    
-    const createdAt = tokenData.createdAt instanceof Timestamp
-      ? tokenData.createdAt.toDate()
-      : new Date(tokenData.createdAt);
-
-    const token: UploadToken = {
-      id: tokenId, // Use the document ID explicitly as the token ID
-      folderId: tokenData.folderId,
-      createdBy: tokenData.createdBy,
-      expiresAt,
-      createdAt,
-      maxFileSize: tokenData.maxFileSize,
-      allowedFileTypes: tokenData.allowedFileTypes,
-      maxUploads: tokenData.maxUploads,
-      usedCount: tokenData.usedCount || 0,
-      metadata: tokenData.metadata
+    const tokenData = tokenDoc.data() as Omit<UploadToken, 'id' | 'expiresAt' | 'createdAt'> & { 
+      expiresAt: Timestamp;
+      createdAt: Timestamp;
     };
-
-    // Check if token has expired
-    const now = new Date();
-    if (expiresAt < now) {
-      console.error('Upload token has expired');
-      return null;
+    
+    const token: UploadToken = {
+      id: tokenDoc.id,
+      ...tokenData,
+      expiresAt: tokenData.expiresAt.toDate(),
+      createdAt: tokenData.createdAt.toDate()
+    };
+    
+    // Check if token is expired
+    if (token.expiresAt < new Date()) {
+      return null; // Token expired
     }
-
-    // Check if max uploads limit has been reached
+    
+    // Check if max uploads reached
     if (token.maxUploads && token.usedCount >= token.maxUploads) {
-      console.error('Upload token has reached maximum usage limit');
-      return null;
+      return null; // Max uploads reached
     }
-
+    
     return token;
   } catch (error) {
     console.error('Error validating upload token:', error);
     return null;
   }
 };
+
+/**
+ * Increments the used count for a token
+ */
+export const incrementTokenUsage = async (tokenId: string): Promise<boolean> => {
+  try {
+    const tokenRef = doc(db, 'uploadTokens', tokenId);
+    const tokenDoc = await getDoc(tokenRef);
+    
+    if (!tokenDoc.exists()) {
+      return false;
+    }
+    
+    await updateDoc(tokenRef, {
+      usedCount: increment(1)
+    });
+    
+    return true;
+  } catch (error) {
+    console.error('Error incrementing token usage:', error);
+    return false;
+  }
+};
+
+// Mock functions for testing if Firebase isn't initialized
+// These can be removed in production
+const mockTokens = new Map<string, UploadToken>();
+let mockTokenCounter = 1;
+
+// Export as named exports for better tree-shaking
+export { mockTokens, mockTokenCounter };
 
 /**
  * Uploads a file using an upload token
@@ -260,14 +245,4 @@ export const uploadFileWithToken = async (
     console.error('Error uploading file with token:', error);
     throw error;
   }
-};
-
-/**
- * Generates a shareable upload URL that contains the token
- * @param token The upload token
- * @param baseUrl The base URL of the application
- * @returns The shareable upload URL
- */
-export const generateUploadUrl = (token: UploadToken, baseUrl: string): string => {
-  return `${baseUrl}/upload?token=${token.id}`;
 }; 

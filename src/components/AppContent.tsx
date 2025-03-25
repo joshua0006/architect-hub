@@ -12,7 +12,7 @@ import TeamList from './TeamList';
 import TaskList from './TaskList';
 import AccountSettings from './AccountSettings';
 import { Project, Folder, Document } from '../types';
-import { projectService, folderService } from '../services';
+import { projectService } from '../services';
 import { sampleTasks, sampleTeamMembers } from '../data/sampleData';
 import { useDocumentManager } from '../hooks/useDocumentManager';
 import { useFolderManager } from '../hooks/useFolderManager';
@@ -21,7 +21,10 @@ import { useTeamManager } from '../hooks/useTeamManager';
 import { useToast } from '../contexts/ToastContext';
 import { useAuth } from '../contexts/AuthContext';
 import { createShareToken } from '../services/shareService';
-import { documentService } from '../services';
+import { documentService } from '../services/documentService';
+import { folderService } from '../services/folderService';
+import { doc, updateDoc } from 'firebase/firestore';
+import { db } from '../lib/firebase';
 
 // Custom components for folder and file routes
 const DocumentsPage: React.FC<{
@@ -40,6 +43,8 @@ const DocumentsPage: React.FC<{
   deleteFolder: any;
   updateDocument: any;
   deleteDocument: any;
+  updateDocumentPermission: (id: string, permission: 'STAFF_ONLY' | 'ALL') => Promise<void>;
+  updateFolderPermission: (id: string, permission: 'STAFF_ONLY' | 'ALL') => Promise<void>;
 }> = ({ 
   projects, 
   selectedProject, 
@@ -55,7 +60,9 @@ const DocumentsPage: React.FC<{
   updateFolder,
   deleteFolder,
   updateDocument,
-  deleteDocument
+  deleteDocument,
+  updateDocumentPermission,
+  updateFolderPermission
 }) => {
   // Hooks for URL parameters
   const params = useParams();
@@ -202,6 +209,8 @@ const DocumentsPage: React.FC<{
           onDeleteDocument={deleteDocument}
           selectedFile={selectedFile}
           onShare={handleShare}
+          onUpdateDocumentPermission={updateDocumentPermission}
+          onUpdateFolderPermission={updateFolderPermission}
         />
       ) : (
         <div className="h-full flex items-center justify-center text-gray-500">
@@ -220,6 +229,7 @@ export default function AppContent() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const params = useParams();
+  const { user } = useAuth();
   
   // Add state for tracking notification navigation
   const [pendingNotificationNavigation, setPendingNotificationNavigation] = useState<any>(null);
@@ -319,48 +329,73 @@ export default function AppContent() {
 
   const loadProjects = async () => {
     try {
-      const fetchedProjects = await projectService.getAll();
+      let fetchedProjects: Project[] = [];
+      
+      // Staff users see all projects, others only see projects they're added to
+      if (user?.role === 'Staff') {
+        // Staff can see all projects
+        fetchedProjects = await projectService.getAll();
+      } else if (user) {
+        // Other users only see projects they're added to
+        fetchedProjects = await projectService.getUserProjects(user.id);
+      } else {
+        // No user logged in - should not happen in protected routes
+        console.warn('No user found when loading projects');
+        fetchedProjects = [];
+      }
+      
       setProjects(fetchedProjects);
       
-      // Handle project selection from navigation state
-      const state = location.state as { selectedProjectId?: string };
-      if (state?.selectedProjectId) {
-        const project = fetchedProjects.find(p => p.id === state.selectedProjectId);
-        if (project) {
-          setSelectedProject(project);
-          // Clear the state to prevent reselection on subsequent renders
-          navigate(location.pathname, { replace: true, state: {} });
+      // If selectedProject is no longer in the list, it was deleted or user lost access
+      if (selectedProject && !fetchedProjects.some(p => p.id === selectedProject.id)) {
+        // Select the first available project or clear selection if none left
+        if (fetchedProjects.length > 0) {
+          setSelectedProject(fetchedProjects[0]);
+        } else {
+          setSelectedProject(undefined);
+          setCurrentFolderId(undefined);
         }
-      }
-      // If we're on the documents page and no project is selected,
-      // select the first project
-      else if (location.pathname.startsWith('/documents') && !selectedProject && fetchedProjects.length > 0) {
-        // Check if we need to find a specific project for a folder in the URL
-        const { folderId } = params;
-        
-        if (folderId) {
-          // Try to find which project this folder belongs to
-          for (const project of fetchedProjects) {
-            const projectFolders = await folderService.getByProjectId(project.id);
-            if (projectFolders.some(f => f.id === folderId)) {
-              console.log(`Auto-selecting project ${project.id} for folder ${folderId}`);
-              setSelectedProject(project);
-              break;
-            }
+      } else {
+        // Handle project selection from navigation state
+        const state = location.state as { selectedProjectId?: string };
+        if (state?.selectedProjectId) {
+          const project = fetchedProjects.find(p => p.id === state.selectedProjectId);
+          if (project) {
+            setSelectedProject(project);
+            // Clear the state to prevent reselection on subsequent renders
+            navigate(location.pathname, { replace: true, state: {} });
           }
         }
-        
-        // If no specific project was found, select the first one
-        if (!selectedProject) {
-        setSelectedProject(fetchedProjects[0]);
+        // If we're on the documents page and no project is selected,
+        // select the first project
+        else if (location.pathname.startsWith('/documents') && !selectedProject && fetchedProjects.length > 0) {
+          // Check if we need to find a specific project for a folder in the URL
+          const { folderId } = params;
+          
+          if (folderId) {
+            // Try to find which project this folder belongs to
+            for (const project of fetchedProjects) {
+              const projectFolders = await folderService.getByProjectId(project.id);
+              if (projectFolders.some(f => f.id === folderId)) {
+                console.log(`Auto-selecting project ${project.id} for folder ${folderId}`);
+                setSelectedProject(project);
+                break;
+              }
+            }
+          }
+          
+          // If no specific project was found, select the first one
+          if (!selectedProject) {
+            setSelectedProject(fetchedProjects[0]);
+          }
         }
-      }
 
-      // Update selected project if it exists in the fetched projects
-      if (selectedProject) {
-        const updatedProject = fetchedProjects.find(p => p.id === selectedProject.id);
-        if (updatedProject) {
-          setSelectedProject(updatedProject);
+        // Update selected project if it exists in the fetched projects
+        if (selectedProject) {
+          const updatedProject = fetchedProjects.find(p => p.id === selectedProject.id);
+          if (updatedProject) {
+            setSelectedProject(updatedProject);
+          }
         }
       }
     } catch (error) {
@@ -608,6 +643,60 @@ export default function AppContent() {
     setDocumentManagerFolderId(newFolderId);
   };
 
+  const updateDocumentPermission = async (id: string, permission: 'STAFF_ONLY' | 'ALL') => {
+    try {
+      // Get the current document to ensure it exists
+      const docToUpdate = documents.find(d => d.id === id);
+      if (!docToUpdate) {
+        console.error(`Document ${id} not found for permission update`);
+        return;
+      }
+
+      // Create metadata update with access permission
+      const metadataUpdate = {
+        ...(docToUpdate.metadata || {}),
+        access: permission
+      };
+
+      // Use updateDocument function which already exists in the component
+      await updateDocument(id, { 
+        metadata: metadataUpdate
+      });
+      
+    } catch (error) {
+      console.error('Error updating document permission:', error);
+      throw new Error('Failed to update document permission');
+    }
+  };
+
+  const updateFolderPermission = async (id: string, permission: 'STAFF_ONLY' | 'ALL') => {
+    try {
+      // Get the current folder to ensure it exists
+      const folderToUpdate = folders.find(f => f.id === id);
+      if (!folderToUpdate) {
+        console.error(`Folder ${id} not found for permission update`);
+        return;
+      }
+
+      // Create folder metadata
+      const folderName = folderToUpdate.name; 
+      
+      // First update the folder name (keeping it the same) to trigger a refresh
+      await updateFolder(id, folderName);
+      
+      // Then directly modify the folder's metadata using an internal API call
+      // You might need to make another implementation for this depending on your actual services
+      const folderRef = doc(db, 'folders', id);
+      await updateDoc(folderRef, {
+        'metadata.access': permission
+      });
+      
+    } catch (error) {
+      console.error('Error updating folder permission:', error);
+      throw new Error('Failed to update folder permission');
+    }
+  };
+
   return (
     <AnimatePresence mode="sync">
       <Routes>
@@ -712,6 +801,8 @@ export default function AppContent() {
               deleteFolder={deleteFolder}
               updateDocument={updateDocument}
               deleteDocument={deleteDocument}
+              updateDocumentPermission={updateDocumentPermission}
+              updateFolderPermission={updateFolderPermission}
             />
           }
         />
@@ -735,6 +826,8 @@ export default function AppContent() {
               deleteFolder={deleteFolder}
               updateDocument={updateDocument}
               deleteDocument={deleteDocument}
+              updateDocumentPermission={updateDocumentPermission}
+              updateFolderPermission={updateFolderPermission}
             />
           }
         />
@@ -758,6 +851,8 @@ export default function AppContent() {
               deleteFolder={deleteFolder}
               updateDocument={updateDocument}
               deleteDocument={deleteDocument}
+              updateDocumentPermission={updateDocumentPermission}
+              updateFolderPermission={updateFolderPermission}
             />
           }
         />
@@ -781,6 +876,8 @@ export default function AppContent() {
               deleteFolder={deleteFolder}
               updateDocument={updateDocument}
               deleteDocument={deleteDocument}
+              updateDocumentPermission={updateDocumentPermission}
+              updateFolderPermission={updateFolderPermission}
             />
           }
         />
@@ -882,6 +979,8 @@ export default function AppContent() {
               deleteFolder={deleteFolder}
               updateDocument={updateDocument}
               deleteDocument={deleteDocument}
+              updateDocumentPermission={updateDocumentPermission}
+              updateFolderPermission={updateFolderPermission}
             />
           }
         />
@@ -905,6 +1004,8 @@ export default function AppContent() {
               deleteFolder={deleteFolder}
               updateDocument={updateDocument}
               deleteDocument={deleteDocument}
+              updateDocumentPermission={updateDocumentPermission}
+              updateFolderPermission={updateFolderPermission}
             />
           }
         />
@@ -928,6 +1029,8 @@ export default function AppContent() {
               deleteFolder={deleteFolder}
               updateDocument={updateDocument}
               deleteDocument={deleteDocument}
+              updateDocumentPermission={updateDocumentPermission}
+              updateFolderPermission={updateFolderPermission}
             />
           }
         />
@@ -951,6 +1054,8 @@ export default function AppContent() {
               deleteFolder={deleteFolder}
               updateDocument={updateDocument}
               deleteDocument={deleteDocument}
+              updateDocumentPermission={updateDocumentPermission}
+              updateFolderPermission={updateFolderPermission}
             />
           }
         />

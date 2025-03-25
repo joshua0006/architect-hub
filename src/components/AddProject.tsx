@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { Plus, X } from 'lucide-react';
+import { Plus, X, Loader2, FolderOpen, AlertCircle } from 'lucide-react';
 import { Project } from '../types';
 import { projectService } from '../services';
+import { useAuth } from '../contexts/AuthContext';
 
 interface AddProjectProps {
   onSuccess?: () => void;
@@ -9,6 +10,10 @@ interface AddProjectProps {
 }
 
 export default function AddProject({ onSuccess, onCancel }: AddProjectProps) {
+  const [isCreating, setIsCreating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const { user } = useAuth();
+  
   const [formData, setFormData] = useState({
     name: '',
     client: '',
@@ -29,9 +34,45 @@ export default function AddProject({ onSuccess, onCancel }: AddProjectProps) {
     }
   });
 
+  // Ensure only staff users can create projects
+  if (user?.role !== 'Staff') {
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div className="bg-white rounded-lg p-6 w-full max-w-md">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-2xl font-semibold text-gray-900">Add New Project</h2>
+            <button
+              onClick={onCancel}
+              className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+            >
+              <X className="w-5 h-5 text-gray-500" />
+            </button>
+          </div>
+          
+          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md flex items-start">
+            <AlertCircle className="w-5 h-5 mr-2 flex-shrink-0 mt-0.5" />
+            <p>Only staff members can create new projects.</p>
+          </div>
+          
+          <div className="flex justify-end space-x-3 pt-6">
+            <button
+              onClick={onCancel}
+              className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800 transition-colors"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
+      setIsCreating(true);
+      setError(null);
+      
       // Clean up empty values before submission
       const cleanedData: Omit<Project, 'id'> = {
         name: formData.name,
@@ -40,7 +81,8 @@ export default function AddProject({ onSuccess, onCancel }: AddProjectProps) {
         progress: formData.progress,
         startDate: formData.startDate,
         endDate: formData.endDate,
-        teamMemberIds: [], // Include the required teamMemberIds property
+        // Automatically add the current user (project creator) to the project team members
+        teamMemberIds: user ? [user.id] : [],
         metadata: {
           industry: formData.metadata.industry || 'N/A',
           projectType: formData.metadata.projectType || 'N/A',
@@ -55,12 +97,18 @@ export default function AddProject({ onSuccess, onCancel }: AddProjectProps) {
       };
       
       console.log('Creating project with data:', cleanedData);
-      await projectService.create(cleanedData);
-      console.log('Project created successfully');
-      onSuccess?.();
+      const newProject = await projectService.create(cleanedData);
+      console.log('Project created successfully:', newProject);
+      
+      // Ensure the onSuccess callback is called to refresh the project list
+      if (onSuccess) {
+        onSuccess();
+      }
     } catch (error) {
       console.error('Error creating project:', error);
-      alert(`Failed to create project: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      setError(`Failed to create project: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setIsCreating(false);
     }
   };
 
@@ -83,13 +131,18 @@ export default function AddProject({ onSuccess, onCancel }: AddProjectProps) {
     } else if (name.includes('.')) {
       // Handle other metadata fields
       const [parent, child] = name.split('.');
-      setFormData(prev => ({
-        ...prev,
-        [parent]: {
-          ...prev[parent as keyof typeof prev],
-          [child]: value
+      setFormData(prev => {
+        if (parent === 'metadata') {
+          return {
+            ...prev,
+            metadata: {
+              ...prev.metadata,
+              [child]: value
+            }
+          };
         }
-      }));
+        return prev;
+      });
     } else {
       // Handle top-level fields
       setFormData(prev => ({
@@ -101,12 +154,27 @@ export default function AddProject({ onSuccess, onCancel }: AddProjectProps) {
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+      <div className="bg-white rounded-lg p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto relative">
+        {/* Loading overlay */}
+        {isCreating && (
+          <div className="absolute inset-0 bg-white bg-opacity-80 z-10 flex flex-col items-center justify-center">
+            <div className="bg-blue-50 rounded-lg p-6 shadow-lg max-w-xs w-full text-center">
+              <div className="flex justify-center mb-3">
+                <FolderOpen className="w-10 h-10 text-blue-500 animate-pulse" />
+              </div>
+              <Loader2 className="w-6 h-6 animate-spin mx-auto mb-3 text-blue-600" />
+              <h3 className="text-lg font-semibold text-gray-900 mb-1">Creating Project</h3>
+              <p className="text-sm text-gray-600">Setting up folder structure...</p>
+            </div>
+          </div>
+        )}
+        
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-2xl font-semibold text-gray-900">Add New Project</h2>
           <button
             onClick={onCancel}
             className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+            disabled={isCreating}
           >
             <X className="w-5 h-5 text-gray-500" />
           </button>
@@ -285,15 +353,26 @@ export default function AddProject({ onSuccess, onCancel }: AddProjectProps) {
               type="button"
               onClick={onCancel}
               className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800 transition-colors"
+              disabled={isCreating}
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="px-4 py-2 text-sm text-white bg-blue-500 rounded-md hover:bg-blue-600 transition-colors flex items-center space-x-2"
+              disabled={isCreating}
+              className="px-4 py-2 text-sm text-white bg-blue-500 rounded-md hover:bg-blue-600 transition-colors flex items-center space-x-2 disabled:opacity-70 disabled:cursor-not-allowed"
             >
-              <Plus className="w-4 h-4" />
-              <span>Create Project</span>
+              {isCreating ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Creating...</span>
+                </>
+              ) : (
+                <>
+                  <Plus className="w-4 h-4" />
+                  <span>Create Project</span>
+                </>
+              )}
             </button>
           </div>
         </form>

@@ -44,6 +44,15 @@ const activeTransactions = new Set<string>();
 // Global cache for checking existing notifications
 const existingNotificationCache = new Map<string, string>();
 
+// Cache for recently received notifications to prevent repeated processing
+const notificationCache = new Map<string, {
+  timestamp: number;
+  notifications: Notification[];
+}>();
+
+// Maximum cache age (1 minute)
+const MAX_CACHE_AGE = 60000;
+
 /**
  * Wrapper function to prevent duplicate notifications from being created
  * @param cacheKey A unique key representing this notification operation
@@ -585,137 +594,154 @@ export const getRecentNotifications = async (
   }
 };
 
-/**
- * Sets up a real-time listener for notifications for a specific user
- * @param userId The ID of the user whose notifications to listen for
- * @param callback The callback function to handle new notifications
- * @returns An unsubscribe function
- */
+// Improved subscription function with more aggressive caching
 export const subscribeToNotifications = (
   userId: string,
   callback: (notifications: Notification[]) => void
 ): (() => void) => {
-  if (!userId) {
-    console.error('[Notification Error] Cannot subscribe to notifications: No user ID provided');
-    callback([]);
-    return () => {};
-  }
+  // Use very aggressive caching to prevent excessive Firestore queries
+  const CACHE_DURATION_MS = 60000; // 1 minute
+  const MIN_CALLBACK_INTERVAL = 10000; // 10 seconds minimum between callbacks
   
+  // Cache of last callback time to prevent excessive updates
+  let lastCallbackTime = 0;
+  let isFirstCallback = true;
+  
+  // Generate a unique subscription ID for tracking
+  const subscriptionId = `${userId}-${Date.now()}`;
+  console.log(`[Notification Subscription] Creating subscription ${subscriptionId}`);
+  
+  // Create a query for this user's notifications
   const notificationsRef = collection(db, 'notifications');
   
-  try {
-    // Try the simplest subscription first - just match on userId
-    const basicQuery = query(
-      notificationsRef,
-      where('userId', '==', userId),
-      limit(50)
-    );
+  // Check if we have cached notifications for this user
+  const cacheKey = `notifications-${userId}`;
+  const cachedData = notificationCache.get(cacheKey);
+  
+  // If we have recent cached notifications, send them immediately
+  if (cachedData && (Date.now() - cachedData.timestamp < MAX_CACHE_AGE)) {
+    console.log(`[Notification Cache] Using cached notifications for user ${userId}, age: ${(Date.now() - cachedData.timestamp) / 1000}s`);
     
-    return onSnapshot(basicQuery, (basicSnapshot) => {
+    // Use setTimeout to ensure this is asynchronous
+    setTimeout(() => {
+      callback(cachedData.notifications);
+    }, 100);
+  }
+  
+  // Use a more efficient query with server timestamp ordering
+  const q = query(
+    notificationsRef,
+    where('userId', '==', userId),
+    orderBy('createdAt', 'desc'),
+    limit(20) // Reduced limit to improve performance
+  );
+  
+  console.log(`[Notification Subscription] Setting up real-time subscription for user ${userId}`);
+  
+  // Implement debounced callback for processing snapshots
+  let pendingSnapshot: any = null;
+  let debounceTimer: NodeJS.Timeout | null = null;
+  
+  const processSnapshot = (snapshot: any) => {
+    pendingSnapshot = snapshot;
+    
+    // Clear existing timer if there is one
+    if (debounceTimer) {
+      clearTimeout(debounceTimer);
+    }
+    
+    // Set a new timer to process this snapshot after a delay
+    debounceTimer = setTimeout(() => {
+      if (!pendingSnapshot) return;
       
-      if (!basicSnapshot.empty) {
-        const notifications = basicSnapshot.docs.map(doc => {
-          const data = doc.data();
-          // Ensure we return a properly formatted Notification object
-          return {
-            id: doc.id,
-            userId: data.userId || userId,
-            createdAt: data.createdAt || new Date(),
-            updatedAt: data.updatedAt || new Date(),
-            iconType: data.iconType || data.type || 'info',
-            type: data.type || 'info',
-            read: typeof data.read === 'boolean' ? data.read : false,
-            message: data.message || 'Notification',
-            link: data.link || '/',
-            metadata: data.metadata || {
-              contentType: 'unknown',
-              fileName: '',
-              folderId: '',
-              folderName: '',
-              guestName: '',
-              uploadDate: new Date().toISOString()
-            }
-          };
+      try {
+        processSnapshotImmediately(pendingSnapshot);
+      } catch (error) {
+        console.error('[Notification Subscription] Error processing debounced snapshot:', error);
+      }
+      
+      // Clear the pending snapshot
+      pendingSnapshot = null;
+    }, isFirstCallback ? 100 : 2000); // Process first callback quickly, then use longer debounce
+  };
+  
+  // Actual snapshot processing function
+  const processSnapshotImmediately = (snapshot: any) => {
+    try {
+      // Throttle callbacks based on time (except for first callback)
+      const now = Date.now();
+      if (!isFirstCallback && now - lastCallbackTime < MIN_CALLBACK_INTERVAL) {
+        console.log(`[Notification Subscription] Throttling callback, too soon after last callback (${Math.floor((now - lastCallbackTime) / 1000)}s)`);
+        return;
+      }
+      
+      // Check if we have any documents
+      if (snapshot.empty) {
+        console.log(`[Notification Subscription] No notifications found for user ${userId}`);
+        
+        // Update the cache with empty array for faster future responses
+        notificationCache.set(cacheKey, {
+          timestamp: now,
+          notifications: []
         });
         
-        callback(notifications);
-      } else {
-        // If we got an empty result for the basic query, try with raw.userId
-        
-        try {
-          // Create a one-time listener with raw.userId
-          const rawQuery = query(
-            notificationsRef,
-            where('raw.userId', '==', userId),
-            limit(50)
-          );
-          
-          const rawUnsubscribe = onSnapshot(rawQuery, (rawSnapshot) => {
-            
-            if (!rawSnapshot.empty) {
-              const notifications = rawSnapshot.docs.map(doc => ({
-                id: doc.id,
-                ...doc.data()
-              })) as Notification[];
-              
-              callback(notifications);
-            } else {
-              // Last resort - one-time fetch of all notifications and filter manually
-              // This is inefficient but will ensure we get results if the document structure is inconsistent
-              const allQuery = query(notificationsRef, limit(100));
-              
-              const allUnsubscribe = onSnapshot(allQuery, (allSnapshot) => {
-                if (!allSnapshot.empty) {
-                  // Filter to find notifications for this user from any field
-                  const userNotifications = allSnapshot.docs.filter(doc => {
-                    const data = doc.data();
-                    return (
-                      data.userId === userId ||
-                      (data.raw && data.raw.userId === userId) ||
-                      (data.metadata && data.metadata.userId === userId) ||
-                      (data.targetUserId === userId)
-                    );
-                  });
-                  
-                  if (userNotifications.length > 0) {
-                    const notifications = userNotifications.map(doc => ({
-                      id: doc.id,
-                      ...doc.data()
-                    })) as Notification[];
-                    
-                    callback(notifications);
-                  } else {
-                    callback([]);
-                  }
-                } else {
-                  callback([]);
-                }
-              }, (allError) => {
-                console.error(`[Notification Error] All notifications query error:`, allError);
-                callback([]);
-              });
-              
-              return allUnsubscribe;
-            }
-          }, (rawError) => {
-            console.error(`[Notification Error] Raw subscription error:`, rawError);
-            callback([]);
-          });
-          
-          return rawUnsubscribe;
-        } catch (setupError) {
-          console.error(`[Notification Error] Error setting up raw subscription:`, setupError);
-          callback([]);
-        }
+        return;
       }
-    }, (basicError) => {
-      console.error(`[Notification Error] Basic subscription error:`, basicError);
-      callback([]);
-    });
-  } catch (setupError) {
-    console.error(`[Notification Error] Failed to set up notification subscription:`, setupError);
-    return () => {}; // Return dummy unsubscribe function
-  }
+      
+      // Process snapshot to get all notifications
+      const notifications: Notification[] = snapshot.docs
+        .map((doc: any) => {
+          const data = doc.data();
+          return data && data.userId === userId ? { id: doc.id, ...data } as Notification : null;
+        })
+        .filter(Boolean);
+      
+      if (notifications.length === 0) {
+        console.log(`[Notification Subscription] No valid notifications in snapshot for user ${userId}`);
+        return;
+      }
+      
+      // Update cache for future use
+      notificationCache.set(cacheKey, {
+        timestamp: now,
+        notifications
+      });
+      
+      // Update timing variables
+      lastCallbackTime = now;
+      isFirstCallback = false;
+      
+      // Call the callback with notifications
+      console.log(`[Notification Subscription] Calling back with ${notifications.length} notifications`);
+      callback(notifications);
+    } catch (error) {
+      console.error('[Notification Subscription] Error processing snapshot:', error);
+    }
+  };
+  
+  // Set up the snapshot listener with much-reduced metadata changes option
+  const unsubscribe = onSnapshot(
+    q,
+    { includeMetadataChanges: false },
+    processSnapshot,
+    (error) => {
+      console.error(`[Notification Subscription] Error in subscription for user ${userId}:`, error);
+    }
+  );
+  
+  // Return an enhanced unsubscribe function that cleans up internal timers
+  return () => {
+    console.log(`[Notification Subscription] Unsubscribing from subscription ${subscriptionId}`);
+    
+    // Clear any pending timers
+    if (debounceTimer) {
+      clearTimeout(debounceTimer);
+      debounceTimer = null;
+    }
+    
+    // Call the Firebase unsubscribe
+    unsubscribe();
+  };
 };
 
 /**

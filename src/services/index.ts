@@ -9,3 +9,5 @@ export * from './uploadService';
 export * from './shareService';
 export * from './uploadTokenService';
 export * from './notificationService';
+export * from './userService';
+export * from './permissionService';

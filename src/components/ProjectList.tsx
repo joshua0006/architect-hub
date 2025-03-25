@@ -1,4 +1,4 @@
-import { Search, Plus, Archive, CheckCircle2, Clock, Trash2, AlertCircle } from "lucide-react";
+import { Search, Plus, Archive, CheckCircle2, Clock, Trash2, AlertCircle, ArrowUpDown, Loader2, MoreVertical } from "lucide-react";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
@@ -7,6 +7,8 @@ import AddProject from "./AddProject";
 import { useMilestoneManager } from "../hooks/useMilestoneManager";
 import { calculateMilestoneProgress } from "../utils/progressCalculator";
 import { projectService } from "../services";
+import { useToast } from "../contexts/ToastContext";
+import { useAuth } from "../contexts/AuthContext";
 
 interface DeleteConfirmationProps {
   projectName: string;
@@ -57,6 +59,7 @@ interface ProjectItemProps {
   onStatusChange: (projectId: string, newStatus: Project["status"]) => void;
   onDeleteProject: (projectId: string) => void;
   tasks: Task[];
+  isDeletingProject: string | null;
 }
 
 const ProjectItem = ({
@@ -66,6 +69,7 @@ const ProjectItem = ({
   onStatusChange,
   onDeleteProject,
   tasks,
+  isDeletingProject,
 }: ProjectItemProps) => {
   const [showStatusMenu, setShowStatusMenu] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -73,6 +77,7 @@ const ProjectItem = ({
   const [progress, setProgress] = useState(project.progress);
   const prevProgressRef = useRef(progress);
   const statusUpdateTimeoutRef = useRef<NodeJS.Timeout>();
+  const { user } = useAuth();
 
   // Format location for display
   const location =
@@ -170,6 +175,75 @@ const ProjectItem = ({
     setShowDeleteConfirm(false);
   };
 
+  const renderStatusMenu = () => {
+    // For non-staff users, just show the status without dropdown
+    if (user?.role !== 'Staff') {
+      return (
+        <div className="status-menu">
+          <button
+            onClick={(e) => e.stopPropagation()}
+            className={`flex items-center space-x-2 px-2 py-1 rounded-md ${getStatusColor(project.status)}`}
+          >
+            {getStatusIcon(project.status)}
+            <span className="text-sm capitalize">{project.status}</span>
+          </button>
+        </div>
+      );
+    }
+
+    // For staff users, show the status button with dropdown
+    return (
+      <div className="relative status-menu">
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            setShowStatusMenu(!showStatusMenu);
+          }}
+          className={`flex items-center space-x-2 px-2 py-1 rounded-md ${getStatusColor(project.status)}`}
+        >
+          {getStatusIcon(project.status)}
+          <span className="text-sm capitalize">{project.status}</span>
+        </button>
+
+        <AnimatePresence>
+          {showStatusMenu && (
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg z-10 border border-gray-200"
+            >
+              <div className="py-1">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onStatusChange(project.id, "archived");
+                    setShowStatusMenu(false);
+                  }}
+                  className="flex items-center space-x-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 w-full"
+                >
+                  <Archive className="w-4 h-4" />
+                  <span>Archive</span>
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowStatusMenu(false);
+                    setShowDeleteConfirm(true);
+                  }}
+                  className="flex items-center space-x-2 px-4 py-2 text-sm text-red-600 hover:bg-red-50 w-full"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  <span>Delete</span>
+                </button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+    );
+  };
+
   return (
     <>
       <motion.div
@@ -178,11 +252,20 @@ const ProjectItem = ({
           selectedId === project.id
             ? "bg-primary-50 border-primary-200"
             : "bg-white border-gray-200 hover:bg-gray-50"
-        } border card-shadow relative`}
+        } border card-shadow relative ${isDeletingProject === project.id ? 'opacity-70' : ''}`}
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, y: -20 }}
       >
+        {isDeletingProject === project.id && (
+          <div className="absolute inset-0 flex items-center justify-center bg-white bg-opacity-70 rounded-lg z-10">
+            <div className="flex flex-col items-center space-y-2">
+              <Loader2 className="w-8 h-8 animate-spin text-primary-600" />
+              <span className="text-sm text-gray-600">Deleting project...</span>
+            </div>
+          </div>
+        )}
+        
         <div className="flex items-start justify-between">
           <div className="flex-1">
             <h3 className="font-medium text-gray-900">{project.name}</h3>
@@ -191,60 +274,9 @@ const ProjectItem = ({
             ) : (
               <br />
             )}
-            
+          </div>
           
-          </div>
-
-          <div className="relative status-menu">
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                setShowStatusMenu(!showStatusMenu);
-              }}
-              className={`flex items-center space-x-2 px-2 py-1 rounded-md ${getStatusColor(
-                project.status
-              )}`}
-            >
-              {getStatusIcon(project.status)}
-              <span className="text-sm capitalize">{project.status}</span>
-            </button>
-
-            <AnimatePresence>
-              {showStatusMenu && (
-                <motion.div
-                  initial={{ opacity: 0, y: -10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
-                  className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg z-10 border border-gray-200"
-                >
-                  <div className="py-1">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onStatusChange(project.id, "archived");
-                        setShowStatusMenu(false);
-                      }}
-                      className="flex items-center space-x-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 w-full"
-                    >
-                      <Archive className="w-4 h-4" />
-                      <span>Archive</span>
-                    </button>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setShowStatusMenu(false);
-                        setShowDeleteConfirm(true);
-                      }}
-                      className="flex items-center space-x-2 px-4 py-2 text-sm text-red-600 hover:bg-red-50 w-full"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                      <span>Delete</span>
-                    </button>
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
+          {renderStatusMenu()}
         </div>
 
         <div className="mt-4 space-y-2">
@@ -309,9 +341,13 @@ export default function ProjectList({
   const [showAddProject, setShowAddProject] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [filteredProjects, setFilteredProjects] = useState(projects);
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const location = useLocation();
   const navigate = useNavigate();
   const isProjectTab = location.pathname === "/";
+  const [isDeletingProject, setIsDeletingProject] = useState<string | null>(null);
+  const { showToast } = useToast();
+  const { user } = useAuth();
 
   useEffect(() => {
     const filtered = projects
@@ -327,8 +363,24 @@ export default function ProjectList({
           project.metadata?.location.country.toLowerCase().includes(searchLower)
         );
       });
-    setFilteredProjects(filtered);
-  }, [searchQuery, projects]);
+    
+    const sorted = [...filtered].sort((a, b) => {
+      const nameA = a.name.toLowerCase();
+      const nameB = b.name.toLowerCase();
+      
+      if (sortOrder === 'asc') {
+        return nameA.localeCompare(nameB);
+      } else {
+        return nameB.localeCompare(nameA);
+      }
+    });
+    
+    setFilteredProjects(sorted);
+  }, [searchQuery, projects, sortOrder]);
+
+  const toggleSortOrder = () => {
+    setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
+  };
 
   const handleProjectSelect = (project: Project) => {
     onSelect(project);
@@ -385,17 +437,42 @@ export default function ProjectList({
 
   const handleDeleteProject = async (projectId: string) => {
     try {
+      setIsDeletingProject(projectId);
+      
+      console.log(`Deleting project ${projectId}...`);
       await projectService.delete(projectId);
+      console.log(`Project ${projectId} deleted successfully`);
+      
+      // Force refresh of the project list
       onProjectsChange();
+      
+      // Wait a moment to ensure the deletion is processed before selecting another project
+      setTimeout(() => {
+        // If the deleted project was selected, reset selection
+        if (selectedId === projectId) {
+          const remainingProjects = projects.filter(p => p.id !== projectId);
+          if (remainingProjects.length > 0) {
+            onSelect(remainingProjects[0]);
+          } else {
+            // If no projects left, pass null to reset selection
+            onSelect(null as any);
+          }
+        }
+        
+        showToast('Project deleted successfully', 'success');
+        setIsDeletingProject(null);
+      }, 500);
     } catch (error) {
       console.error('Error deleting project:', error);
+      showToast('Failed to delete project', 'error');
+      setIsDeletingProject(null);
     }
   };
 
   return (
     <>
       <div className="sticky top-0 z-10 bg-white border-b border-gray-200 p-4 space-y-4">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center space-x-2">
           <div className="relative flex-1">
             <input
               type="text"
@@ -417,13 +494,27 @@ export default function ProjectList({
               </motion.button>
             )}
           </div>
+          
           <button
-            onClick={() => setShowAddProject(true)}
-            className="ml-4 px-3 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 transition-all duration-300 flex items-center space-x-2"
+            onClick={toggleSortOrder}
+            className="px-3 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-all duration-300 flex items-center space-x-2 flex-shrink-0"
+            title={`Sort by name (${sortOrder === 'asc' ? 'A-Z' : 'Z-A'})`}
           >
-            <Plus className="w-4 h-4" />
-            <span>New Project</span>
+            <ArrowUpDown className="w-4 h-4" />
+            <span className="hidden sm:inline">{sortOrder === 'asc' ? 'A-Z' : 'Z-A'}</span>
           </button>
+        </div>
+        
+        <div className="flex w-full">
+          {user?.role === "Staff" && (
+            <button
+              onClick={() => setShowAddProject(true)}
+              className="w-full px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 transition-all duration-300 flex items-center justify-center space-x-2"
+            >
+              <Plus className="w-4 h-4" />
+              <span>New Project</span>
+            </button>
+          )}
         </div>
 
         {searchQuery && (
@@ -451,6 +542,7 @@ export default function ProjectList({
                   onStatusChange={handleStatusChange}
                   onDeleteProject={handleDeleteProject}
                   tasks={tasks}
+                  isDeletingProject={isDeletingProject}
                 />
               ))}
             </div>

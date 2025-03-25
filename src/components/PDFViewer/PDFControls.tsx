@@ -9,6 +9,9 @@ import {
   HelpCircle,
   Maximize,
   ChevronDown,
+  ZoomIn,
+  ZoomOut,
+  RefreshCw,
 } from "lucide-react";
 import { useKeyboardShortcutGuide } from "../../hooks/useKeyboardShortcutGuide";
 
@@ -22,6 +25,9 @@ interface PDFControlsProps {
   onPrevPage: () => void;
   onNextPage: () => void;
   onFitToWidth: () => void;
+  onZoomIn: () => void;
+  onZoomOut: () => void;
+  onResetZoom: () => void;
   onExportCurrentPage: (format: "png" | "pdf") => void;
   onExportAllPages: (quality?: "standard" | "hd") => void;
   onExportAnnotations: () => void;
@@ -38,6 +44,9 @@ export const PDFControls: React.FC<PDFControlsProps> = ({
   onPrevPage,
   onNextPage,
   onFitToWidth,
+  onZoomIn,
+  onZoomOut,
+  onResetZoom,
   onExportCurrentPage,
   onExportAllPages,
   onExportAnnotations,
@@ -84,9 +93,52 @@ export const PDFControls: React.FC<PDFControlsProps> = ({
 
         <div className="h-6 w-px bg-gray-200" />
         
+        {/* Zoom Controls */}
+        <div className="flex items-center space-x-1 ml-2">
+          <button
+            onClick={onZoomOut}
+            className="p-1 rounded hover:bg-gray-100 transition-colors duration-200"
+            title="Zoom Out (Ctrl+-)"
+            aria-label="Zoom Out"
+          >
+            <ZoomOut className="text-gray-700" size={20} />
+          </button>
+          
+          <span className="text-sm font-medium text-gray-700 min-w-[4rem] text-center">
+            {Math.round(scale * 100)}%
+          </span>
+          
+          <button
+            onClick={onZoomIn}
+            className="p-1 rounded hover:bg-gray-100 transition-colors duration-200"
+            title="Zoom In (Ctrl++)"
+            aria-label="Zoom In"
+          >
+            <ZoomIn className="text-gray-700" size={20} />
+          </button>
+          
+          <button
+            onClick={onFitToWidth}
+            className="p-1 flex items-center gap-2 rounded hover:bg-gray-100 transition-colors duration-200"
+            title="Fit to Width"
+            aria-label="Fit to Width"
+          >
+            <Maximize className="text-gray-700" size={20} />
+            <span className="text-gray-700 text-sm font-medium">Fit Width</span>
+          </button>
+          
+          <button
+            onClick={onResetZoom}
+            className="p-1 flex items-center gap-2 rounded hover:bg-gray-100 transition-colors duration-200"
+            title="Reset Zoom (Ctrl+0)"
+            aria-label="Reset Zoom"
+          >
+            <RefreshCw className="text-gray-700" size={20} />
+            <span className="text-gray-700 text-sm font-medium">Reset</span>
+          </button>
+        </div>
         
-        
-        <div className="h-6 w-px bg-gray-200" />
+        <div className="h-6 w-px bg-gray-200 ml-2" />
         
         <div className="relative group">
           <div className="flex">
