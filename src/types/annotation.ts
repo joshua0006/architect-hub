@@ -5,6 +5,7 @@ export type Point = {
 
 export type AnnotationType =
   | "select"
+  | "hand"
   | "freehand"
   | "line"
   | "arrow"
@@ -61,6 +62,7 @@ export interface ToolConfig {
 export const createAnnotation = (type: AnnotationType): Annotation => {
   const defaultStyles: Record<AnnotationType, AnnotationStyle> = {
     select: { color: "#000000", lineWidth: 2, opacity: 1 },
+    hand: { color: "#000000", lineWidth: 2, opacity: 1 },
     freehand: { color: "#000000", lineWidth: 2, opacity: 1 },
     line: { color: "#000000", lineWidth: 2, opacity: 1 },
     arrow: { color: "#000000", lineWidth: 2, opacity: 1 },
