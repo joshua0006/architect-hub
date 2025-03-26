@@ -73,8 +73,12 @@ async function isTextBasedPDF(pdfDocument: any) {
 }
 
 export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
+  // Define cursor styles for grabbing with cross-browser support
+  const grabCursorClassName = "cursor-grabbing";
+  
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   
   // Add missing refs
   const renderTaskRef = useRef<any>(null);
@@ -98,6 +102,8 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
   const [scale, setScale] = useState(1.0);
   const [pageChangeInProgress, setPageChangeInProgress] = useState(false);
   const [pdfFile, setPdfFile] = useState<File | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   
   // Add new state for initial loading
   const [isInitialLoading, setIsInitialLoading] = useState(true);
@@ -153,11 +159,17 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
 
   // Function to center the document in the view
   const scrollToCenterDocument = useCallback(() => {
-    if (!containerRef.current || !page) return;
+    if (!containerRef.current || !page || isDragging) return;
     
     const container = containerRef.current;
-    const scrollContainer = container.querySelector('.overflow-auto');
+    const scrollContainer = container.querySelector('.overflow-auto') as HTMLElement;
     if (!scrollContainer) return;
+    
+    // Skip centering if we recently finished dragging (within last 500ms)
+    const dragEndTime = parseInt(scrollContainer.dataset.dragEndTime || '0');
+    if (Date.now() - dragEndTime < 500) {
+      return;
+    }
     
     // Calculate center position
     const viewportWidth = scrollContainer.clientWidth;
@@ -174,7 +186,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     scrollContainer.scrollTop = scrollTop;
     
     console.log(`[PDFViewer] Centered document: scrollLeft=${scrollLeft}, scrollTop=${scrollTop}`);
-  }, [page, viewport]);
+  }, [page, viewport, isDragging]);
 
   // Helper function to get annotations for a specific page
   const getAnnotationsForPage = useCallback((documentId: string, pageNumber: number) => {
@@ -1026,6 +1038,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
 
     const cursorMap: { [key: string]: string } = {
       select: "default",
+      hand: "grab",
       freehand: "crosshair",
       line: "crosshair",
       arrow: "crosshair",
@@ -1037,6 +1050,9 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
       stickyNote: "text",
       highlight: "crosshair",
       stamp: "crosshair",
+      stampApproved: "crosshair",
+      stampRejected: "crosshair",
+      stampRevision: "crosshair",
     };
 
     container.style.cursor = cursorMap[currentTool] || "default";
@@ -1847,6 +1863,331 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     }
   }, [scale, page, viewport, isViewerReady, currentPage, pageChangeInProgress, renderPdfPage]);
 
+  // Add event handlers for dragging
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    if (!scrollContainerRef.current) return;
+    
+    // Only enable dragging when using select or hand tool
+    // Also check if content is larger than container (requires panning)
+    const hasOverflow = page && viewport && 
+      (viewport.width > scrollContainerRef.current.clientWidth || 
+       viewport.height > scrollContainerRef.current.clientHeight);
+       
+    if ((currentTool === 'select' || currentTool === 'hand') && hasOverflow) {
+      setIsDragging(true);
+      
+      // Store initial mouse position and scroll position separately
+      setDragStart({
+        x: e.clientX,
+        y: e.clientY
+      });
+      
+      // Store current scroll position in the ref element's dataset
+      scrollContainerRef.current.dataset.startScrollLeft = String(scrollContainerRef.current.scrollLeft);
+      scrollContainerRef.current.dataset.startScrollTop = String(scrollContainerRef.current.scrollTop);
+      
+      // Change cursor to grabbing for all elements
+      if (containerRef.current) {
+        containerRef.current.classList.add(grabCursorClassName);
+      }
+      if (scrollContainerRef.current) {
+        scrollContainerRef.current.classList.add(grabCursorClassName);
+      }
+      if (canvasRef.current) {
+        canvasRef.current.classList.add(grabCursorClassName);
+      }
+      
+      // Prevent default behaviors
+      e.preventDefault();
+    }
+  }, [currentTool, page, viewport, grabCursorClassName]);
+
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    if (isDragging && scrollContainerRef.current) {
+      // Get starting scroll position from dataset
+      const startScrollLeft = parseInt(scrollContainerRef.current.dataset.startScrollLeft || '0');
+      const startScrollTop = parseInt(scrollContainerRef.current.dataset.startScrollTop || '0');
+      
+      // Calculate how far the mouse has moved from starting position
+      const dx = e.clientX - dragStart.x;
+      const dy = e.clientY - dragStart.y;
+      
+      // Update scroll position by subtracting mouse movement from initial scroll position
+      // (moving mouse right scrolls content left)
+      scrollContainerRef.current.scrollLeft = startScrollLeft - dx;
+      scrollContainerRef.current.scrollTop = startScrollTop - dy;
+      
+      // Prevent default behaviors like text selection
+      e.preventDefault();
+    }
+  }, [isDragging, dragStart]);
+
+  // Add effect to update container cursor based on content size and tool
+  useEffect(() => {
+    const scrollContainer = scrollContainerRef.current;
+    if (!scrollContainer) return;
+    
+    const updateCursor = () => {
+      if (!page || !viewport) return;
+      
+      // Check if content is larger than container (requires panning)
+      const hasOverflow = viewport.width > scrollContainer.clientWidth || 
+                          viewport.height > scrollContainer.clientHeight;
+      
+      // Set cursor based on current state
+      if (isDragging) {
+        // Use grabbing cursor with cross-browser support via a CSS class
+        scrollContainer.classList.add(grabCursorClassName);
+        if (canvasRef.current) {
+          canvasRef.current.classList.add(grabCursorClassName);
+        }
+      } else if ((currentTool === 'hand' || currentTool === 'select') && hasOverflow) {
+        scrollContainer.classList.remove(grabCursorClassName);
+        scrollContainer.style.cursor = 'grab';
+        if (canvasRef.current) {
+          canvasRef.current.classList.remove(grabCursorClassName);
+          canvasRef.current.style.cursor = 'grab';
+        }
+      } else {
+        scrollContainer.classList.remove(grabCursorClassName);
+        const cursorMap: { [key: string]: string } = {
+          select: hasOverflow ? "grab" : "default",
+          hand: "grab",
+          freehand: "crosshair",
+          line: "crosshair",
+          arrow: "crosshair",
+          doubleArrow: "crosshair",
+          rectangle: "crosshair",
+          circle: "crosshair",
+          triangle: "crosshair",
+          text: "text",
+          stickyNote: "text",
+          highlight: "crosshair",
+          stamp: "crosshair",
+          stampApproved: "crosshair",
+          stampRejected: "crosshair",
+          stampRevision: "crosshair",
+        };
+        
+        scrollContainer.style.cursor = cursorMap[currentTool] || "default";
+        if (canvasRef.current) {
+          canvasRef.current.style.cursor = cursorMap[currentTool] || "default";
+        }
+      }
+    };
+    
+    // Update cursor on initial load and when relevant factors change
+    updateCursor();
+    
+    // Create observer to check when content dimensions change
+    const resizeObserver = new ResizeObserver(updateCursor);
+    resizeObserver.observe(scrollContainer);
+    
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, [currentTool, isDragging, page, viewport, grabCursorClassName]);
+
+  const handleMouseUp = useCallback(() => {
+    if (isDragging && scrollContainerRef.current) {
+      // Store timestamp when drag ended to prevent immediate re-centering
+      scrollContainerRef.current.dataset.dragEndTime = Date.now().toString();
+      
+      setIsDragging(false);
+      
+      // Reset cursor based on tool and content overflow
+      const hasOverflow = page && viewport && 
+        (viewport.width > scrollContainerRef.current.clientWidth || 
+         viewport.height > scrollContainerRef.current.clientHeight);
+      
+      // Remove grabbing cursor class from all elements
+      if (containerRef.current) {
+        containerRef.current.classList.remove(grabCursorClassName);
+      }
+      if (scrollContainerRef.current) {
+        scrollContainerRef.current.classList.remove(grabCursorClassName);
+      }
+      if (canvasRef.current) {
+        canvasRef.current.classList.remove(grabCursorClassName);
+      }
+      
+      // Update cursor based on tool and overflow state
+      if ((currentTool === 'hand' || currentTool === 'select') && hasOverflow) {
+        // Use grab cursor when hovering over pannable content
+        if (containerRef.current) {
+          containerRef.current.style.cursor = 'grab';
+        }
+        if (scrollContainerRef.current) {
+          scrollContainerRef.current.style.cursor = 'grab';
+        }
+        if (canvasRef.current) {
+          canvasRef.current.style.cursor = 'grab';
+        }
+      } else {
+        // Reset to appropriate tool cursor
+        const cursorMap: { [key: string]: string } = {
+          select: hasOverflow ? "grab" : "default",
+          hand: "grab",
+          freehand: "crosshair",
+          line: "crosshair",
+          arrow: "crosshair",
+          doubleArrow: "crosshair",
+          rectangle: "crosshair",
+          circle: "crosshair",
+          triangle: "crosshair",
+          text: "text",
+          stickyNote: "text",
+          highlight: "crosshair",
+          stamp: "crosshair",
+          stampApproved: "crosshair",
+          stampRejected: "crosshair",
+          stampRevision: "crosshair",
+        };
+        
+        const cursor = cursorMap[currentTool] || "default";
+        if (containerRef.current) {
+          containerRef.current.style.cursor = cursor;
+        }
+        if (scrollContainerRef.current) {
+          scrollContainerRef.current.style.cursor = cursor;
+        }
+        if (canvasRef.current) {
+          canvasRef.current.style.cursor = cursor;
+        }
+      }
+    }
+  }, [isDragging, currentTool, page, viewport, grabCursorClassName]);
+
+  // Create blue cursor images as constants at the component level
+  const BLUE_GRAB_CURSOR = `url("data:image/svg+xml,%3Csvg width='32' height='32' viewBox='0 0 32 32' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M12.5 11C12.5 8.51472 14.5147 6.5 17 6.5C19.4853 6.5 21.5 8.51472 21.5 11V19C21.5 21.4853 19.4853 23.5 17 23.5C14.5147 23.5 12.5 21.4853 12.5 19V11Z' stroke='%233B82F6' stroke-width='2'/%3E%3Cpath d='M8.5 12V10C8.5 6.13401 11.634 3 15.5 3V3C19.366 3 22.5 6.13401 22.5 10V11' stroke='%233B82F6' stroke-width='2'/%3E%3Cpath d='M4.5 14V12C4.5 6.47715 8.97715 2 14.5 2V2' stroke='%233B82F6' stroke-width='2'/%3E%3C/svg%3E")`;
+  
+  const BLUE_GRABBING_CURSOR = `url("data:image/svg+xml,%3Csvg width='32' height='32' viewBox='0 0 32 32' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M12 16V12C12 9.79086 13.7909 8 16 8V8C18.2091 8 20 9.79086 20 12V16' stroke='%233B82F6' stroke-width='2'/%3E%3Cpath d='M25 16V18C25 22.4183 21.4183 26 17 26H15C10.5817 26 7 22.4183 7 18V16' stroke='%233B82F6' stroke-width='2'/%3E%3Cpath d='M5 16H27' stroke='%233B82F6' stroke-width='2'/%3E%3C/svg%3E")`;
+
+  // Add a style tag for the grabbing cursor if it doesn't exist
+  useEffect(() => {
+    const styleId = "grabbing-cursor-style";
+    if (!document.getElementById(styleId)) {
+      const style = document.createElement("style");
+      style.id = styleId;
+      style.textContent = `
+        /* Create a blue cursor for grab and grabbing */
+        .cursor-grabbing {
+          cursor: ${BLUE_GRABBING_CURSOR} 16 16, grabbing;
+        }
+        .cursor-grab {
+          cursor: ${BLUE_GRAB_CURSOR} 16 16, grab;
+        }
+        
+        /* Only show blue grab cursor when content is pannable AND using select/hand tool */
+        [data-has-overflow="true"][data-current-tool="select"] .overflow-auto,
+        [data-has-overflow="true"][data-current-tool="hand"] .overflow-auto,
+        [data-has-overflow="true"][data-current-tool="select"] .overflow-auto canvas,
+        [data-has-overflow="true"][data-current-tool="hand"] .overflow-auto canvas,
+        .allow-panning {
+          cursor: ${BLUE_GRAB_CURSOR} 16 16, grab !important;
+        }
+        
+        /* When dragging, show grabbing cursor */
+        .is-dragging .overflow-auto,
+        .is-dragging canvas {
+          cursor: ${BLUE_GRABBING_CURSOR} 16 16, grabbing !important;
+        }
+      `;
+      document.head.appendChild(style);
+    }
+  }, []);
+
+  // Update effect to add/remove the is-dragging class for global cursor control
+  useEffect(() => {
+    // Apply is-dragging class to document body for global cursor control
+    if (isDragging) {
+      document.body.classList.add('is-dragging');
+    } else {
+      document.body.classList.remove('is-dragging');
+    }
+    
+    return () => {
+      document.body.classList.remove('is-dragging');
+    };
+  }, [isDragging]);
+
+  // Add new effect to detect overflow and update data attribute
+  useEffect(() => {
+    // Skip if necessary refs or objects aren't available
+    if (!containerRef.current || !scrollContainerRef.current || !page || !viewport) {
+      return;
+    }
+    
+    // Function to check for overflow
+    const checkForOverflow = () => {
+      const scrollContainer = scrollContainerRef.current;
+      if (!scrollContainer || !viewport) return;
+      
+      // Content is larger than container (requires panning)
+      const hasOverflow = 
+        viewport.width > scrollContainer.clientWidth || 
+        viewport.height > scrollContainer.clientHeight;
+      
+      // Update data attribute for CSS targeting
+      if (containerRef.current) {
+        containerRef.current.dataset.hasOverflow = hasOverflow.toString();
+      }
+    };
+    
+    // Check immediately
+    checkForOverflow();
+    
+    // Also check when window resizes
+    window.addEventListener('resize', checkForOverflow);
+    
+    return () => {
+      window.removeEventListener('resize', checkForOverflow);
+    };
+  }, [page, viewport]);
+
+  // Update the scroll container to conditionally apply the appropriate cursor based on tool
+  useEffect(() => {
+    // Function to update cursor and data attributes based on conditions
+    const updateCursorState = () => {
+      if (!containerRef.current || !scrollContainerRef.current || !page || !viewport) {
+        return;
+      }
+      
+      const scrollContainer = scrollContainerRef.current;
+      
+      // Check if content is larger than container (requires panning)
+      const hasOverflow = 
+        viewport.width > scrollContainer.clientWidth || 
+        viewport.height > scrollContainer.clientHeight;
+      
+      // Update data attribute for overflow state
+      containerRef.current.dataset.hasOverflow = hasOverflow.toString();
+      
+      // Update data attribute for current tool
+      containerRef.current.dataset.currentTool = currentTool;
+      
+      // Only add cursor classes if using select or hand tool AND content overflows
+      const allowPanning = hasOverflow && (currentTool === 'select' || currentTool === 'hand');
+      
+      // Set cursor class based on conditions
+      if (allowPanning) {
+        scrollContainer.classList.add('allow-panning');
+      } else {
+        scrollContainer.classList.remove('allow-panning');
+      }
+    };
+    
+    // Run immediately
+    updateCursorState();
+    
+    // Also run on resize
+    window.addEventListener('resize', updateCursorState);
+    
+    return () => {
+      window.removeEventListener('resize', updateCursorState);
+    };
+  }, [page, viewport, currentTool]);
+
   return (
     <div className="relative flex flex-col h-full">
       {isShortcutGuideOpen && (
@@ -1884,9 +2225,19 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
         </div>
       )}
 
-      <div className="pdf-container h-full flex-1 overflow-hidden" ref={containerRef}>
+      <div 
+        className="pdf-container h-full flex-1 overflow-hidden" 
+        ref={containerRef}
+        data-has-overflow="false" // Default value, will be updated by the effect
+      >
         {/* PDF Viewer - Fixed container with scrollable content */}
-        <div className="relative flex-1 overflow-auto bg-gray-100 p-2 md:p-4 h-full w-full">
+        <div 
+          className="relative flex-1 overflow-auto bg-gray-100 p-2 md:p-4 h-full w-full" 
+          ref={scrollContainerRef}
+          onMouseDown={handleMouseDown}
+          onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUp}
+        >
           {/* Initial Loading Animation - before PDF processing has started */}
           {isInitialLoading && !hasStartedLoading && !renderError && (
             <div className="absolute inset-0 flex items-center justify-center z-50 bg-white">
@@ -1984,16 +2335,20 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
           )}
           
           <div 
-            className="pdf-viewer-container mx-auto"
+            className={`pdf-viewer-container mx-auto ${isDragging ? grabCursorClassName : ""}`}
             style={{
-              width: page ? `${viewport.width}px` : '100%',
-              height: page ? `${viewport.height}px` : '100%',
+              width:  '100%',
+              height: '45vh'  ,
               position: 'relative',
               maxWidth: '100%',
               marginBottom: '20px',
               opacity: isRendering ? 0.7 : 1,
               transition: 'opacity 0.2s ease-in-out, width 0.15s ease-out, height 0.15s ease-out',
               transformOrigin: 'top left',
+              cursor: isDragging ? 'grabbing' : 
+                (((viewport?.width || 0) > (scrollContainerRef.current?.clientWidth || 0) || 
+                (viewport?.height || 0) > (scrollContainerRef.current?.clientHeight || 0)) && 
+                (currentTool === 'select' || currentTool === 'hand')) ? 'grab' : undefined
             }}
           >
             {page && (
