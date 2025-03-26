@@ -17,6 +17,7 @@ export const userService = {
     }
   },
 
+  
   async getUsersByRole(role: string): Promise<User[]> {
     try {
       const usersRef = collection(db, 'users');
