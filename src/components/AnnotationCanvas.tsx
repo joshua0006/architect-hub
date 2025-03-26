@@ -77,6 +77,8 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
   const [isTextDragging, setIsTextDragging] = useState(false);
   const [textDimensions, setTextDimensions] = useState<{ width: number; height: number } | null>(null);
   const [cursorPosition, setCursorPosition] = useState<Point | null>(null);
+  const [scrollPosition, setScrollPosition] = useState({ left: 0, top: 0 });
+  const lastScrollPosition = useRef({ left: 0, top: 0 });
 
   const store = useAnnotationStore();
   const { currentTool, currentStyle, currentDrawMode } = store;
@@ -122,18 +124,38 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
     const canvas = canvasRef.current!;
     const rect = canvas.getBoundingClientRect();
     const scrollContainer = canvas.parentElement?.parentElement;
-
+    
     if (!scrollContainer) return { x: 0, y: 0 };
-
-    // Get scroll offsets
+    
+    // Get the current scroll values
     const scrollLeft = scrollContainer.scrollLeft;
     const scrollTop = scrollContainer.scrollTop;
-
-    // Calculate the actual position considering scroll and zoom
-    const x = (e.clientX - rect.left + scrollLeft) / scale;
-    const y = (e.clientY - rect.top + scrollTop) / scale;
-
-    return { x, y };
+    
+    // Store the initial scroll position when drawing starts
+    if (!isDrawing) {
+      lastScrollPosition.current = { left: scrollLeft, top: scrollTop };
+    }
+    
+    // Calculate the scroll delta since drawing started
+    const scrollDeltaX = scrollLeft - lastScrollPosition.current.left;
+    const scrollDeltaY = scrollTop - lastScrollPosition.current.top;
+    
+    // Get correct scale between displayed size and actual canvas size
+    const scaleFactorX = canvas.width / rect.width;
+    const scaleFactorY = canvas.height / rect.height;
+    
+    // Mouse position relative to visible canvas
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+    
+    // Calculate final PDF coordinates, adjusting for scroll movement during drawing
+    const pdfX = mouseX * scaleFactorX / scale;
+    const pdfY = mouseY * scaleFactorY / scale;
+    
+    // Log for debugging
+    console.log(`Mouse: (${mouseX.toFixed(1)}, ${mouseY.toFixed(1)}), Scroll Delta: (${scrollDeltaX.toFixed(1)}, ${scrollDeltaY.toFixed(1)}), PDF: (${pdfX.toFixed(1)}, ${pdfY.toFixed(1)})`);
+    
+    return { x: pdfX, y: pdfY };
   };
 
   const getResizeHandle = (
@@ -287,9 +309,12 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
       lastPointRef.current = point;
 
       if (currentTool === "freehand") {
-        // For freehand, we start with just the initial point
-        // More points will be added during mouse move
+        // For freehand drawing, start with just the initial point
+        // Clear any previous points first to ensure a fresh drawing
         setCurrentPoints([point]);
+        
+        // Debug: log starting position
+        console.log(`Starting freehand drawing at: (${point.x.toFixed(2)}, ${point.y.toFixed(2)})`);
       } else {
         // For other shapes, initialize with start and end at the same point
         // End point will be updated during mouse move
@@ -304,9 +329,37 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
   const handleFreehandDraw = (point: Point) => {
     if (!isDrawing || currentTool !== "freehand") return;
     
-    // For freehand drawing, we need to collect all points as the user moves the cursor
-    // This provides a continuous path rather than just start and end points
-    setCurrentPoints((prev) => [...prev, point]);
+    // Get the last point from the current points array
+    const lastPoint = currentPoints[currentPoints.length - 1];
+    
+    // Calculate distance between new point and last point
+    const dx = point.x - lastPoint.x;
+    const dy = point.y - lastPoint.y;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+    
+    // Get scroll container to check if scrolling occurred
+    const scrollContainer = canvasRef.current?.parentElement?.parentElement;
+    const isScrolling = scrollContainer && 
+      (scrollContainer.scrollLeft !== lastScrollPosition.current.left || 
+       scrollContainer.scrollTop !== lastScrollPosition.current.top);
+    
+    // Add point if:
+    // 1. It's a minimum distance away from the last point (prevents too many points)
+    // 2. OR if scrolling occurred (ensures proper line connection during scrolling)
+    const MIN_DISTANCE = 2; // minimum pixels in PDF coordinate space
+    
+    if (distance >= MIN_DISTANCE || isScrolling) {
+      // If scrolling occurred, add a point at the new location
+      setCurrentPoints((prev) => [...prev, point]);
+      
+      // Update the last scroll position
+      if (scrollContainer) {
+        lastScrollPosition.current = {
+          left: scrollContainer.scrollLeft,
+          top: scrollContainer.scrollTop
+        };
+      }
+    }
     
     // Force a render to show the drawing in real-time
     render();
@@ -317,7 +370,7 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
     
     // Update cursor position for tool indicators
     setCursorPosition(point);
-
+    
     // Handle text tool dragging
     if (isTextDragging && textDragStart) {
       setTextDragEnd(point);
@@ -880,7 +933,7 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    // Clear canvas
+    // Clear the canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     // Get annotations for this page
@@ -1041,7 +1094,25 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
 
       // Handle different drawing modes
       if (currentTool === "freehand") {
-        drawSmoothFreehand(ctx, currentPoints, scale, currentStyle);
+        // For freehand drawing, use simpler drawing to ensure exact correspondence with cursor
+        ctx.beginPath();
+        
+        // Start at the first point
+        if (currentPoints.length > 0) {
+          const firstPoint = currentPoints[0];
+          ctx.moveTo(firstPoint.x * scale, firstPoint.y * scale);
+          
+          // Draw straight line segments to all points
+          for (let i = 1; i < currentPoints.length; i++) {
+            const point = currentPoints[i];
+            ctx.lineTo(point.x * scale, point.y * scale);
+          }
+          
+          // Use rounded line joins and caps for smoother appearance
+          ctx.lineCap = "round";
+          ctx.lineJoin = "round";
+          ctx.stroke();
+        }
       } else if (currentTool === "line") {
         drawLine(ctx, currentPoints, scale);
       } else if (currentTool === "rectangle") {
@@ -1711,6 +1782,67 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
     ctx.restore();
   };
 
+  // Add effect to listen for scroll events
+  useEffect(() => {
+    const scrollContainer = canvasRef.current?.parentElement?.parentElement;
+    if (!scrollContainer) return;
+
+    const handleScroll = () => {
+      const newScrollLeft = scrollContainer.scrollLeft;
+      const newScrollTop = scrollContainer.scrollTop;
+      
+      // Update last scroll position for drawing calculations
+      lastScrollPosition.current = { left: newScrollLeft, top: newScrollTop };
+      
+      // Update state to trigger re-render
+      setScrollPosition({ left: newScrollLeft, top: newScrollTop });
+      
+      // If currently drawing, force re-render to ensure drawing follows cursor
+      if (isDrawing) {
+        render();
+      }
+    };
+
+    scrollContainer.addEventListener('scroll', handleScroll);
+    return () => scrollContainer.removeEventListener('scroll', handleScroll);
+  }, [isDrawing]);
+
+  // Add effect to handle scrolling during drawing
+  useEffect(() => {
+    const scrollContainer = canvasRef.current?.parentElement?.parentElement;
+    if (!scrollContainer) return;
+    
+    // Function to prevent scrolling during active drawing
+    const preventScroll = (e: WheelEvent) => {
+      if (isDrawing && currentTool === 'freehand') {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+    
+    // Add wheel event listener with passive: false to allow preventDefault
+    scrollContainer.addEventListener('wheel', preventScroll, { passive: false });
+    
+    return () => {
+      scrollContainer.removeEventListener('wheel', preventScroll);
+    };
+  }, [isDrawing, currentTool]);
+
+  // Enhance mouseDown to record initial scroll position
+  const handleMouseDownEnhanced = (e: React.MouseEvent) => {
+    // Initialize scroll position when drawing starts
+    const scrollContainer = canvasRef.current?.parentElement?.parentElement;
+    if (scrollContainer) {
+      lastScrollPosition.current = {
+        left: scrollContainer.scrollLeft,
+        top: scrollContainer.scrollTop
+      };
+    }
+    
+    // Call the original handler
+    handleMouseDown(e);
+  };
+
   return (
     <>
       <canvas
@@ -1718,7 +1850,7 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
         width={width}
         height={height}
         className="absolute inset-0 z-10"
-        onMouseDown={handleMouseDown}
+        onMouseDown={handleMouseDownEnhanced}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseLeave}
