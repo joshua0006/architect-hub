@@ -117,6 +117,18 @@ export default function DocumentActions({
         await onRefresh();
       }
       
+      // Dispatch event for successful upload - this will be listened for by DocumentList
+      const uploadSuccessEvent = new CustomEvent('document-upload-success', {
+        bubbles: true,
+        detail: {
+          folderId: currentFolderId,
+          timestamp: Date.now(),
+          fileCount: files.length
+        }
+      });
+      document.dispatchEvent(uploadSuccessEvent);
+      console.log(`[Document Actions] Dispatched upload success event for folder: ${currentFolderId}`);
+      
       // Reset the input
       if (fileInputRef.current) {
         fileInputRef.current.value = "";

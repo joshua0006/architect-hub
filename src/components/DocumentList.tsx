@@ -36,6 +36,7 @@ import { NOTIFICATION_DOCUMENT_UPDATE_EVENT } from './NotificationIcon';
 import { doc, updateDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { collection, query, where, getDocs, orderBy, limit } from 'firebase/firestore';
+import { subscribeToFolderDocuments, DOCUMENT_UPDATE_EVENT, triggerDocumentUpdate } from "../services/documentSubscriptionService";
 
 // Local type definition for the DocumentViewer's Folder type
 interface ViewerFolder {
@@ -176,6 +177,11 @@ export default function DocumentList({
     failed: 0
   });
 
+  // Add state for real-time document updates
+  const [localDocuments, setLocalDocuments] = useState<Document[]>(documents);
+  const unsubscribeRef = useRef<(() => void) | null>(null);
+  const hasActiveSubscription = useRef<boolean>(false);
+
   // Set initial values when popup opens - moved from renderEditPopup
   useEffect(() => {
     if (popupItem) {
@@ -201,18 +207,25 @@ export default function DocumentList({
 
   // Filter and sort documents and folders based on search, view filter, and sort order
   const filteredAndSortedItems = () => {
-    // Apply search filter
-    let filteredDocs = allDocs.filter(doc => 
+    // Apply search filter for documents
+    let filteredDocs = isSharedView 
+      ? (sharedDocuments || []) 
+      : localDocuments.filter(doc => doc.folderId === currentFolder?.id);
+    
+    filteredDocs = filteredDocs.filter(doc => 
       doc.name && typeof doc.name === 'string' ? 
       doc.name.toLowerCase().includes(searchQuery.toLowerCase()) : 
       false
     );
     
-    let filteredFolders = allFolders.filter(folder => 
-      folder.name && typeof folder.name === 'string' ? 
-      folder.name.toLowerCase().includes(searchQuery.toLowerCase()) : 
-      false
-    );
+    // Apply search filter for folders
+    let filteredFolders = isSharedView 
+      ? (sharedFolders || []) 
+      : allFolders.filter(folder => 
+          folder.name && typeof folder.name === 'string' ? 
+          folder.name.toLowerCase().includes(searchQuery.toLowerCase()) : 
+          false
+        );
 
     // Apply permission filter based on user role
     if (user?.role !== 'Staff' && user?.role !== 'Admin') {
@@ -468,6 +481,20 @@ export default function DocumentList({
       } else {
         onDeleteFolder(itemToDelete.id);
       }
+      
+      // Dispatch event for successful deletion
+      const deleteSuccessEvent = new CustomEvent('document-delete-success', {
+        bubbles: true,
+        detail: {
+          folderId: currentFolder?.id,
+          itemId: itemToDelete.id,
+          itemType: itemToDelete.type,
+          timestamp: Date.now()
+        }
+      });
+      document.dispatchEvent(deleteSuccessEvent);
+      console.log(`[Document List] Dispatched delete success event for ${itemToDelete.type}: ${itemToDelete.id}`);
+      
       showToast(`${itemToDelete.name} deleted successfully`, 'success');
     } catch (error) {
       console.error('Delete failed:', error);
@@ -1721,6 +1748,116 @@ export default function DocumentList({
     document.addEventListener('mousedown', handleClickOutsideSort);
     return () => document.removeEventListener('mousedown', handleClickOutsideSort);
   }, []);
+
+  // Use the initial documents as the starting point
+  useEffect(() => {
+    setLocalDocuments(documents);
+  }, [documents]);
+
+  // Setup real-time document subscription
+  useEffect(() => {
+    // Only set up subscription if we have a currentFolder and we're not in shared view
+    if (!currentFolder || isSharedView) {
+      // Cleanup any existing subscription
+      if (unsubscribeRef.current) {
+        console.log('[Document List] Cleaning up document subscription due to folder change');
+        unsubscribeRef.current();
+        unsubscribeRef.current = null;
+        hasActiveSubscription.current = false;
+      }
+      return;
+    }
+
+    // Don't create multiple subscriptions for the same folder
+    if (hasActiveSubscription.current && unsubscribeRef.current) {
+      console.log(`[Document List] Already have an active subscription for this folder`);
+      return;
+    }
+
+    console.log(`[Document List] Setting up real-time document subscription for folder: ${currentFolder.id}`);
+    
+    // Set up the subscription
+    const unsubscribe = subscribeToFolderDocuments(currentFolder.id, (updatedDocuments) => {
+      console.log(`[Document List] Received ${updatedDocuments.length} documents from real-time update`);
+      
+      // Update local state with the latest documents
+      setLocalDocuments(updatedDocuments);
+    });
+    
+    // Store the unsubscribe function
+    unsubscribeRef.current = unsubscribe;
+    hasActiveSubscription.current = true;
+    
+    // Cleanup on unmount or when the folder changes
+    return () => {
+      if (unsubscribeRef.current) {
+        console.log('[Document List] Cleaning up document subscription');
+        unsubscribeRef.current();
+        unsubscribeRef.current = null;
+        hasActiveSubscription.current = false;
+      }
+    };
+  }, [currentFolder, isSharedView]);
+
+  // Listen for document update events from other sources
+  useEffect(() => {
+    const handleDocumentUpdate = (event: Event) => {
+      const customEvent = event as CustomEvent;
+      const { folderId, source } = customEvent.detail;
+      
+      console.log(`[Document List] Document update event received from ${source}:`, customEvent.detail);
+      
+      // If this update is for our current folder, refresh
+      if (currentFolder && folderId === currentFolder.id) {
+        console.log(`[Document List] Updating for folder match: ${folderId}`);
+        if (onRefresh) {
+          onRefresh();
+        }
+      }
+    };
+    
+    // Listen for both notification updates and direct document updates
+    document.addEventListener(NOTIFICATION_DOCUMENT_UPDATE_EVENT, handleDocumentUpdate);
+    document.addEventListener(DOCUMENT_UPDATE_EVENT, handleDocumentUpdate);
+    
+    return () => {
+      document.removeEventListener(NOTIFICATION_DOCUMENT_UPDATE_EVENT, handleDocumentUpdate);
+      document.removeEventListener(DOCUMENT_UPDATE_EVENT, handleDocumentUpdate);
+    };
+  }, [currentFolder, onRefresh]);
+
+  // When files are uploaded or deleted, set up listeners for the events
+  useEffect(() => {
+    // Only add these event listeners when we're in a folder
+    if (!currentFolder) return;
+    
+    // Define handler for successful file operations
+    const handleFileOperationSuccess = () => {
+      console.log(`[Document List] File operation completed, triggering update for folder: ${currentFolder.id}`);
+      
+      // Trigger document update event
+      triggerDocumentUpdate(currentFolder.id);
+      
+      // Also call onRefresh if available
+      if (onRefresh) {
+        onRefresh();
+      }
+    };
+    
+    // Define custom events for file operations
+    const FILE_UPLOAD_SUCCESS_EVENT = 'document-upload-success';
+    const FILE_DELETE_SUCCESS_EVENT = 'document-delete-success';
+    
+    // Add event listeners
+    document.addEventListener(FILE_UPLOAD_SUCCESS_EVENT, handleFileOperationSuccess);
+    document.addEventListener(FILE_DELETE_SUCCESS_EVENT, handleFileOperationSuccess);
+    
+    // Return cleanup function
+    return () => {
+      document.removeEventListener(FILE_UPLOAD_SUCCESS_EVENT, handleFileOperationSuccess);
+      document.removeEventListener(FILE_DELETE_SUCCESS_EVENT, handleFileOperationSuccess);
+    };
+  }, [currentFolder, onRefresh]);
 
   return (
     <div 
