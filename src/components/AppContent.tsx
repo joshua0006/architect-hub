@@ -11,6 +11,7 @@ import Settings from './Settings';
 import TeamList from './TeamList';
 import TaskList from './TaskList';
 import AccountSettings from './AccountSettings';
+import TaskTreeExample from '../pages/TaskTreeExample';
 import { Project, Folder, Document } from '../types';
 import { projectService } from '../services';
 import { sampleTasks, sampleTeamMembers } from '../data/sampleData';
@@ -1059,6 +1060,8 @@ export default function AppContent() {
             />
           }
         />
+
+        <Route path="/task-tree-example" element={<TaskTreeExample />} />
       </Routes>
     </AnimatePresence>
   );
