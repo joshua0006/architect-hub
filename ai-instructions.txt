@@ -1,0 +1,118 @@
+the Login user can have the Role of 
+
+Staff, Contractor and Client 
+
+and on the Folder this is the Permission
+
+Staff Only
+Only staff members can view this folder
+
+
+Contractors Write
+Contractors can read and write to this folder
+
+
+Clients Read
+Clients can read but not modify this folder
+
+
+All Users
+Everyone with project access can view this folder
+
+from the folder data in firebase it has this field
+
+metadata access
+
+and this can be the value
+STAFF_ONLY - the logged in user with Role Staff can only view the folder and it child folers, but cannot upload button is disabled, and on the pdf can view also can edit
+
+
+the Login user can have the Role of 
+
+Staff, Contractor and Client 
+
+and on the Folder this is the Permission
+
+Staff Only
+Only staff members can view this folder
+
+
+Contractors Write
+Contractors can read and write to this folder
+
+
+Clients Read
+Clients can read but not modify this folder
+
+
+All Users
+Everyone with project access can view this folder
+
+from the folder data in firebase it has this field
+
+metadata access
+
+and this can be the value
+STAFF_ONLY - the logged in user with Role Staff can only view the folder and it child folers, but cannot upload button is disabled, and on the pdf can view also can edit
+
+CONTRACTORS_WRITE - the logged in user with Role Contractor can view/edit the folder, can upload button is enabled and can view/edit on the pdf view
+
+CLIENTS_READ- the logged in user with Role Client can only view the folder and it child folers, but cannot upload button is disabled, and on the pdf can view also can edit
+
+ALL -- the logged in user with any role  can view/edit the folder, can upload and can view/edit on the pdf view
+
+
+also if the User Role of the logged in user does not match to the folder permission access then make it  can only view the folder and it child folers, but cannot upload button is disabled, and on the pdf can view also can edit exept if the Folder Permission is all
+
+
+
+and please dont make any change color of the ui
+
+CONTRACTORS_WRITE - the logged in user with Role Contractor can view/edit the folder, can upload button is enabled and can view/edit on the pdf view
+
+CLIENTS_READ- the logged in user with Role Client can only view the folder and it child folers, but cannot upload button is disabled, and on the pdf can view also can edit
+
+ALL -- the logged in user with any role  can view/edit the folder, can upload and can view/edit on the pdf view
+
+
+also if the User Role of the logged in user does not match to the folder permission access then make it  can only view the folder and it child folers, but cannot upload button is disabled, and on the pdf can view also can edit exept if the Folder Permission is all
+
+
+the Login user can have the Role of 
+
+Staff, Contractor and Client 
+
+and on the Folder this is the Permission
+
+Staff Only
+Only staff members can view this folder
+
+
+Contractors Write
+Contractors can read and write to this folder
+
+
+Clients Read
+Clients can read but not modify this folder
+
+
+All Users
+Everyone with project access can view this folder
+
+from the folder data in firebase it has this field
+
+metadata access
+
+and this can be the value
+STAFF_ONLY - the logged in user with Role Staff can only view the folder and it child folers, but cannot upload button is disabled, and on the pdf can view also can edit
+
+CONTRACTORS_WRITE - the logged in user with Role Contractor can view/edit the folder, can upload button is enabled and can view/edit on the pdf view
+
+CLIENTS_READ- the logged in user with Role Client can only view the folder and it child folers, but cannot upload button is disabled, and on the pdf can view also can edit
+
+ALL -- the logged in user with any role  can view/edit the folder, can upload and can view/edit on the pdf view
+
+
+also if the User Role of the logged in user does not match to the folder permission access then make it  can only view the folder and it child folers, but cannot upload button is disabled, and on the pdf can view also can edit exept if the Folder Permission is all
+
+
