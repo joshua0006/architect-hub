@@ -17,7 +17,25 @@ export const userService = {
     }
   },
 
-  
+  async getById(userId: string): Promise<User | null> {
+    try {
+      const userRef = doc(db, 'users', userId);
+      const userSnap = await getDoc(userRef);
+      
+      if (!userSnap.exists()) {
+        return null;
+      }
+      
+      return {
+        id: userSnap.id,
+        ...userSnap.data()
+      } as User;
+    } catch (error) {
+      console.error(`Error fetching user with ID ${userId}:`, error);
+      return null;
+    }
+  },
+
   async getUsersByRole(role: string): Promise<User[]> {
     try {
       const usersRef = collection(db, 'users');
@@ -308,6 +326,46 @@ export const userService = {
     } catch (error) {
       console.error('Error updating user role:', error);
       throw new Error('Failed to update user role');
+    }
+  },
+
+  async saveProjectOrder(userId: string, projectIds: string[]): Promise<void> {
+    try {
+      if (!userId) {
+        throw new Error('User ID is required to save project order');
+      }
+
+      const userRef = doc(db, 'users', userId);
+      await updateDoc(userRef, {
+        'preferences.projectOrder': projectIds,
+        'metadata.updatedAt': new Date().toISOString()
+      });
+      
+      console.log(`Saved project order for user ${userId}:`, projectIds);
+    } catch (error) {
+      console.error('Error saving project order:', error);
+      throw new Error('Failed to save project order');
+    }
+  },
+
+  async getProjectOrder(userId: string): Promise<string[] | null> {
+    try {
+      if (!userId) {
+        return null;
+      }
+
+      const userRef = doc(db, 'users', userId);
+      const userDoc = await getDoc(userRef);
+      
+      if (!userDoc.exists()) {
+        return null;
+      }
+      
+      const userData = userDoc.data();
+      return userData?.preferences?.projectOrder || null;
+    } catch (error) {
+      console.error('Error getting project order:', error);
+      return null;
     }
   }
 };

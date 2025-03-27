@@ -31,7 +31,7 @@ export default function ProjectDetails({
   const [loadingTeamMembers, setLoadingTeamMembers] = useState(false);
   const [showAddMemberDialog, setShowAddMemberDialog] = useState(false);
 
-  const { milestones, createMilestone, updateMilestone, deleteMilestone } =
+  const { milestones, createMilestone, updateMilestone, deleteMilestone, reorderMilestones } =
     useMilestoneManager(project.id);
 
   const progress = calculateMilestoneProgress(milestones);
@@ -285,6 +285,7 @@ export default function ProjectDetails({
         onCreateMilestone={createMilestone}
         onUpdateMilestone={updateMilestone}
         onDeleteMilestone={deleteMilestone}
+        onReorderMilestones={reorderMilestones}
       />
 
       {/* Edit Project Modal */}

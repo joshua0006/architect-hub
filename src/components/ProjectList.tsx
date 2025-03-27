@@ -2,11 +2,12 @@ import { Search, Plus, Archive, CheckCircle2, Clock, Trash2, AlertCircle, ArrowU
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
+import { DragDropContext, Droppable, Draggable, DropResult } from 'react-beautiful-dnd';
 import { Project, Task } from "../types";
 import AddProject from "./AddProject";
 import { useMilestoneManager } from "../hooks/useMilestoneManager";
 import { calculateMilestoneProgress } from "../utils/progressCalculator";
-import { projectService } from "../services";
+import { projectService, userService } from "../services";
 import { useToast } from "../contexts/ToastContext";
 import { useAuth } from "../contexts/AuthContext";
 
@@ -60,6 +61,7 @@ interface ProjectItemProps {
   onDeleteProject: (projectId: string) => void;
   tasks: Task[];
   isDeletingProject: string | null;
+  index: number;
 }
 
 const ProjectItem = ({
@@ -70,6 +72,7 @@ const ProjectItem = ({
   onDeleteProject,
   tasks,
   isDeletingProject,
+  index
 }: ProjectItemProps) => {
   const [showStatusMenu, setShowStatusMenu] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -246,67 +249,78 @@ const ProjectItem = ({
 
   return (
     <>
-      <motion.div
-        onClick={handleCardClick}
-        className={`w-full p-4 text-left rounded-lg transition-all duration-300 hover:scale-[1.01] cursor-pointer ${
-          selectedId === project.id
-            ? "bg-primary-50 border-primary-200"
-            : "bg-white border-gray-200 hover:bg-gray-50"
-        } border card-shadow relative ${isDeletingProject === project.id ? 'opacity-70' : ''}`}
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, y: -20 }}
-      >
-        {isDeletingProject === project.id && (
-          <div className="absolute inset-0 flex items-center justify-center bg-white bg-opacity-70 rounded-lg z-10">
-            <div className="flex flex-col items-center space-y-2">
-              <Loader2 className="w-8 h-8 animate-spin text-primary-600" />
-              <span className="text-sm text-gray-600">Deleting project...</span>
-            </div>
+      <Draggable draggableId={project.id} index={index}>
+        {(provided) => (
+          <div
+            ref={provided.innerRef}
+            {...provided.draggableProps}
+            {...provided.dragHandleProps}
+            className="mb-2"
+          >
+            <motion.div
+              onClick={handleCardClick}
+              className={`w-full p-4 text-left rounded-lg transition-all duration-300 hover:scale-[1.01] cursor-pointer ${
+                selectedId === project.id
+                  ? "bg-primary-50 border-primary-200"
+                  : "bg-white border-gray-200 hover:bg-gray-50"
+              } border card-shadow relative ${isDeletingProject === project.id ? 'opacity-70' : ''}`}
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+            >
+              {isDeletingProject === project.id && (
+                <div className="absolute inset-0 flex items-center justify-center bg-white bg-opacity-70 rounded-lg z-10">
+                  <div className="flex flex-col items-center space-y-2">
+                    <Loader2 className="w-8 h-8 animate-spin text-primary-600" />
+                    <span className="text-sm text-gray-600">Deleting project...</span>
+                  </div>
+                </div>
+              )}
+              
+              <div className="flex items-start justify-between">
+                <div className="flex-1">
+                  <h3 className="font-medium text-gray-900">{project.name}</h3>
+                  {project.client ? (
+                    <p className="text-sm text-gray-500 mt-1">{project.client}</p>
+                  ) : (
+                    <br />
+                  )}
+                </div>
+                
+                {renderStatusMenu()}
+              </div>
+
+              <div className="mt-4 space-y-2">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-gray-600">Progress</span>
+                  <motion.span
+                    key={`progress-text-${progress}`}
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="font-medium"
+                  >
+                    {progress}%
+                  </motion.span>
+                </div>
+                <div className="relative h-2 bg-gray-100 rounded-full overflow-hidden">
+                  <motion.div
+                    key={`progress-bar-${project.id}-${progress}`}
+                    className={`absolute left-0 top-0 h-full rounded-full ${getProgressColor(
+                      progress
+                    )}`}
+                    initial={{ width: `${prevProgressRef.current}%` }}
+                    animate={{ width: `${progress}%` }}
+                    transition={{
+                      duration: getAnimationDuration(progress, prevProgressRef.current),
+                      ease: [0.4, 0, 0.2, 1],
+                    }}
+                  />
+                </div>
+              </div>
+            </motion.div>
           </div>
         )}
-        
-        <div className="flex items-start justify-between">
-          <div className="flex-1">
-            <h3 className="font-medium text-gray-900">{project.name}</h3>
-            {project.client ? (
-              <p className="text-sm text-gray-500 mt-1">{project.client}</p>
-            ) : (
-              <br />
-            )}
-          </div>
-          
-          {renderStatusMenu()}
-        </div>
-
-        <div className="mt-4 space-y-2">
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-gray-600">Progress</span>
-            <motion.span
-              key={`progress-text-${progress}`}
-              initial={{ opacity: 0, y: -10 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="font-medium"
-            >
-              {progress}%
-            </motion.span>
-          </div>
-          <div className="relative h-2 bg-gray-100 rounded-full overflow-hidden">
-            <motion.div
-              key={`progress-bar-${project.id}-${progress}`}
-              className={`absolute left-0 top-0 h-full rounded-full ${getProgressColor(
-                progress
-              )}`}
-              initial={{ width: `${prevProgressRef.current}%` }}
-              animate={{ width: `${progress}%` }}
-              transition={{
-                duration: getAnimationDuration(progress, prevProgressRef.current),
-                ease: [0.4, 0, 0.2, 1],
-              }}
-            />
-          </div>
-        </div>
-      </motion.div>
+      </Draggable>
 
       <AnimatePresence>
         {showDeleteConfirm && (
@@ -341,7 +355,8 @@ export default function ProjectList({
   const [showAddProject, setShowAddProject] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [filteredProjects, setFilteredProjects] = useState(projects);
-  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
+  const [projectOrder, setProjectOrder] = useState<Project[]>([]);
+  const [isOrderLoaded, setIsOrderLoaded] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
   const isProjectTab = location.pathname === "/";
@@ -349,8 +364,52 @@ export default function ProjectList({
   const { showToast } = useToast();
   const { user } = useAuth();
 
+  // Load user's saved project order
   useEffect(() => {
-    const filtered = projects
+    const loadSavedOrder = async () => {
+      if (!user?.id || projects.length === 0) return;
+      
+      try {
+        const savedOrder = await userService.getProjectOrder(user.id);
+        
+        if (savedOrder && savedOrder.length > 0) {
+          // Create a map for quick lookup
+          const projectMap = new Map(projects.map(p => [p.id, p]));
+          
+          // Create ordered array from saved IDs, only including projects that exist
+          const orderedProjects = savedOrder
+            .map(id => projectMap.get(id))
+            .filter(p => p !== undefined) as Project[];
+          
+          // Add any projects that aren't in saved order at the end
+          projects.forEach(project => {
+            if (!savedOrder.includes(project.id)) {
+              orderedProjects.push(project);
+            }
+          });
+          
+          setProjectOrder(orderedProjects);
+          console.log('Loaded custom project order from user preferences');
+        } else {
+          setProjectOrder(projects);
+        }
+      } catch (error) {
+        console.error('Error loading saved project order:', error);
+        setProjectOrder(projects);
+      } finally {
+        setIsOrderLoaded(true);
+      }
+    };
+    
+    loadSavedOrder();
+  }, [user, projects]);
+
+  useEffect(() => {
+    // Only apply filtering after the custom order is loaded
+    if (!isOrderLoaded) return;
+    
+    // Filter projects without sorting by name
+    const filtered = projectOrder
       .filter((project) => project.status !== "archived")
       .filter((project) => {
         const searchLower = searchQuery.toLowerCase();
@@ -364,22 +423,35 @@ export default function ProjectList({
         );
       });
     
-    const sorted = [...filtered].sort((a, b) => {
-      const nameA = a.name.toLowerCase();
-      const nameB = b.name.toLowerCase();
-      
-      if (sortOrder === 'asc') {
-        return nameA.localeCompare(nameB);
-      } else {
-        return nameB.localeCompare(nameA);
-      }
-    });
-    
-    setFilteredProjects(sorted);
-  }, [searchQuery, projects, sortOrder]);
+    setFilteredProjects(filtered);
+  }, [searchQuery, projectOrder, isOrderLoaded]);
 
-  const toggleSortOrder = () => {
-    setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
+  const handleDragEnd = (result: DropResult) => {
+    const { destination, source } = result;
+
+    // If dropped outside the list or didn't move
+    if (!destination || (destination.index === source.index)) {
+      return;
+    }
+
+    // Reorder the list
+    const newOrder = Array.from(projectOrder);
+    const [removed] = newOrder.splice(source.index, 1);
+    newOrder.splice(destination.index, 0, removed);
+
+    setProjectOrder(newOrder);
+    
+    // Save the new order to user preferences
+    if (user?.id) {
+      const projectIds = newOrder.map(project => project.id);
+      userService.saveProjectOrder(user.id, projectIds)
+        .then(() => {
+          console.log('Project order saved to user preferences');
+        })
+        .catch(error => {
+          console.error('Error saving project order:', error);
+        });
+    }
   };
 
   const handleProjectSelect = (project: Project) => {
@@ -494,15 +566,6 @@ export default function ProjectList({
               </motion.button>
             )}
           </div>
-          
-          <button
-            onClick={toggleSortOrder}
-            className="px-3 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-all duration-300 flex items-center space-x-2 flex-shrink-0"
-            title={`Sort by name (${sortOrder === 'asc' ? 'A-Z' : 'Z-A'})`}
-          >
-            <ArrowUpDown className="w-4 h-4" />
-            <span className="hidden sm:inline">{sortOrder === 'asc' ? 'A-Z' : 'Z-A'}</span>
-          </button>
         </div>
         
         <div className="flex w-full">
@@ -530,38 +593,50 @@ export default function ProjectList({
       </div>
 
       <motion.div className="p-4 space-y-4">
-        <AnimatePresence mode="wait">
-          {filteredProjects.length > 0 ? (
-            <div className="space-y-2">
-              {filteredProjects.map((project) => (
-                <ProjectItem
-                  key={project.id}
-                  project={project}
-                  selectedId={selectedId}
-                  onSelect={handleProjectSelect}
-                  onStatusChange={handleStatusChange}
-                  onDeleteProject={handleDeleteProject}
-                  tasks={tasks}
-                  isDeletingProject={isDeletingProject}
-                />
-              ))}
-            </div>
-          ) : (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="text-center py-8"
-            >
-              <p className="text-gray-500">No projects found</p>
-              {searchQuery && (
-                <p className="text-sm text-gray-400 mt-2">
-                  Try adjusting your search terms
-                </p>
-              )}
-            </motion.div>
-          )}
-        </AnimatePresence>
+        <DragDropContext onDragEnd={handleDragEnd}>
+          <AnimatePresence mode="wait">
+            {projectOrder.length > 0 ? (
+              <Droppable droppableId="projects-list">
+                {(provided) => (
+                  <div
+                    ref={provided.innerRef}
+                    {...provided.droppableProps}
+                    className="space-y-2"
+                  >
+                    {projectOrder.map((project, index) => (
+                      <ProjectItem
+                        key={project.id}
+                        project={project}
+                        selectedId={selectedId}
+                        onSelect={handleProjectSelect}
+                        onStatusChange={handleStatusChange}
+                        onDeleteProject={handleDeleteProject}
+                        tasks={tasks}
+                        isDeletingProject={isDeletingProject}
+                        index={index}
+                      />
+                    ))}
+                    {provided.placeholder}
+                  </div>
+                )}
+              </Droppable>
+            ) : (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="text-center py-8"
+              >
+                <p className="text-gray-500">No projects found</p>
+                {searchQuery && (
+                  <p className="text-sm text-gray-400 mt-2">
+                    Try adjusting your search terms
+                  </p>
+                )}
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </DragDropContext>
       </motion.div>
 
       {showAddProject && (
