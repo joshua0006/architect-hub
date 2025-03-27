@@ -14,7 +14,6 @@ import SharedContent from './components/SharedContent';
 import { Toolbar } from './components/Toolbar';
 import TokenUpload from './components/TokenUpload';
 import UserGroupManagement from './components/UserGroupManagement';
-import TaskDemo from './components/TaskDemo';
 
 // Protected Route Component
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -88,7 +87,6 @@ export const App: React.FC = () => {
               <Routes>
                 <Route path="/signin" element={<SignIn />} />
                 <Route path="/signup" element={<SignUp />} />
-                <Route path="/task-demo" element={<TaskDemo />} />
                 <Route
                   path="/admin/user-groups"
                   element={

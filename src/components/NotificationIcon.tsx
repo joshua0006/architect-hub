@@ -292,27 +292,6 @@ export const NotificationIcon: React.FC = () => {
       if (notification.link) {
         console.log('Navigating to link:', notification.link);
         
-        // Check if this is a task notification
-        const isTaskNotification = notification.iconType === 'task-assignment';
-        
-        if (isTaskNotification) {
-          // For task notifications, use the taskId from metadata
-          const taskId = notification.metadata?.taskId;
-          const projectId = notification.metadata?.projectId;
-          
-          if (taskId && projectId) {
-            // Navigate to the project's tasks page with the specific task highlighted
-            navigate(`/projects/${projectId}/tasks?task=${taskId}`, { 
-              state: { 
-                fromNotification: true,
-                highlightTaskId: taskId,
-                timestamp: Date.now()
-              }
-            });
-            return;
-          }
-        }
-        
         // Extract the folder ID from the link or from metadata
         let folderId = notification.metadata?.folderId;
         if (!folderId && notification.link.includes('/folders/')) {

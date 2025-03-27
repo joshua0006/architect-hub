@@ -81,9 +81,6 @@ interface Document {
 interface Folder {
   id: string;
   name: string;
-  projectId?: string;
-  parentId?: string;
-  metadata?: any;
 }
 
 interface Comment extends DocumentComment {

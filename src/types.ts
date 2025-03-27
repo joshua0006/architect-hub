@@ -94,13 +94,11 @@ export interface Task {
   projectId: string;
   title: string;
   description: string;
-  assignedTo: string[];
+  assignedTo: string;
   dueDate: string;
   priority: 'low' | 'medium' | 'high';
   status: 'todo' | 'in-progress' | 'completed';
   category: string;
-  parentTaskId?: string; // Reference to parent task if this is a subtask
-  subtasks?: Task[]; // Array of subtasks
   metadata?: {
     createdBy: string;
     createdAt: string;

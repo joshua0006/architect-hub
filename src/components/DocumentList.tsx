@@ -137,11 +137,8 @@ export default function DocumentList({
     "all"
   );
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
-  const [sortBy, setSortBy] = useState<"name" | "dateModified" | "dateCreated">("name");
   const [showFilterDropdown, setShowFilterDropdown] = useState(false);
-  const [showSortDropdown, setShowSortDropdown] = useState(false);
   const filterRef = useRef<HTMLDivElement>(null);
-  const sortRef = useRef<HTMLDivElement>(null);
 
   // Add new state for rename dialog
   const [renameDialogOpen, setRenameDialogOpen] = useState(false);
@@ -281,46 +278,20 @@ export default function DocumentList({
       filteredDocs = [];
     }
 
-    // Sort documents and folders based on sortBy and sortOrder
-    const sortFunction = (a: any, b: any) => {
-      if (sortBy === 'name') {
-        const aName = a.name && typeof a.name === 'string' ? a.name.toLowerCase() : '';
-        const bName = b.name && typeof b.name === 'string' ? b.name.toLowerCase() : '';
-        // Sort numbers before letters
-        const aIsNumber = /^\d+/.test(aName);
-        const bIsNumber = /^\d+/.test(bName);
-        
-        if (aIsNumber && !bIsNumber) return sortOrder === 'asc' ? -1 : 1;
-        if (!aIsNumber && bIsNumber) return sortOrder === 'asc' ? 1 : -1;
-        if (aIsNumber && bIsNumber) {
-          // Extract numbers from the start of the string
-          const aNumMatch = aName.match(/^\d+/);
-          const bNumMatch = bName.match(/^\d+/);
-          if (aNumMatch && bNumMatch) {
-            const aNum = parseInt(aNumMatch[0]);
-            const bNum = parseInt(bNumMatch[0]);
-            if (aNum !== bNum) {
-              return sortOrder === 'asc' ? aNum - bNum : bNum - aNum;
-            }
-          }
-        }
-        const comparison = aName.localeCompare(bName);
-        return sortOrder === 'asc' ? comparison : -comparison;
-      } else if (sortBy === 'dateModified') {
-        const aDate = a.dateModified ? new Date(a.dateModified) : new Date(0);
-        const bDate = b.dateModified ? new Date(b.dateModified) : new Date(0);
-        return sortOrder === 'asc' ? aDate.getTime() - bDate.getTime() : bDate.getTime() - aDate.getTime();
-      } else if (sortBy === 'dateCreated') {
-        const aDate = a.createdAt ? new Date(a.createdAt) : new Date(0);
-        const bDate = b.createdAt ? new Date(b.createdAt) : new Date(0);
-        return sortOrder === 'asc' ? aDate.getTime() - bDate.getTime() : bDate.getTime() - aDate.getTime();
-      }
-      
-      return 0;
-    };
+    // Sort documents and folders
+    filteredDocs.sort((a, b) => {
+      const aName = a.name && typeof a.name === 'string' ? a.name.toLowerCase() : '';
+      const bName = b.name && typeof b.name === 'string' ? b.name.toLowerCase() : '';
+      const comparison = aName.localeCompare(bName);
+      return sortOrder === 'asc' ? comparison : -comparison;
+    });
 
-    filteredDocs.sort(sortFunction);
-    filteredFolders.sort(sortFunction);
+    filteredFolders.sort((a, b) => {
+      const aName = a.name && typeof a.name === 'string' ? a.name.toLowerCase() : '';
+      const bName = b.name && typeof b.name === 'string' ? b.name.toLowerCase() : '';
+      const comparison = aName.localeCompare(bName);
+      return sortOrder === 'asc' ? comparison : -comparison;
+    });
 
     return { filteredDocs, filteredFolders };
   };
@@ -330,12 +301,6 @@ export default function DocumentList({
   // Toggle sort order
   const toggleSortOrder = () => {
     setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
-  };
-  
-  // Change sort field
-  const changeSortBy = (sortField: 'name' | 'dateModified' | 'dateCreated') => {
-    setSortBy(sortField);
-    setShowSortDropdown(false);
   };
 
   // Toggle view filter
@@ -484,13 +449,50 @@ export default function DocumentList({
   };
 
   const renderBreadcrumbs = () => {
+    if (selectedDocument) {
+      const currentFolder = folders.find(
+        (f) => f.id === selectedDocument.folderId
+      );
+
+      return (
+        <nav
+          className="flex items-center text-sm text-gray-600 px-4 pt-2"
+          aria-label="Breadcrumb"
+        >
+          <button
+            onClick={() => handleBreadcrumbNavigation(undefined)}
+            className="flex items-center hover:text-gray-900 px-2 py-1 rounded-md transition-colors hover:bg-gray-100"
+          >
+            <Home className="w-4 h-4 mr-1.5" />
+            <span>Documents</span>
+          </button>
+
+          {currentFolder && typeof currentFolder.name === 'string' && (
+            <>
+              <ChevronRight className="w-4 h-4 mx-2 text-gray-400" />
+              <button
+                onClick={() => handleBreadcrumbNavigation(currentFolder)}
+                className="flex items-center px-2 py-1 rounded-md transition-colors hover:bg-gray-100"
+              >
+                <FolderOpen className="w-4 h-4 mr-1.5 text-gray-400" />
+                <span>{currentFolder.name}</span>
+              </button>
+            </>
+          )}
+
+          <ChevronRight className="w-4 h-4 mx-2 text-gray-400" />
+          <span className="px-2 py-1 text-gray-900 font-medium">
+            {selectedDocument.name}
+          </span>
+        </nav>
+      );
+    }
+
     return (
       <DocumentBreadcrumbs
         folders={folders}
         currentFolder={currentFolder}
-        selectedDocument={selectedDocument}
         onNavigate={handleBreadcrumbNavigation}
-        onDocumentClick={() => selectedDocument && onPreview(selectedDocument)}
       />
     );
   };
@@ -1698,30 +1700,6 @@ export default function DocumentList({
     );
   };
 
-  // Get sort by label for display
-  const getSortByLabel = () => {
-    switch (sortBy) {
-      case 'dateModified':
-        return 'Date Modified';
-      case 'dateCreated':
-        return 'Date Added';
-      default:
-        return 'Name';
-    }
-  };
-
-  // Add effect to close sort dropdown when clicking outside
-  useEffect(() => {
-    const handleClickOutsideSort = (event: MouseEvent) => {
-      if (sortRef.current && !sortRef.current.contains(event.target as Node)) {
-        setShowSortDropdown(false);
-      }
-    };
-
-    document.addEventListener('mousedown', handleClickOutsideSort);
-    return () => document.removeEventListener('mousedown', handleClickOutsideSort);
-  }, []);
-
   return (
     <div 
       ref={dropZoneRef}
@@ -1733,11 +1711,9 @@ export default function DocumentList({
     >
       <div className="flex justify-between items-center border-b px-4 py-3 bg-white">
         <DocumentBreadcrumbs
-         folders={folders}
-         currentFolder={currentFolder}
-         selectedDocument={selectedDocument}
-         onNavigate={handleBreadcrumbNavigation}
-         onDocumentClick={() => selectedDocument && onPreview(selectedDocument)}
+          folders={folders}
+          currentFolder={currentFolder}
+          onNavigate={handleBreadcrumbNavigation as (folder?: Folder) => void}
         />
         
         {/* Replace DocumentActions with the conditional rendering function */}
@@ -1745,8 +1721,7 @@ export default function DocumentList({
       </div>
       
       {selectedDocument ? (
-        <div className="flex-1 min-h-0 flex flex-col">
-          {/* Remove duplicate breadcrumbs - the main one at the top is enough */}
+        <div className="flex-1 min-h-0">
           <DocumentViewer
             document={selectedDocument}
             onClose={() => setSelectedDocument(undefined)}
@@ -1762,9 +1737,8 @@ export default function DocumentList({
         </div>
       ) : (
         <>
-      
           {/* Search, filter, and sort controls */}
-          <div className="px-4 my-4 space-y-3">
+          <div className="px-4 mb-4 space-y-3">
             <div className="flex items-center space-x-2">
               <div className="relative flex-1">
                 <input
@@ -1852,64 +1826,15 @@ export default function DocumentList({
                 </AnimatePresence>
               </div>
               
-              {/* Sort Dropdown */}
-              <div className="relative" ref={sortRef}>
-                <button
-                  onClick={() => setShowSortDropdown(!showSortDropdown)}
-                  className="px-3 py-2 bg-slate-300 text-gray-700 rounded-md hover:bg-gray-200 transition-all duration-300 flex items-center space-x-2 min-w-[140px] justify-between"
-                >
-                  <div className="flex items-center space-x-2">
-                    <ArrowUpDown className="w-4 h-4" />
-                    <span className="text-sm">{getSortByLabel()} {sortOrder === 'asc' ? '↑' : '↓'}</span>
-                  </div>
-                  <ChevronDown className="w-4 h-4" />
-                </button>
-                
-                <AnimatePresence>
-                  {showSortDropdown && (
-                    <motion.div
-                      initial={{ opacity: 0, y: -10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -10 }}
-                      className="absolute right-0 mt-1 w-48 bg-white rounded-md shadow-lg z-10 border border-gray-200"
-                    >
-                      <div className="py-1">
-                        <button
-                          onClick={() => changeSortBy('name')}
-                          className={`flex items-center space-x-2 px-4 py-2 text-sm w-full text-left hover:bg-gray-100 ${
-                            sortBy === 'name' ? 'bg-primary-50 text-primary-700' : 'text-gray-700'
-                          }`}
-                        >
-                          <span>Name (Alpha & Numeric)</span>
-                        </button>
-                        <button
-                          onClick={() => changeSortBy('dateModified')}
-                          className={`flex items-center space-x-2 px-4 py-2 text-sm w-full text-left hover:bg-gray-100 ${
-                            sortBy === 'dateModified' ? 'bg-primary-50 text-primary-700' : 'text-gray-700'
-                          }`}
-                        >
-                          <span>Date Modified</span>
-                        </button>
-                        <button
-                          onClick={() => changeSortBy('dateCreated')}
-                          className={`flex items-center space-x-2 px-4 py-2 text-sm w-full text-left hover:bg-gray-100 ${
-                            sortBy === 'dateCreated' ? 'bg-primary-50 text-primary-700' : 'text-gray-700'
-                          }`}
-                        >
-                          <span>Date Added</span>
-                        </button>
-                        <div className="border-t border-gray-100 my-1"></div>
-                        <button
-                          onClick={toggleSortOrder}
-                          className="flex items-center space-x-2 px-4 py-2 text-sm w-full text-left hover:bg-gray-100 text-gray-700"
-                        >
-                          <span>Toggle Order ({sortOrder === 'asc' ? 'Ascending' : 'Descending'})</span>
-                        </button>
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </div>
+              {/* Sort Button */}
+              <button
+                onClick={toggleSortOrder}
+                className="px-3 py-2 bg-slate-300 text-gray-700 rounded-md hover:bg-gray-200 transition-all duration-300 flex items-center space-x-2 flex-shrink-0"
+                title={`Sort by name (${sortOrder === 'asc' ? 'A-Z' : 'Z-A'})`}
+              >
+                <ArrowUpDown className="w-4 h-4" />
+                <span className="hidden sm:inline">{sortOrder === 'asc' ? 'A-Z' : 'Z-A'}</span>
+              </button>
             </div>
             
             {searchQuery && (

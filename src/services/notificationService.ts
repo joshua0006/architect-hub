@@ -20,8 +20,6 @@ export interface Notification {
     commentText?: string;
     mentionedUserId?: string;
     fileId?: string; // Add fileId to metadata for file upload notifications
-    taskId?: string; // Add taskId to metadata for task notifications
-    dueDate?: string; // Add dueDate to metadata for task notifications
   };
   raw?: {
     userId: string;
@@ -1507,79 +1505,3 @@ async function checkForExistingMentionNotification(
     return null; // On error, proceed with creating a new notification
   }
 }
-
-/**
- * Creates task notifications for assigned users
- * @param taskId The ID of the task
- * @param taskTitle The title of the task
- * @param projectId The ID of the project
- * @param projectName The name of the project
- * @param creatorName The name of the user who created or updated the task
- * @param assignedUserIds Array of user IDs assigned to the task
- * @param dueDate The due date of the task
- * @param isUpdate Whether this is a task update (true) or new task creation (false)
- * @returns Array of created notification IDs
- */
-export const createTaskNotification = async (
-  taskId: string,
-  taskTitle: string,
-  projectId: string,
-  projectName: string,
-  creatorName: string,
-  assignedUserIds: string[],
-  dueDate: string,
-  isUpdate: boolean = false
-): Promise<string[]> => {
-  try {
-    console.log(`[Notification Info] Creating ${isUpdate ? 'task update' : 'new task'} notifications for ${assignedUserIds.length} users`);
-    
-    // If no target users provided, return empty array
-    if (!assignedUserIds || assignedUserIds.length === 0) {
-      console.warn('[Notification Warning] No target users provided for task notification');
-      return [];
-    }
-    
-    // Create the link to the task
-    const link = `/projects/${projectId}/tasks?task=${taskId}`;
-    
-    // Create a notification for each assigned user
-    const notificationPromises = assignedUserIds.map(userId => {
-      const notification = {
-        iconType: 'task-assignment',
-        type: 'info' as const,
-        message: isUpdate 
-          ? `${creatorName} updated task "${taskTitle}"`
-          : `${creatorName} assigned you to "${taskTitle}"`,
-        link,
-        read: false,
-        userId, // Set the target user ID
-        metadata: {
-          contentType: 'task',
-          fileName: '', // Using task title in message instead
-          folderId: '',
-          folderName: '',
-          guestName: creatorName,
-          uploadDate: new Date().toISOString(),
-          projectId,
-          taskId,
-          dueDate
-        }
-      };
-      
-      return createNotification(notification);
-    });
-    
-    try {
-      // Wait for all notifications to be created
-      const notificationIds = await Promise.all(notificationPromises);
-      console.log(`[Notification Success] Created ${notificationIds.length} task notifications`);
-      return notificationIds;
-    } catch (error) {
-      console.error('[Notification Error] Error creating task notifications:', error);
-      return [];
-    }
-  } catch (error) {
-    console.error('[Notification Error] Error in createTaskNotification:', error);
-    return [];
-  }
-};

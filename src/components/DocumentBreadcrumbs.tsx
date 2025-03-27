@@ -1,21 +1,17 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { ChevronRight, FolderOpen, Home, MoreHorizontal, FileText } from 'lucide-react';
-import { Folder, Document } from '../types';
+import { ChevronRight, FolderOpen, Home, MoreHorizontal } from 'lucide-react';
+import { Folder } from '../types';
 
 interface DocumentBreadcrumbsProps {
   folders: Folder[];
   currentFolder?: Folder;
-  selectedDocument?: Document;
   onNavigate: (folder?: Folder) => void;
-  onDocumentClick?: () => void;
 }
 
 export default function DocumentBreadcrumbs({
   folders,
   currentFolder,
-  selectedDocument,
   onNavigate,
-  onDocumentClick,
 }: DocumentBreadcrumbsProps) {
   const folderMap = new Map<string, Folder>(folders.map(f => [f.id, f]));
   const [showDropdown, setShowDropdown] = useState(false);
@@ -36,25 +32,6 @@ export default function DocumentBreadcrumbs({
     };
   }, []);
 
-  // Handle backspace key to navigate to parent folder
-  useEffect(() => {
-    function handleKeyDown(event: KeyboardEvent) {
-      // Check if backspace was pressed and not in an input field
-      if (
-        event.key === 'Backspace' && 
-        !['INPUT', 'TEXTAREA'].includes((event.target as HTMLElement).tagName)
-      ) {
-        event.preventDefault(); // Prevent browser back navigation
-        navigateToParent();
-      }
-    }
-    
-    document.addEventListener('keydown', handleKeyDown);
-    return () => {
-      document.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [currentFolder, selectedDocument, onNavigate]);
-
   const generateBreadcrumbPath = () => {
     const path: Folder[] = [];
     let current = currentFolder;
@@ -69,18 +46,6 @@ export default function DocumentBreadcrumbs({
 
   const breadcrumbPath = generateBreadcrumbPath();
   const shouldCollapse = breadcrumbPath.length > 3;
-  
-  // Function to navigate to parent folder
-  const navigateToParent = () => {
-    if (selectedDocument) {
-      // If a document is selected, navigate to its containing folder
-      onNavigate(currentFolder);
-    } else if (currentFolder) {
-      // If in a folder, navigate to parent folder
-      const parentFolder = currentFolder.parentId ? folderMap.get(currentFolder.parentId) : undefined;
-      onNavigate(parentFolder);
-    }
-  };
   
   // Function to render dropdown content
   const renderDropdownContent = () => {
@@ -109,11 +74,6 @@ export default function DocumentBreadcrumbs({
     );
   };
 
-  // Get appropriate icon for document type
-  const getDocumentIcon = (type: string) => {
-    return <FileText className="w-4 h-4 text-gray-400" />;
-  };
-
   return (
     <div ref={containerRef} className="relative mb-4">
       <nav 
@@ -124,7 +84,10 @@ export default function DocumentBreadcrumbs({
         <div className="flex items-center my-1">
           <button
             onClick={() => onNavigate(undefined)}
-            className="flex items-center space-x-1.5 px-2 py-1 rounded-md transition-colors whitespace-nowrap hover:text-gray-900 hover:bg-gray-100"
+            className={`flex items-center space-x-1.5 px-2 py-1 rounded-md transition-colors whitespace-nowrap ${
+              !currentFolder ? 'text-gray-900 font-medium' : 'hover:text-gray-900 hover:bg-gray-100'
+            }`}
+            disabled={!currentFolder}
           >
             <Home className="w-4 h-4" />
             <span>Documents</span>
@@ -186,8 +149,8 @@ export default function DocumentBreadcrumbs({
                 {/* Last item (current folder) - always shown */}
                 <div className="flex items-center my-1">
                   <button
-                    onClick={() => onNavigate(breadcrumbPath[breadcrumbPath.length - 1])}
-                    className="flex items-center space-x-1.5 px-2 py-1 rounded-md transition-colors whitespace-nowrap hover:text-gray-900 hover:bg-gray-100"
+                    className="flex items-center space-x-1.5 px-2 py-1 rounded-md transition-colors whitespace-nowrap text-gray-900 font-medium cursor-default"
+                    disabled
                   >
                     <FolderOpen className="w-4 h-4 text-gray-400" />
                     <span>{breadcrumbPath[breadcrumbPath.length - 1].name}</span>
@@ -206,7 +169,12 @@ export default function DocumentBreadcrumbs({
                   <div className="flex items-center my-1">
                     <button
                       onClick={() => onNavigate(folder)}
-                      className="flex items-center space-x-1.5 px-2 py-1 rounded-md transition-colors whitespace-nowrap hover:text-gray-900 hover:bg-gray-100"
+                      className={`flex items-center space-x-1.5 px-2 py-1 rounded-md transition-colors whitespace-nowrap ${
+                        index === breadcrumbPath.length - 1 
+                          ? 'text-gray-900 font-medium cursor-default'
+                          : 'hover:text-gray-900 hover:bg-gray-100'
+                      }`}
+                      disabled={index === breadcrumbPath.length - 1}
                     >
                       <FolderOpen className="w-4 h-4 text-gray-400" />
                       <span>{folder.name}</span>
@@ -215,33 +183,6 @@ export default function DocumentBreadcrumbs({
                 </React.Fragment>
               ))
             )}
-          </>
-        )}
-
-        {/* Show selected document at the end if available */}
-        {selectedDocument && (
-          <>
-            {/* Chevron before document */}
-            <div className="flex items-center my-1">
-              <ChevronRight className="w-4 h-4 mx-1 text-gray-400 flex-shrink-0" />
-            </div>
-            
-            {/* Document item - current (last) item */}
-            <div className="flex items-center my-1">
-              <div 
-                className="flex items-center space-x-1.5 px-3 py-1.5 rounded-md whitespace-nowrap text-gray-900 font-medium bg-blue-50 border border-blue-200"
-                onClick={onDocumentClick}
-                aria-current="page"
-              >
-                {getDocumentIcon(selectedDocument.type)}
-                <span className="truncate max-w-xs">{selectedDocument.name}</span>
-                {selectedDocument.type && (
-                  <span className="ml-2 px-1.5 py-0.5 text-xs rounded bg-gray-100 text-gray-600 uppercase">
-                    {selectedDocument.type}
-                  </span>
-                )}
-              </div>
-            </div>
           </>
         )}
       </nav>

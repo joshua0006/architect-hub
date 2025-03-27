@@ -8,8 +8,7 @@ import {
   deleteDoc,
   query,
   where,
-  serverTimestamp,
-  onSnapshot
+  serverTimestamp
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { Task } from '../types';
@@ -23,28 +22,6 @@ export const taskService = {
     return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Task));
   },
 
-  // Real-time subscription to tasks for a specific project
-  subscribeToProjectTasks(projectId: string, callback: (tasks: Task[]) => void) {
-    try {
-      const tasksRef = collection(db, COLLECTION);
-      const q = query(tasksRef, where('projectId', '==', projectId));
-      
-      return onSnapshot(q, (snapshot) => {
-        const tasks = snapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        } as Task));
-        callback(tasks);
-      }, (error) => {
-        console.error('Error in tasks subscription:', error);
-        callback([]);
-      });
-    } catch (error) {
-      console.error('Error setting up tasks subscription:', error);
-      return () => {};
-    }
-  },
-
   // Get all tasks for a project
   async getByProjectId(projectId: string): Promise<Task[]> {
     const q = query(
@@ -52,51 +29,14 @@ export const taskService = {
       where('projectId', '==', projectId)
     );
     const snapshot = await getDocs(q);
-    const tasks = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Task));
-    
-    // Return all tasks - both parent tasks and subtasks
-    // The component will organize them into hierarchy
-    return tasks;
-  },
-
-  // Get all subtasks for a parent task
-  async getSubtasks(parentTaskId: string): Promise<Task[]> {
-    const q = query(
-      collection(db, COLLECTION),
-      where('parentTaskId', '==', parentTaskId)
-    );
-    const snapshot = await getDocs(q);
     return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Task));
-  },
-
-  // Real-time subscription to subtasks for a specific parent task
-  subscribeToSubtasks(parentTaskId: string, callback: (subtasks: Task[]) => void) {
-    try {
-      const tasksRef = collection(db, COLLECTION);
-      const q = query(tasksRef, where('parentTaskId', '==', parentTaskId));
-      
-      return onSnapshot(q, (snapshot) => {
-        const subtasks = snapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        } as Task));
-        callback(subtasks);
-      }, (error) => {
-        console.error('Error in subtasks subscription:', error);
-        callback([]);
-      });
-    } catch (error) {
-      console.error('Error setting up subtasks subscription:', error);
-      return () => {};
-    }
   },
 
   // Get tasks assigned to a user
   async getByAssignedTo(userId: string): Promise<Task[]> {
-    // Need to handle array-contains for the new multi-user structure
     const q = query(
       collection(db, COLLECTION),
-      where('assignedTo', 'array-contains', userId)
+      where('assignedTo', '==', userId)
     );
     const snapshot = await getDocs(q);
     return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Task));
@@ -106,63 +46,21 @@ export const taskService = {
   async getById(id: string): Promise<Task | null> {
     const docRef = doc(db, COLLECTION, id);
     const docSnap = await getDoc(docRef);
-    
-    if (!docSnap.exists()) return null;
-    
-    const task = { id: docSnap.id, ...docSnap.data() } as Task;
-    
-    // Fetch subtasks if this is a parent task
-    const subtasks = await this.getSubtasks(task.id);
-    if (subtasks.length > 0) {
-      task.subtasks = subtasks;
-    }
-    
-    return task;
+    return docSnap.exists() ? { id: docSnap.id, ...docSnap.data() } as Task : null;
   },
 
   // Create a task
-  async create(task: Omit<Task, 'id'>): Promise<string> {
-    // If this is a subtask, get the parent task's category
-    if (task.parentTaskId) {
-      try {
-        const parentTask = await this.getById(task.parentTaskId);
-        if (parentTask) {
-          // Ensure subtask uses the same category as parent
-          task.category = parentTask.category;
-        }
-      } catch (error) {
-        console.error("Error getting parent task category:", error);
-        // Continue with the provided category if parent lookup fails
-      }
-    }
-    
+  async create(task: Omit<Task, 'id'>): Promise<Task> {
     const docRef = await addDoc(collection(db, COLLECTION), {
       ...task,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp()
     });
-    return docRef.id;
+    return { id: docRef.id, ...task };
   },
 
   // Update a task
   async update(id: string, updates: Partial<Task>): Promise<void> {
-    // If this is a subtask, don't allow changing the category
-    if (updates.parentTaskId && updates.category) {
-      try {
-        const task = await this.getById(id);
-        if (task && task.parentTaskId) {
-          const parentTask = await this.getById(task.parentTaskId);
-          if (parentTask && updates.category !== parentTask.category) {
-            // Remove the category update as it should match the parent
-            const { category, ...validUpdates } = updates;
-            updates = validUpdates as Partial<Task>;
-          }
-        }
-      } catch (error) {
-        console.error("Error validating subtask category update:", error);
-      }
-    }
-    
     const docRef = doc(db, COLLECTION, id);
     await updateDoc(docRef, {
       ...updates,
@@ -170,20 +68,8 @@ export const taskService = {
     });
   },
 
-  // Delete a task and its subtasks
+  // Delete a task
   async delete(id: string): Promise<void> {
-    // First, delete all subtasks
-    const subtasks = await this.getSubtasks(id);
-    
-    // Delete each subtask
-    const subtaskDeletePromises = subtasks.map(subtask => 
-      deleteDoc(doc(db, COLLECTION, subtask.id))
-    );
-    
-    // Wait for all subtask deletions to complete
-    await Promise.all(subtaskDeletePromises);
-    
-    // Then delete the parent task
     const docRef = doc(db, COLLECTION, id);
     await deleteDoc(docRef);
   }

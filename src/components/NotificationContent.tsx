@@ -1,5 +1,5 @@
 import React from 'react';
-import { Folder, ExternalLink, File, User, MessageSquare, AtSign, CheckSquare } from 'lucide-react';
+import { Folder, ExternalLink, File, User, MessageSquare, AtSign } from 'lucide-react';
 import { Notification } from '../services/notificationService';
 
 interface NotificationContentProps {
@@ -26,8 +26,6 @@ const NotificationContent: React.FC<NotificationContentProps> = ({
         return <MessageSquare className="w-4 h-4 text-green-500" />;
       case 'comment-mention':
         return <AtSign className="w-4 h-4 text-blue-500" />;
-      case 'task-assignment':
-        return <CheckSquare className="w-4 h-4 text-purple-500" />;
       case 'invite':
         return <User className="w-4 h-4 text-purple-500" />;
       case 'share':
@@ -39,9 +37,6 @@ const NotificationContent: React.FC<NotificationContentProps> = ({
   
   // Check if this is a mention notification
   const isMentionNotification = (notification.iconType === 'comment-mention');
-  
-  // Check if this is a task notification
-  const isTaskNotification = (notification.iconType === 'task-assignment');
   
   // Safely access notification fields
   const message = notification.message || 'New notification';
@@ -58,9 +53,6 @@ const NotificationContent: React.FC<NotificationContentProps> = ({
         <p className={`text-sm ${!notification.read ? 'font-medium' : 'text-gray-700'} ${isMentionNotification ? 'flex items-center' : ''}`}>
           {isMentionNotification && (
             <AtSign className="w-3 h-3 mr-1 text-blue-500 inline-flex flex-shrink-0" />
-          )}
-          {isTaskNotification && (
-            <CheckSquare className="w-3 h-3 mr-1 text-purple-500 inline-flex flex-shrink-0" />
           )}
           <span className={isMentionNotification ? 'text-blue-700' : ''}>
             {message}
@@ -110,29 +102,11 @@ const NotificationContent: React.FC<NotificationContentProps> = ({
               </div>
             )}
             
-            {/* For task notifications, show due date if available */}
-            {isTaskNotification && notification.metadata.dueDate && (
-              <div className="mt-1 flex items-center">
-                <CheckSquare className="w-3 h-3 mr-1" />
-                <span>Due: {new Date(notification.metadata.dueDate).toLocaleDateString()}</span>
-              </div>
-            )}
-            
             {/* For mention notifications, show a "Go to comment" link */}
             {isMentionNotification && notification.link && (
               <div className="mt-2 flex justify-end">
                 <span className="text-blue-600 text-xs flex items-center">
                   <span className="mr-1">Go to comment</span>
-                  <ExternalLink className="w-3 h-3" />
-                </span>
-              </div>
-            )}
-            
-            {/* For task notifications, show a "View task" link */}
-            {isTaskNotification && notification.link && (
-              <div className="mt-2 flex justify-end">
-                <span className="text-purple-600 text-xs flex items-center">
-                  <span className="mr-1">View task</span>
                   <ExternalLink className="w-3 h-3" />
                 </span>
               </div>
