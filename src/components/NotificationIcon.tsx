@@ -631,6 +631,7 @@ export const NotificationIcon: React.FC = () => {
       return formatDistanceToNow(new Date(), { addSuffix: true });
     } catch (error) {
       console.error('Error formatting timestamp:', error, timestamp);
+      console.log('Timestamp:', timestamp);
       return 'some time ago';
     }
   };
