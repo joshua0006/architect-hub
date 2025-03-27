@@ -122,13 +122,21 @@ export const taskService = {
 
   // Create a task
   async create(task: Omit<Task, 'id'>): Promise<string> {
+    // Filter out any properties with undefined values
+    const cleanedTask = Object.entries(task).reduce((acc, [key, value]) => {
+      if (value !== undefined) {
+        acc[key] = value;
+      }
+      return acc;
+    }, {} as Record<string, any>);
+    
     // If this is a subtask, get the parent task's category
-    if (task.parentTaskId) {
+    if (cleanedTask.parentTaskId) {
       try {
-        const parentTask = await this.getById(task.parentTaskId);
+        const parentTask = await this.getById(cleanedTask.parentTaskId);
         if (parentTask) {
           // Ensure subtask uses the same category as parent
-          task.category = parentTask.category;
+          cleanedTask.category = parentTask.category;
         }
       } catch (error) {
         console.error("Error getting parent task category:", error);
@@ -137,7 +145,7 @@ export const taskService = {
     }
     
     const docRef = await addDoc(collection(db, COLLECTION), {
-      ...task,
+      ...cleanedTask,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp()
     });
@@ -146,16 +154,23 @@ export const taskService = {
 
   // Update a task
   async update(id: string, updates: Partial<Task>): Promise<void> {
+    // Filter out any properties with undefined values
+    const cleanedUpdates = Object.entries(updates).reduce((acc, [key, value]) => {
+      if (value !== undefined) {
+        acc[key] = value;
+      }
+      return acc;
+    }, {} as Record<string, any>);
+    
     // If this is a subtask, don't allow changing the category
-    if (updates.parentTaskId && updates.category) {
+    if (cleanedUpdates.parentTaskId && cleanedUpdates.category) {
       try {
         const task = await this.getById(id);
         if (task && task.parentTaskId) {
           const parentTask = await this.getById(task.parentTaskId);
-          if (parentTask && updates.category !== parentTask.category) {
+          if (parentTask && cleanedUpdates.category !== parentTask.category) {
             // Remove the category update as it should match the parent
-            const { category, ...validUpdates } = updates;
-            updates = validUpdates as Partial<Task>;
+            delete cleanedUpdates.category;
           }
         }
       } catch (error) {
@@ -165,7 +180,7 @@ export const taskService = {
     
     const docRef = doc(db, COLLECTION, id);
     await updateDoc(docRef, {
-      ...updates,
+      ...cleanedUpdates,
       updatedAt: serverTimestamp()
     });
   },
