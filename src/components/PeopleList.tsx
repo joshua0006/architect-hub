@@ -89,6 +89,7 @@ export default function PeopleList({ projects, teamMembers, onCreateMember, onUp
       const fetchedUsers = await userService.getAllUsers();
       setUsers(fetchedUsers);
       setError(null);
+      console.log("LOG TO BE REMOVE: PEOPLE LIST-", fetchedUsers	);
     } catch (error) {
       setError("Failed to load users");
       console.error("Error loading users:", error);
