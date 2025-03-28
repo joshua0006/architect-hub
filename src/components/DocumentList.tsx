@@ -203,7 +203,6 @@ export default function DocumentList({
 
 
  const hasFolderWritePermission = (folderPermission: FolderAccessPermission): boolean => {
-
   const role = user?.role as UserRole | undefined;
   
   let writeAccess = DEFAULT_FOLDER_ACCESS;
@@ -229,72 +228,83 @@ export default function DocumentList({
       false
     );
 
+    // Filter folders based on user's write permissions for each folder
+    filteredFolders = filteredFolders.filter(folder => 
+      hasFolderWritePermission(folder.metadata?.access as FolderAccessPermission)
+    );
+
+    
+    // Filter documents based on user's write permissions for the current folder
+    filteredDocs = filteredDocs.filter(doc => 
+      hasFolderWritePermission(currentFolder?.metadata?.access as FolderAccessPermission)
+    );
+
     // Apply permission filter based on user role
-    if (user?.role !== 'Staff' && user?.role !== 'Admin') {
-      // For non-staff users, filter based on their role
-      if (user?.role === 'Contractor') {
-        // Contractors can see folders with CONTRACTORS_WRITE or CLIENTS_READ or ALL permission
-        filteredFolders = filteredFolders.filter(folder => {
-          if (folder.metadata && 'access' in folder.metadata) {
-            const access = folder.metadata.access as string;
-            return access === 'CONTRACTORS_WRITE' || access === 'CLIENTS_READ' || access === 'ALL';
-          }
-          return false;
-        });
+    // if (user?.role !== 'Staff' && user?.role !== 'Admin') {
+    //   // For non-staff users, filter based on their role
+    //   if (user?.role === 'Contractor') {
+    //     // Contractors can see folders with CONTRACTORS_WRITE or CLIENTS_READ or ALL permission
+    //     filteredFolders = filteredFolders.filter(folder => {
+    //       if (folder.metadata && 'access' in folder.metadata) {
+    //         const access = folder.metadata.access as string;
+    //         return access === 'CONTRACTORS_WRITE' || access === 'CLIENTS_READ' || access === 'ALL';
+    //       }
+    //       return false;
+    //     });
 
-        filteredDocs = filteredDocs.filter(doc => {
-          if (doc.metadata && 'access' in doc.metadata) {
-            const access = doc.metadata.access as string;
-            return access === 'CONTRACTORS_WRITE' || access === 'CLIENTS_READ' || access === 'ALL';
-          }
-          return false;
-        });
-      } else if (user?.role === 'Client') {
-        // Clients can only see folders with CLIENTS_READ or ALL permission
-        filteredFolders = filteredFolders.filter(folder => {
-          if (folder.metadata && 'access' in folder.metadata) {
-            const access = folder.metadata.access as string;
-            return access === 'CLIENTS_READ' || access === 'ALL';
-          }
-          return false;
-        });
+    //     filteredDocs = filteredDocs.filter(doc => {
+    //       if (doc.metadata && 'access' in doc.metadata) {
+    //         const access = doc.metadata.access as string;
+    //         return access === 'CONTRACTORS_WRITE' || access === 'CLIENTS_READ' || access === 'ALL';
+    //       }
+    //       return false;
+    //     });
+    //   } else if (user?.role === 'Client') {
+    //     // Clients can only see folders with CLIENTS_READ or ALL permission
+    //     filteredFolders = filteredFolders.filter(folder => {
+    //       if (folder.metadata && 'access' in folder.metadata) {
+    //         const access = folder.metadata.access as string;
+    //         return access === 'CLIENTS_READ' || access === 'ALL';
+    //       }
+    //       return false;
+    //     });
 
-        filteredDocs = filteredDocs.filter(doc => {
-          if (doc.metadata && 'access' in doc.metadata) {
-            const access = doc.metadata.access as string;
-            return access === 'CLIENTS_READ' || access === 'ALL';
-          }
-          return false;
-        });
-      } else {
-        // Default handling for any other role
-        filteredFolders = filteredFolders.filter(folder => {
-          if (folder.metadata && 'access' in folder.metadata) {
-            const access = folder.metadata.access as string;
-            return access === 'ALL';
-          }
-          return false;
-        });
+    //     filteredDocs = filteredDocs.filter(doc => {
+    //       if (doc.metadata && 'access' in doc.metadata) {
+    //         const access = doc.metadata.access as string;
+    //         return access === 'CLIENTS_READ' || access === 'ALL';
+    //       }
+    //       return false;
+    //     });
+    //   } else {
+    //     // Default handling for any other role
+    //     filteredFolders = filteredFolders.filter(folder => {
+    //       if (folder.metadata && 'access' in folder.metadata) {
+    //         const access = folder.metadata.access as string;
+    //         return access === 'ALL';
+    //       }
+    //       return false;
+    //     });
 
-        filteredDocs = filteredDocs.filter(doc => {
-          if (doc.metadata && 'access' in doc.metadata) {
-            const access = doc.metadata.access as string;
-            return access === 'ALL';
-          }
-          return false;
-        });
-      }
-    } else {
-      // Staff users see all items regardless of permission
-      console.log('Staff user - showing all items regardless of permission');
-    }
+    //     filteredDocs = filteredDocs.filter(doc => {
+    //       if (doc.metadata && 'access' in doc.metadata) {
+    //         const access = doc.metadata.access as string;
+    //         return access === 'ALL';
+    //       }
+    //       return false;
+    //     });
+    //   }
+    // } else {
+    //   // Staff users see all items regardless of permission
+    //   console.log('Staff user - showing all items regardless of permission');
+    // }
 
     // Apply view filter
-    if (viewFilter === 'files') {
-      filteredFolders = [];
-    } else if (viewFilter === 'folders') {
-      filteredDocs = [];
-    }
+    // if (viewFilter === 'files') {
+    //   filteredFolders = [];
+    // } else if (viewFilter === 'folders') {
+    //   filteredDocs = [];
+    // }
 
     // Sort documents and folders based on sortBy and sortOrder
     const sortFunction = (a: any, b: any) => {
@@ -2073,20 +2083,20 @@ export default function DocumentList({
                     {!isSharedView && (
                       <div className="flex items-center space-x-1">
                         {/* Only show edit button if user can edit documents */}
-                        {canEditDocuments() && (
-                          <div className="group relative">
+                       
+                          {/* <div className="group relative">
                             <button
                               onClick={(e) => handleEditClick(e, doc.id, 'document', typeof doc.name === 'string' ? doc.name : 'Unnamed document')}
                               className="p-1 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100"
-                              aria-label="Edit document"
+                              disabled={!hasFolderWritePermission(currentFolder?.metadata?.access as FolderAccessPermission)}
                             >
                               <Edit className="w-5 h-5" />
                             </button>
                             <div className="absolute bottom-full mb-2 left-1/2 transform -translate-x-1/2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap">
                               Edit
                             </div>
-                          </div>
-                        )}
+                          </div> */}
+                 
                         
                         {/* Only show share button if user can share documents */}
                         {canShareDocuments() && (

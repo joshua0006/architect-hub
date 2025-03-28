@@ -1,4 +1,4 @@
-import { FolderAccessPermission } from "./contexts/AuthContext";
+import { FolderAccessPermission, UserRole } from "./contexts/AuthContext";
 
 // Document types
 export interface DocumentComment {
@@ -157,8 +157,6 @@ export interface TaskCategory {
   isDefault?: boolean;
 }
 
-// User role type
-export type UserRole = 'Staff' | 'Client' | 'Contractor' | 'Admin';
 
 // User types
 export interface UserProfile {

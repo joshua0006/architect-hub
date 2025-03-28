@@ -341,6 +341,7 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
   viewerHeight,
   isShared,
   setViewerHeight,
+  folders,
   onRefresh
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);
@@ -390,8 +391,14 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
     }
   `;
 
+    // Add this to find the current folder
+  const currentFolder = folders.find(folder => folder.id === document.folderId);
+  
+
   useEffect(() => {
     if (!document.id) return;
+
+    console.log("Current folder:", currentFolder);
 
     setLoadingComments(true);
     const commentsRef = collection(db, `documents/${document.id}/comments`);
@@ -1363,7 +1370,7 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
       <div className="flex-1 bg-gray-100 p-4">
         {document.type === "pdf" ? (
           <div className="flex h-full gap-4">
-            <Toolbar />
+            <Toolbar  />
             <div
               className="relative bg-white rounded-lg shadow-sm p-4 flex-1 document-content"
               style={{ height: "100%" }}
