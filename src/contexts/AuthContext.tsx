@@ -11,6 +11,49 @@ import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { auth, db, storage } from '../lib/firebase';
 import { AuthContextType, User, AuthState, UserProfile } from '../types/auth';
 
+export enum FolderAccessPermission {
+  STAFF_ONLY = 'STAFF_ONLY',
+  CONTRACTOR_WRITE = 'CONTRACTOR_WRITE',
+  CONTRACTOR_READ = 'CONTRACTOR_READ',
+  CLIENTS_READ = 'CLIENTS_READ',
+  ALL_USERS = 'ALL',
+}
+
+export enum UserRole {
+  STAFF = 'Staff',
+  CONTRACTOR = 'Contractor',
+  CLIENT = 'Client'
+}
+
+export const PERMISSIONS_MAP: Record<FolderAccessPermission, Record<UserRole, { read: boolean; write: boolean }>> = {
+  [FolderAccessPermission.STAFF_ONLY]: {
+    [UserRole.STAFF]: { read: true, write: false },
+    [UserRole.CONTRACTOR]: { read: true, write: false },
+    [UserRole.CLIENT]: { read: true, write: false },
+  },
+  [FolderAccessPermission.CONTRACTOR_WRITE]: {
+    [UserRole.STAFF]: { read: true, write: false },
+    [UserRole.CONTRACTOR]: { read: true, write: true },
+    [UserRole.CLIENT]: { read: true, write: false },
+  },
+  [FolderAccessPermission.CONTRACTOR_READ]: {
+    [UserRole.STAFF]: { read: true, write: false },
+    [UserRole.CONTRACTOR]: { read: true, write: false },
+    [UserRole.CLIENT]: { read: true, write: false },
+  },
+  [FolderAccessPermission.CLIENTS_READ]: {
+    [UserRole.STAFF]: { read: true, write: true },
+    [UserRole.CONTRACTOR]: { read: true, write: false },
+    [UserRole.CLIENT]: { read: true, write: false },
+  },
+  [FolderAccessPermission.ALL_USERS]: {
+    [UserRole.STAFF]: { read: true, write: true },
+    [UserRole.CONTRACTOR]: { read: true, write: true },
+    [UserRole.CLIENT]: { read: true, write: true },
+  },
+};
+
+
 const initialState: AuthState = {
   user: null,
   loading: true,
@@ -27,9 +70,15 @@ const AuthContext = createContext<AuthContextType>({
   canUpdateMilestones: () => false,
   canUpdateTaskStatus: () => false,
   canUploadDocuments: () => false,
+  canEditDocuments: () => false,
+  canDeleteDocuments: () => false,
+  canShareDocuments: () => false,
   canComment: () => false,
   canManageTeam: () => false,
   canEditProject: () => false,
+  canEditTask: () => false,
+  canDeleteTask: () => false,
+  hasFolderPermission: () => false,
 });
 
 export function useAuth() {
@@ -234,6 +283,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // Permission checks based on user role
   const isStaffOrContractor = () => {
+    // return state.user?.role === 'Staff' || state.user?.role === 'Contractor';
     return state.user?.role === 'Staff' || state.user?.role === 'Contractor';
   };
 

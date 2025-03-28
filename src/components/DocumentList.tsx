@@ -28,7 +28,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Timestamp } from "firebase/firestore";
 import { createShareToken } from '../services/shareService';
 import { useToast } from '../contexts/ToastContext';
-import { useAuth } from '../contexts/AuthContext';
+import { FolderAccessPermission, FolderPermission, PERMISSIONS_MAP, useAuth, UserRole } from '../contexts/AuthContext';
 import { ConfirmDialog } from './ui/ConfirmDialog';
 import { RenameDialog } from './ui/RenameDialog';
 import { PermissionsDialog } from './ui/PermissionsDialog';
@@ -176,6 +176,8 @@ export default function DocumentList({
     failed: 0
   });
 
+  
+
   // Set initial values when popup opens - moved from renderEditPopup
   useEffect(() => {
     if (popupItem) {
@@ -198,6 +200,20 @@ export default function DocumentList({
   const allFolders = isSharedView ? sharedFolders || [] : folders.filter(
     (folder) => folder.parentId === currentFolder?.id
   );
+
+
+ const hasFolderWritePermission = (folderPermission: FolderAccessPermission): boolean => {
+
+  const role = user?.role as UserRole | undefined;
+  const defaultAccess = { read: false, write: false };
+  
+  let writeAccess = defaultAccess;
+  if (role && folderPermission in PERMISSIONS_MAP) {
+    writeAccess = PERMISSIONS_MAP[folderPermission][role] ?? defaultAccess;
+  }
+  return writeAccess.write;
+ }  
+
 
   // Filter and sort documents and folders based on search, view filter, and sort order
   const filteredAndSortedItems = () => {
@@ -1940,8 +1956,9 @@ export default function DocumentList({
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
                 className="space-y-2 px-4 pr-6 overflow-y-auto"
+                style={{paddingTop: '1.5rem', paddingBottom: '1.5rem'}}
               >
-                {subFolders.map((folder) => (
+                {subFolders.map((folder, index) => (
                   <motion.div
                     key={`folder-${folder.id || Math.random().toString(36)}`}
                     initial={{ opacity: 0, y: 20 }}
@@ -1960,21 +1977,24 @@ export default function DocumentList({
                     {!isSharedView && (
                       <div className="flex items-center space-x-1">
                         {/* Only show edit button if user can edit documents */}
-                        {canEditDocuments() && (
+                       
                           <div className="group relative">
                             <button
                               onClick={(e) => handleEditClick(e, folder.id, 'folder', typeof folder.name === 'string' ? folder.name : 'Unnamed folder')}
-                              className="p-1 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100"
+                              className={`p-1 ${!hasFolderWritePermission(folder?.metadata?.access as FolderAccessPermission) ? 
+                                'text-gray-300 cursor-not-allowed' : 
+                                'text-gray-400 hover:text-gray-600 hover:bg-gray-100'} rounded-full`}
                               aria-label="Edit folder"
+                              disabled={!hasFolderWritePermission(folder?.metadata?.access as FolderAccessPermission)}
                             >
                               <Edit className="w-5 h-5" />
                             </button>
-                            <div className="absolute bottom-full mb-2 left-1/2 transform -translate-x-1/2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap">
-                              Edit
+                            <div className={`absolute ${index === 0 ? 'top-full mt-2' : 'bottom-full mb-2'} left-1/2 transform -translate-x-1/2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap`}>
+                              {hasFolderWritePermission(folder?.metadata?.access as FolderAccessPermission) 
+                                ? "Edit" 
+                                : "You don't have permission access"}
                             </div>
                           </div>
-                        )}
-
                       
 
                         {/* Only show share button if user can share documents */}
@@ -1984,6 +2004,7 @@ export default function DocumentList({
                               onClick={() => handleShare(folder.id, true)}
                               className="p-1 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100"
                               aria-label="Share folder"
+                              
                             >
                               <Share2 className="w-5 h-5" />
                             </button>
@@ -1994,7 +2015,6 @@ export default function DocumentList({
                         )}
 
                         {/* Only show delete button if user can delete documents */}
-                        {canDeleteDocuments() && (
                           <div className="group relative">
                             <button
                               onClick={(e) => {
@@ -2003,14 +2023,14 @@ export default function DocumentList({
                               }}
                               className="p-1 text-gray-400 hover:text-red-600 rounded-full hover:bg-red-50"
                               aria-label="Delete folder"
+                              disabled={!hasFolderWritePermission(folder?.metadata?.access as FolderAccessPermission)}
                             >
                               <Trash2 className="w-5 h-5" />
                             </button>
-                            <div className="absolute bottom-full mb-2 left-1/2 transform -translate-x-1/2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap">
+                            <div className={`absolute ${index === 0 ? 'top-full mt-2' : 'bottom-full mb-2'} left-1/2 transform -translate-x-1/2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap`}>
                               Delete
                             </div>
                           </div>
-                        )}
                       </div>
                     )}
                   </motion.div>

@@ -1,3 +1,5 @@
+import { FolderAccessPermission } from "./contexts/AuthContext";
+
 // Document types
 export interface DocumentComment {
   id: string;
@@ -84,7 +86,7 @@ export interface Folder {
     level?: number;
     documentCount?: number;
     lastUpdated?: string;
-    access?: 'ALL' | 'STAFF_ONLY' | 'CONTRACTORS_WRITE' | 'CLIENTS_READ';
+    access?: FolderAccessPermission
   };
 }
 
