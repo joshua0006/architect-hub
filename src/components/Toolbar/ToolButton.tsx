@@ -81,12 +81,6 @@ export const ToolButton: React.FC<ToolButtonProps> = ({
   const { user } = useAuth();
 
 
-  useEffect(() => {
-    console.log('currentFolder', currentFolder);
-    console.log('hasFolderWritePermission', hasFolderWritePermission());
-    console.log('tool', tool);
-  }, [currentFolder]);
-
 
   const hasFolderWritePermission = (): boolean => {
     if(tool === 'select') {
