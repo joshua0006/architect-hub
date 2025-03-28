@@ -27,17 +27,17 @@ export enum UserRole {
 
 export const PERMISSIONS_MAP: Record<FolderAccessPermission, Record<UserRole, { read: boolean; write: boolean }>> = {
   [FolderAccessPermission.STAFF_ONLY]: {
-    [UserRole.STAFF]: { read: true, write: false },
+    [UserRole.STAFF]: { read: true, write: true },
     [UserRole.CONTRACTOR]: { read: true, write: false },
     [UserRole.CLIENT]: { read: true, write: false },
   },
   [FolderAccessPermission.CONTRACTOR_WRITE]: {
-    [UserRole.STAFF]: { read: true, write: false },
+    [UserRole.STAFF]: { read: true, write: true },
     [UserRole.CONTRACTOR]: { read: true, write: true },
     [UserRole.CLIENT]: { read: true, write: false },
   },
   [FolderAccessPermission.CONTRACTOR_READ]: {
-    [UserRole.STAFF]: { read: true, write: false },
+    [UserRole.STAFF]: { read: true, write: true },
     [UserRole.CONTRACTOR]: { read: true, write: false },
     [UserRole.CLIENT]: { read: true, write: false },
   },
@@ -52,6 +52,8 @@ export const PERMISSIONS_MAP: Record<FolderAccessPermission, Record<UserRole, { 
     [UserRole.CLIENT]: { read: true, write: true },
   },
 };
+
+export const DEFAULT_FOLDER_ACCESS = { read: true, write: true };
 
 
 const initialState: AuthState = {
@@ -78,7 +80,6 @@ const AuthContext = createContext<AuthContextType>({
   canEditProject: () => false,
   canEditTask: () => false,
   canDeleteTask: () => false,
-  hasFolderPermission: () => false,
 });
 
 export function useAuth() {
@@ -346,6 +347,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Only Staff can delete tasks
     return isStaffOnly();
   };
+
+
 
   return (
     <AuthContext.Provider value={{

@@ -50,5 +50,4 @@ export interface AuthContextType extends AuthState {
   canEditProject: () => boolean;
   canEditTask: () => boolean;
   canDeleteTask: () => boolean;
-  hasFolderPermission: () => boolean;
 }

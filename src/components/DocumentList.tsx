@@ -28,7 +28,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Timestamp } from "firebase/firestore";
 import { createShareToken } from '../services/shareService';
 import { useToast } from '../contexts/ToastContext';
-import { FolderAccessPermission, FolderPermission, PERMISSIONS_MAP, useAuth, UserRole } from '../contexts/AuthContext';
+import { DEFAULT_FOLDER_ACCESS, FolderAccessPermission, PERMISSIONS_MAP, useAuth, UserRole } from '../contexts/AuthContext';
 import { ConfirmDialog } from './ui/ConfirmDialog';
 import { RenameDialog } from './ui/RenameDialog';
 import { PermissionsDialog } from './ui/PermissionsDialog';
@@ -205,11 +205,10 @@ export default function DocumentList({
  const hasFolderWritePermission = (folderPermission: FolderAccessPermission): boolean => {
 
   const role = user?.role as UserRole | undefined;
-  const defaultAccess = { read: false, write: false };
   
-  let writeAccess = defaultAccess;
+  let writeAccess = DEFAULT_FOLDER_ACCESS;
   if (role && folderPermission in PERMISSIONS_MAP) {
-    writeAccess = PERMISSIONS_MAP[folderPermission][role] ?? defaultAccess;
+    writeAccess = PERMISSIONS_MAP[folderPermission][role] ?? DEFAULT_FOLDER_ACCESS;
   }
   return writeAccess.write;
  }  
@@ -1973,6 +1972,7 @@ export default function DocumentList({
                       <span className="font-medium text-gray-900">
                         {typeof folder.name === 'string' ? folder.name : 'Unnamed folder'}
                       </span>
+                      <p>{folder.metadata?.access}</p>
                     </button>
                     {!isSharedView && (
                       <div className="flex items-center space-x-1">
@@ -2021,7 +2021,9 @@ export default function DocumentList({
                                 e.stopPropagation();
                                 confirmDelete(folder.id, 'folder', typeof folder.name === 'string' ? folder.name : 'Unnamed folder');
                               }}
-                              className="p-1 text-gray-400 hover:text-red-600 rounded-full hover:bg-red-50"
+                              className={`p-1 ${!hasFolderWritePermission(folder?.metadata?.access as FolderAccessPermission) ? 
+                                'text-gray-300 cursor-not-allowed' : 
+                                'text-gray-400 hover:text-gray-600 hover:bg-gray-100'} rounded-full`}
                               aria-label="Delete folder"
                               disabled={!hasFolderWritePermission(folder?.metadata?.access as FolderAccessPermission)}
                             >

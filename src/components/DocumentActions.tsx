@@ -3,7 +3,7 @@ import { Plus, Upload, FolderPlus, X, Folder, File, MoreVertical, Share2 } from 
 import { AnimatePresence, motion } from "framer-motion";
 import { Document, Folder as FolderType } from "../types";
 import { useToast } from "../contexts/ToastContext";
-import { FolderAccessPermission, PERMISSIONS_MAP, useAuth, UserRole } from "../contexts/AuthContext";
+import { DEFAULT_FOLDER_ACCESS, FolderAccessPermission, PERMISSIONS_MAP, useAuth, UserRole } from "../contexts/AuthContext";
 import GenerateUploadToken from "./GenerateUploadToken";
 
 interface DocumentActionsProps {
@@ -237,14 +237,13 @@ export default function DocumentActions({
     const folderPermission = currentFolder?.metadata?.access as FolderAccessPermission;
     
     const role = user?.role as UserRole | undefined;
-    const defaultAccess = { read: false, write: false };
     
-    let writeAccess = defaultAccess;
+    
+    let writeAccess = DEFAULT_FOLDER_ACCESS;
     if (role && folderPermission in PERMISSIONS_MAP) {
-      writeAccess = PERMISSIONS_MAP[folderPermission][role] ?? defaultAccess;
+      writeAccess = PERMISSIONS_MAP[folderPermission][role] ?? DEFAULT_FOLDER_ACCESS;
     }
 
-    console.log("writeAccess", writeAccess);
     return writeAccess.write;
   }  
 
