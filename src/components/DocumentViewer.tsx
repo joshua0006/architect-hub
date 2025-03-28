@@ -342,7 +342,8 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
   isShared,
   setViewerHeight,
   folders,
-  onRefresh
+  onRefresh,
+  onNavigateToFolder,
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -394,10 +395,32 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
     // Add this to find the current folder
   const currentFolder = folders.find(folder => folder.id === document.folderId);
   
+  // Function to get folder path hierarchy 
+  const getFolderPath = useCallback(() => {
+    if (!currentFolder) return [];
+    
+    const path: Folder[] = [currentFolder];
+    let parentId = currentFolder.parentId;
+    
+    // Build path from child to parent
+    while (parentId) {
+      const parentFolder = folders.find(f => f.id === parentId);
+      if (parentFolder) {
+        path.unshift(parentFolder); // Add at beginning
+        parentId = parentFolder.parentId;
+      } else {
+        break;
+      }
+    }
+    
+    return path;
+  }, [currentFolder, folders]);
+  
+  // Get folder path
+  const folderPath = getFolderPath();
 
   useEffect(() => {
     if (!document.id) return;
-
     console.log("Current folder:", currentFolder);
 
     setLoadingComments(true);
@@ -1171,6 +1194,26 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
                 Version {document.version} • Last modified{" "}
                 {formatDate(document.dateModified)}
               </p>
+              {/* Add folder path as breadcrumbs */}
+              {currentFolder && (
+                <div className="mt-1 flex items-center text-xs text-gray-500">
+                  <FolderOpen className="w-3 h-3 mr-1 flex-shrink-0" />
+                  <span className="flex items-center">
+                    <Home className="w-3 h-3 mr-1 cursor-pointer hover:text-blue-500" onClick={() => onNavigateToFolder?.()} />
+                    {folderPath.map((folder, idx) => (
+                      <span key={folder.id} className="flex items-center">
+                        {idx > 0 && <ChevronRight className="w-3 h-3 mx-1" />}
+                        <span 
+                          className="hover:text-blue-500 cursor-pointer"
+                          onClick={() => onNavigateToFolder?.(folder)}
+                        >
+                          {folder.name}
+                        </span>
+                      </span>
+                    ))}
+                  </span>
+                </div>
+              )}
             </div>
           </div>
           <div className="flex items-center space-x-4">
@@ -1197,6 +1240,9 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
         {/* Version History Section */}
         {isExpanded && (
           <div className="px-4 space-y-6">
+            {/* Add Folder Information Section */}
+        
+
             <div>
               <h3 className="text-sm font-medium text-gray-900 mb-2 flex items-center">
                 <History className="w-4 h-4 mr-1" /> Version History

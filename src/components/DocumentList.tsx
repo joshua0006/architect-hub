@@ -436,12 +436,18 @@ export default function DocumentList({
     }
     
     if (folder) {
-      // Find the matching folder from our folders array
+      // Find the matching folder from our folders array by ID
+      // This ensures we're using the full folder object from our state
       const matchingFolder = folders.find(f => f.id === folder.id);
       if (matchingFolder) {
         onFolderSelect?.(matchingFolder);
+      } else {
+        console.log(`Folder with ID ${folder.id} not found in folders array`);
+        // If we can't find the folder, we might still want to navigate using the folder object passed
+        onFolderSelect?.(folder as Folder);
       }
     } else {
+      // Navigate to root (no folder)
       onFolderSelect?.(undefined);
     }
   };
@@ -523,18 +529,22 @@ export default function DocumentList({
   // Add this effect to handle selected file from URL
   useEffect(() => {
     if (selectedFile) {
-      console.log("Setting selected document from selectedFile prop:", selectedFile.name ? selectedFile.name : 'unnamed file');
+      // Get the folder information for the selected file
+      const fileFolder = selectedFile.folderId ? folders.find(f => f.id === selectedFile.folderId) : undefined;
+      console.log(`Setting selected document from selectedFile prop: ${selectedFile.name || 'unnamed file'} in folder: ${fileFolder?.name || 'No folder'}`);
       setSelectedDocument(selectedFile);
     }
-  }, [selectedFile]);
+  }, [selectedFile, folders]);
 
   // Add additional effect to handle documents array changes
   useEffect(() => {
     if (documents.length > 0 && !selectedDocument && selectedFile) {
-      console.log("Documents loaded, setting selected document:", selectedFile.name ? selectedFile.name : 'unnamed file');
+      // Get the folder information for the selected file
+      const fileFolder = selectedFile.folderId ? folders.find(f => f.id === selectedFile.folderId) : undefined;
+      console.log(`Documents loaded, setting selected document: ${selectedFile.name || 'unnamed file'} in folder: ${fileFolder?.name || 'No folder'}`);
       setSelectedDocument(selectedFile);
     }
-  }, [documents, selectedDocument, selectedFile]);
+  }, [documents, selectedDocument, selectedFile, folders]);
 
   // Monitor for project changes while we have a selectedFile
   useEffect(() => {
@@ -1776,7 +1786,7 @@ export default function DocumentList({
             document={selectedDocument}
             onClose={() => setSelectedDocument(undefined)}
             onRefresh={onRefresh}
-            folders={folders.map(f => ({ id: f.id, name: f.name }))}
+            folders={folders} // Pass the full folders array with complete folder information
             onNavigateToFolder={handleBreadcrumbNavigation}
             viewerHeight={600}
             setViewerHeight={(height: number) => {
@@ -2060,6 +2070,9 @@ export default function DocumentList({
                         if (isSharedView) {
                           onPreview(doc);
                         } else {
+                          // Get the full current folder info for this document
+                          const documentFolder = doc.folderId ? folders.find(f => f.id === doc.folderId) : undefined;
+                          console.log(`Setting selected document: ${doc.name} in folder: ${documentFolder?.name || 'No folder'}`);
                           setSelectedDocument(doc);
                         }
                       }}
