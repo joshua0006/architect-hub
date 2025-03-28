@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Milestone } from '../types';
-import { Flag, Calendar, Pencil, Trash2, Plus, X, ChevronDown } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { Flag, Calendar, Pencil, Trash2, Plus, X, ChevronDown, GripVertical } from 'lucide-react';
+import { motion, AnimatePresence, Reorder, useDragControls } from 'framer-motion';
 import { useAuth } from '../contexts/AuthContext';
 
 interface MilestoneListProps {
@@ -10,6 +10,7 @@ interface MilestoneListProps {
   onCreateMilestone: (title: string, description: string, dueDate: string, weight: number) => void;
   onUpdateMilestone: (id: string, updates: Partial<Omit<Milestone, 'id' | 'projectId'>>) => void;
   onDeleteMilestone: (id: string) => void;
+  onReorderMilestones?: (newOrder: Milestone[]) => void;
 }
 
 export default function MilestoneList({
@@ -17,18 +18,33 @@ export default function MilestoneList({
   milestones,
   onCreateMilestone,
   onUpdateMilestone,
-  onDeleteMilestone
+  onDeleteMilestone,
+  onReorderMilestones
 }: MilestoneListProps) {
   const { user, canUpdateMilestones } = useAuth();
   const [showForm, setShowForm] = useState(false);
   const [editingMilestone, setEditingMilestone] = useState<Milestone | null>(null);
   const [showStatusMenu, setShowStatusMenu] = useState<string | null>(null);
+  const [orderedMilestones, setOrderedMilestones] = useState<Milestone[]>(milestones);
   const [formData, setFormData] = useState({
     title: '',
     description: '',
     dueDate: '',
     weight: 0
   });
+
+  // Update ordered milestones when parent milestones change
+  useEffect(() => {
+    setOrderedMilestones(milestones);
+  }, [milestones]);
+
+  // Handle reordering of milestones
+  const handleReorder = (newOrder: Milestone[]) => {
+    setOrderedMilestones(newOrder);
+    if (onReorderMilestones) {
+      onReorderMilestones(newOrder);
+    }
+  };
 
   // Calculate total weight of existing milestones
   const totalExistingWeight = milestones
@@ -227,17 +243,36 @@ export default function MilestoneList({
       )}
 
       <div className="space-y-4">
-        <AnimatePresence mode="wait">
-          {milestones.map((milestone) => (
-            <motion.div
-              key={milestone.id}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -20 }}
+        <Reorder.Group 
+          axis="y" 
+          values={orderedMilestones} 
+          onReorder={handleReorder} 
+          className="space-y-4"
+        >
+          {orderedMilestones.map((milestone) => (
+            <Reorder.Item 
+              key={milestone.id} 
+              value={milestone}
               className="bg-white rounded-xl p-6 shadow-sm"
+              whileDrag={{ 
+                scale: 1.02, 
+                boxShadow: "0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)",
+                cursor: "grabbing",
+                zIndex: 10
+              }}
+              transition={{ 
+                type: "spring", 
+                damping: 25, 
+                stiffness: 300
+              }}
             >
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center space-x-2">
+                  {canUpdateMilestones() && (
+                    <div className="cursor-grab p-1 mr-1 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100">
+                      <GripVertical className="w-5 h-5" />
+                    </div>
+                  )}
                   <Flag className="w-5 h-5 text-primary-600" />
                   <h3 className="text-lg font-medium text-gray-900">{milestone.title}</h3>
                 </div>
@@ -259,7 +294,7 @@ export default function MilestoneList({
                             initial={{ opacity: 0, y: -10 }}
                             animate={{ opacity: 1, y: 0 }}
                             exit={{ opacity: 0, y: -10 }}
-                            className="absolute right-0 mt-2 w-40 bg-white rounded-md shadow-lg z-10 border border-gray-200"
+                            className="absolute right-0 mt-2 w-40 bg-white rounded-md shadow-lg z-20 border border-gray-200"
                           >
                             {statusOptions.map(option => (
                               <button
@@ -320,9 +355,9 @@ export default function MilestoneList({
                   </span>
                 </div>
               </div>
-            </motion.div>
+            </Reorder.Item>
           ))}
-        </AnimatePresence>
+        </Reorder.Group>
       </div>
     </div>
   );

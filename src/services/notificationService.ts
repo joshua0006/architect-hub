@@ -332,21 +332,31 @@ export const createFileUploadNotification = async (
   
   // If no target users provided, return empty array
   if (!targetUserIds || targetUserIds.length === 0) {
-    console.warn('No target users provided for file upload notification');
+    console.warn('[Notification] No target users provided for file upload notification');
     return [];
   }
   
+  // Log the notification creation attempt
+  console.log(`[Notification] Creating upload notifications for file "${fileName}" by ${formattedGuestName} for ${targetUserIds.length} users`);
+  
   // Create a notification for each target user
   const notificationPromises = targetUserIds.map(userId => {
+    // Make sure we have a valid userId
+    if (!userId || typeof userId !== 'string' || userId.trim() === '') {
+      console.warn('[Notification] Skipping invalid userId in createFileUploadNotification');
+      return Promise.resolve('invalid-user-id');
+    }
+    
+    // Create the notification object with all required fields
     const notification = {
-      iconType: 'file-upload',
-      type: 'info' as const,
+      iconType: 'file-upload', // This matches the icon type in NotificationContent.tsx
+      type: 'success' as const, // Use 'success' type for a green indicator
       message: `${formattedGuestName} uploaded "${fileName}" to ${folderName}`,
       link,
       read: false,
       userId, // Set the target user ID
       metadata: {
-        contentType,
+        contentType: contentType || 'file', // Ensure content type is never empty
         fileName,
         folderId,
         folderName,
@@ -356,15 +366,26 @@ export const createFileUploadNotification = async (
       }
     };
     
+    // Create the notification in Firebase
     return createNotification(notification);
   });
   
   try {
     // Wait for all notifications to be created
     const notificationIds = await Promise.all(notificationPromises);
-    return notificationIds;
+    
+    // Filter out any failed notifications
+    const validNotificationIds = notificationIds.filter(id => 
+      id && typeof id === 'string' && 
+      !id.startsWith('invalid') && 
+      !id.startsWith('retry') && 
+      !id.startsWith('general')
+    );
+    
+    console.log(`[Notification] Successfully created ${validNotificationIds.length} upload notifications`);
+    return validNotificationIds;
   } catch (error) {
-    console.error('Error creating file upload notifications:', error);
+    console.error('[Notification Error] Error creating file upload notifications:', error);
     return [];
   }
 };
@@ -604,6 +625,7 @@ export const subscribeToNotifications = (
   // Use very aggressive caching to prevent excessive Firestore queries
   const CACHE_DURATION_MS = 60000; // 1 minute
   const MIN_CALLBACK_INTERVAL = 10000; // 10 seconds minimum between callbacks
+  const FILE_UPLOAD_CALLBACK_INTERVAL = 2000; // 2 seconds for file uploads
   
   // Cache of last callback time to prevent excessive updates
   let lastCallbackTime = 0;
@@ -621,7 +643,7 @@ export const subscribeToNotifications = (
   const cachedData = notificationCache.get(cacheKey);
   
   // If we have recent cached notifications, send them immediately
-  if (cachedData && (Date.now() - cachedData.timestamp < MAX_CACHE_AGE)) {
+  if (cachedData && (Date.now() - cachedData.timestamp) < CACHE_DURATION_MS) {
     console.log(`[Notification Cache] Using cached notifications for user ${userId}, age: ${(Date.now() - cachedData.timestamp) / 1000}s`);
     
     // Use setTimeout to ensure this is asynchronous
@@ -667,15 +689,33 @@ export const subscribeToNotifications = (
     }, isFirstCallback ? 100 : 2000); // Process first callback quickly, then use longer debounce
   };
   
+  // Function to check if snapshot contains file upload notifications
+  const containsFileUploadNotifications = (snapshot: any): boolean => {
+    if (!snapshot || !snapshot.docs || snapshot.docs.length === 0) return false;
+    
+    // Check if any docs are file upload notifications that are unread
+    return snapshot.docs.some((doc: any) => {
+      const data = doc.data();
+      return data && data.iconType === 'file-upload' && data.read === false;
+    });
+  };
+  
   // Actual snapshot processing function
   const processSnapshotImmediately = (snapshot: any) => {
     try {
+      // Check for file upload notifications to determine throttling
+      const hasFileUploads = containsFileUploadNotifications(snapshot);
+      const throttleInterval = hasFileUploads ? FILE_UPLOAD_CALLBACK_INTERVAL : MIN_CALLBACK_INTERVAL;
+      
       // Throttle callbacks based on time (except for first callback)
       const now = Date.now();
-      if (!isFirstCallback && now - lastCallbackTime < MIN_CALLBACK_INTERVAL) {
+      if (!isFirstCallback && now - lastCallbackTime < throttleInterval) {
         console.log(`[Notification Subscription] Throttling callback, too soon after last callback (${Math.floor((now - lastCallbackTime) / 1000)}s)`);
         return;
       }
+      
+      // Log status along with file upload presence
+      console.log(`[Notification Subscription] Processing snapshot (hasFileUploads=${hasFileUploads}, throttleInterval=${throttleInterval}ms)`);
       
       // Check if we have any documents
       if (snapshot.empty) {
@@ -687,6 +727,7 @@ export const subscribeToNotifications = (
           notifications: []
         });
         
+        callback([]); // Always call callback with empty array
         return;
       }
       
@@ -700,8 +741,20 @@ export const subscribeToNotifications = (
       
       if (notifications.length === 0) {
         console.log(`[Notification Subscription] No valid notifications in snapshot for user ${userId}`);
+        callback([]); // Always call callback with empty array
         return;
       }
+      
+      // Sort notifications by creation time (newest first)
+      notifications.sort((a, b) => {
+        const timeA = a.createdAt?.toMillis?.() || 
+                    (a.createdAtISO ? new Date(a.createdAtISO).getTime() : 0) || 
+                    (a.raw?.createdTimestamp || 0);
+        const timeB = b.createdAt?.toMillis?.() || 
+                    (b.createdAtISO ? new Date(b.createdAtISO).getTime() : 0) || 
+                    (b.raw?.createdTimestamp || 0);
+        return timeB - timeA;
+      });
       
       // Update cache for future use
       notificationCache.set(cacheKey, {
@@ -713,6 +766,12 @@ export const subscribeToNotifications = (
       lastCallbackTime = now;
       isFirstCallback = false;
       
+      // Log information about file upload notifications
+      if (hasFileUploads) {
+        const fileUploadCount = notifications.filter(n => n.iconType === 'file-upload' && !n.read).length;
+        console.log(`[Notification Subscription] Found ${fileUploadCount} unread file upload notifications`);
+      }
+      
       // Call the callback with notifications
       console.log(`[Notification Subscription] Calling back with ${notifications.length} notifications`);
       callback(notifications);
@@ -721,27 +780,23 @@ export const subscribeToNotifications = (
     }
   };
   
-  // Set up the snapshot listener with much-reduced metadata changes option
+  // Set up the snapshot listener with improved error handling
   const unsubscribe = onSnapshot(
     q,
-    { includeMetadataChanges: false },
+    { includeMetadataChanges: false }, // Set to false to reduce unnecessary updates
     processSnapshot,
     (error) => {
-      console.error(`[Notification Subscription] Error in subscription for user ${userId}:`, error);
+      console.error(`[Notification Subscription] Error in subscription ${subscriptionId}:`, error);
     }
   );
   
-  // Return an enhanced unsubscribe function that cleans up internal timers
+  // Return unsubscribe function
   return () => {
-    console.log(`[Notification Subscription] Unsubscribing from subscription ${subscriptionId}`);
-    
-    // Clear any pending timers
+    console.log(`[Notification Subscription] Cleaning up subscription ${subscriptionId}`);
     if (debounceTimer) {
       clearTimeout(debounceTimer);
       debounceTimer = null;
     }
-    
-    // Call the Firebase unsubscribe
     unsubscribe();
   };
 };

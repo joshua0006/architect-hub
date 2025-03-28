@@ -5,6 +5,48 @@ import { Upload, AlertCircle, CheckCircle2, FileText, Loader2, User, X } from 'l
 import { documentService } from '../services/documentService';
 import { userService } from '../services/userService';
 import { createFileUploadNotification } from '../services/notificationService';
+import { triggerDocumentUpdate } from '../services/documentSubscriptionService';
+
+// Custom document upload function for token uploads
+const uploadDocument = async (
+  folderId: string, 
+  docData: any,  // Renamed from 'document' to avoid shadowing the global object
+  file: File
+): Promise<any> => {
+  // Use the imported documentService but wrap it with error handling
+  try {
+    // Call the actual create method on documentService
+    // @ts-ignore - Suppressing the TS error about missing method
+    const documentResult = await documentService.create(folderId, docData, file);
+    
+    // Dispatch document upload event for real-time updates
+    // This custom event will be picked up by DocumentList components
+    if (documentResult) {
+      const uploadSuccessEvent = new CustomEvent('document-upload-success', {
+        bubbles: true,
+        detail: {
+          folderId: folderId,
+          fileId: documentResult.id,
+          timestamp: Date.now(),
+          source: 'guest-upload'
+        }
+      });
+      
+      // Use window.document to explicitly refer to the global document object
+      window.document.dispatchEvent(uploadSuccessEvent);
+      console.log(`[Token Upload] Dispatched upload success event for folder: ${folderId}`);
+      
+      // Also use the triggerDocumentUpdate function as a backup
+      triggerDocumentUpdate(folderId, documentResult.id);
+    }
+    
+    // If upload is successful, return the result
+    return documentResult;
+  } catch (error) {
+    console.error("Error in uploadDocument:", error);
+    throw error;
+  }
+};
 
 const TokenUpload: React.FC = () => {
   const [searchParams] = useSearchParams();
@@ -24,6 +66,16 @@ const TokenUpload: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dragCounter = useRef(0);
   const tokenId = searchParams.get('token');
+  const [displayedRemainingUploads, setDisplayedRemainingUploads] = useState<number | null>(null);
+
+  // Update the displayed remaining uploads whenever token changes
+  useEffect(() => {
+    if (token?.maxUploads) {
+      setDisplayedRemainingUploads(token.maxUploads - token.usedCount);
+    } else {
+      setDisplayedRemainingUploads(null);
+    }
+  }, [token]);
 
   const fetchToken = async (id: string | null) => {
     if (!id) {
@@ -53,6 +105,11 @@ const TokenUpload: React.FC = () => {
 
   const hasReachedUploadLimit = () => {
     if (!token?.maxUploads) return false;
+    // Use displayedRemainingUploads for real-time tracking
+    if (displayedRemainingUploads !== null) {
+      return displayedRemainingUploads < files.length;
+    }
+    // Fallback to token state if displayedRemainingUploads is not set yet
     return (token.usedCount + files.length) > token.maxUploads;
   };
 
@@ -69,7 +126,11 @@ const TokenUpload: React.FC = () => {
     }
     
     if (token?.maxUploads) {
-      const remainingUploads = token.maxUploads - token.usedCount;
+      // Calculate remaining uploads based on the current token state
+      const remainingUploads = displayedRemainingUploads !== null 
+        ? displayedRemainingUploads
+        : (token.maxUploads - token.usedCount);
+        
       if (newFiles.length > remainingUploads) {
         alert(`You can only upload ${remainingUploads} more file(s). Please select fewer files.`);
         if (remainingUploads <= 0) return;
@@ -164,13 +225,25 @@ const TokenUpload: React.FC = () => {
       setIdentifierError("");
     }
     
+    // Refresh token information before starting uploads to ensure we have latest usedCount
+    if (tokenId) {
+      try {
+        await fetchToken(tokenId);
+      } catch (error) {
+        console.error("Error refreshing token before upload:", error);
+        // Continue with current token data
+      }
+    }
+    
     setIsUploading(true);
     
     let successCount = 0;
     const successFiles: string[] = [];
+    let updatedUsedCount = token.usedCount;
     
     try {
-      const uploadPromises = files.map(async (file) => {
+      // Process files one by one instead of parallel to avoid race conditions with token usage count
+      for (const file of files) {
         const fileId = `${file.name}_${file.size}_${Date.now()}`;
         
         try {
@@ -184,7 +257,7 @@ const TokenUpload: React.FC = () => {
             fileType = "dwg";
           }
           
-          const documentResult = await documentService.create(
+          const documentResult = await uploadDocument(
             token.folderId,
             {
               name: file.name,
@@ -201,59 +274,107 @@ const TokenUpload: React.FC = () => {
           );
           
           setUploadProgress(prev => ({ ...prev, [fileId]: 100 }));
-          
           setUploadStatus(prev => ({ ...prev, [fileId]: 'success' }));
           successCount++;
           successFiles.push(file.name);
           
+          // Increment token usage and update local state immediately for each successful file
           if (token.id) {
             await incrementTokenUsage(token.id);
-          }
-
-          try {
-            let usersToNotify: string[] = [];
-            if (token.metadata?.projectId) {
-              const projectUsers = await userService.getUsersByProject(token.metadata.projectId);
-              usersToNotify = projectUsers.map(user => user.id);
+            
+            // Get the latest token information from the server
+            if (tokenId) {
+              try {
+                await fetchToken(tokenId);
+                // The token state is now updated by fetchToken
+                // Get the latest usedCount for local reference
+                if (token) {
+                  updatedUsedCount = token.usedCount;
+                }
+              } catch (refreshError) {
+                console.error("Error refreshing token data:", refreshError);
+                // Update local count as fallback
+                updatedUsedCount++;
+                setToken(prevToken => prevToken ? {
+                  ...prevToken,
+                  usedCount: updatedUsedCount
+                } : null);
+              }
+            } else {
+              // If no tokenId (shouldn't happen), update local state only
+              updatedUsedCount++;
+              setToken(prevToken => prevToken ? {
+                ...prevToken,
+                usedCount: updatedUsedCount
+              } : null);
             }
-
-            if (usersToNotify.length > 0 && documentResult) {
+          }
+          
+          // Send notifications to users
+          try {
+            // Fetch all users with access to this folder first
+            const projectUsers = await userService.getUsersByProject(token.metadata?.projectId || '');
+            const staffUsers = projectUsers.filter(u => u.role === 'Staff' || u.role === 'Admin');
+            const assignedUsers = projectUsers.filter(u => u.role !== 'Staff' && u.role !== 'Admin');
+            
+            if (documentResult && (staffUsers.length > 0 || assignedUsers.length > 0)) {
               await createFileUploadNotification(
-                file.name,
-                guestIdentifier.trim(),
+                file.name.length > 40 ? file.name.substring(0, 37) + '...' : file.name,
+                guestIdentifier.trim().length > 25 ? guestIdentifier.trim().substring(0, 22) + '...' : guestIdentifier.trim(),
                 fileType,
                 token.folderId,
                 token.metadata?.folderName || "Folder",
                 documentResult.id,
                 token.metadata?.projectId || '',
                 new Date().toISOString(),
-                usersToNotify
+                [...assignedUsers.map((u) => u.id), ...staffUsers.map((u) => u.id)]
               );
-              console.log(`Notifications sent to ${usersToNotify.length} users for file upload`);
+              
+              console.log(`Notifications sent to ${assignedUsers.length + staffUsers.length} users`);
+            } else {
+              console.warn("No users to notify or missing document result for notifications");
+              
+              // If there's a system user or admin that should always be notified, you could add it here
+              if (documentResult && token.createdBy) {
+                // Always notify the token creator at minimum
+                await createFileUploadNotification(
+                  file.name.length > 40 ? file.name.substring(0, 37) + '...' : file.name,
+                  guestIdentifier.trim().length > 25 ? guestIdentifier.trim().substring(0, 22) + '...' : guestIdentifier.trim(),
+                  fileType,
+                  token.folderId,
+                  token.metadata?.folderName || "Folder",
+                  documentResult.id,
+                  token.metadata?.projectId || '',
+                  new Date().toISOString(),
+                  [token.createdBy]
+                );
+                console.log(`Notification sent to token creator: ${token.createdBy}`);
+              }
             }
+            
           } catch (notificationError) {
             console.error("Error sending upload notifications:", notificationError);
+            // Continue with the upload even if notification fails
           }
         } catch (error) {
           console.error(`Error uploading file ${file.name}:`, error);
           setUploadStatus(prev => ({ ...prev, [fileId]: 'error' }));
         }
-      });
-      
-      await Promise.all(uploadPromises);
+      }
     } finally {
       setIsUploading(false);
     }
     
     if (successCount > 0) {
+      // We've already updated the token state for each file, this is just a safety check
       setSuccessfulFiles(successFiles);
       setShowSuccessPopup(true);
-      
       setFiles([]);
     }
   };
 
   const handleContinueAfterSuccess = async () => {
+    // Fetch the most current token information to make sure we have the latest count
     if (tokenId) {
       await fetchToken(tokenId);
     }
@@ -345,7 +466,6 @@ const TokenUpload: React.FC = () => {
   const description = token.metadata?.description;
   const folderName = token.metadata?.folderName;
   const maxSizeMB = token.maxFileSize ? Math.round(token.maxFileSize / (1024 * 1024)) : null;
-  const remainingUploads = token.maxUploads ? token.maxUploads - token.usedCount : null;
 
   const renderLoadingOverlay = () => {
     if (!isUploading) return null;
@@ -375,7 +495,9 @@ const TokenUpload: React.FC = () => {
               <p className="text-sm font-medium text-gray-700 mb-2">The following files were uploaded:</p>
               <ul className="text-sm text-gray-600 list-disc pl-5 space-y-1">
                 {successfulFiles.map((fileName, index) => (
-                  <li key={index}>{fileName}</li>
+                  <li key={index} className="overflow-hidden text-ellipsis whitespace-nowrap max-w-full" title={fileName}>
+                    {fileName}
+                  </li>
                 ))}
               </ul>
             </div>
@@ -442,11 +564,11 @@ const TokenUpload: React.FC = () => {
                   {maxSizeMB} MB
                 </div>
               )}
-              {remainingUploads !== null && (
+              {displayedRemainingUploads !== null && (
                 <div className="flex items-center mb-2">
                   <span className="font-medium mr-2">Remaining uploads:</span> 
-                  <span className={remainingUploads <= 0 ? 'text-red-500 font-bold' : ''}>
-                    {remainingUploads <= 0 ? 'No remaining uploads' : remainingUploads}
+                  <span className={displayedRemainingUploads <= 0 ? 'text-red-500 font-bold' : ''}>
+                    {displayedRemainingUploads <= 0 ? 'No remaining uploads' : displayedRemainingUploads}
                   </span>
                 </div>
               )}
@@ -527,7 +649,7 @@ const TokenUpload: React.FC = () => {
                         <div className="flex items-center">
                           <FileText className="w-5 h-5 text-gray-400 mr-3" />
                           <div className="flex-grow">
-                            <p className="text-sm font-medium text-gray-700 truncate">{file.name}</p>
+                            <p className="text-sm font-medium text-gray-700 truncate" title={file.name}>{file.name}</p>
                             <p className="text-xs text-gray-500">{(file.size / 1024).toFixed(1)} KB</p>
                           </div>
                           {status === 'uploading' && (

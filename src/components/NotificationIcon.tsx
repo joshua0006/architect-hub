@@ -70,7 +70,7 @@ export const NotificationIcon: React.FC = () => {
   }, [notifications]);
   
   // Fetch notifications manually - memoized for stability
-  const fetchNotifications = useCallback(async (forceFetch = false) => {
+  const fetchNotifications = useCallback(async (forceFetch = false, skipLoadingState = false) => {
     if (!user) return;
     
     try {
@@ -81,7 +81,9 @@ export const NotificationIcon: React.FC = () => {
         return;
       }
       
-      setIsLoading(true);
+      if (!skipLoadingState) {
+        setIsLoading(true);
+      }
       setError(null);
       console.log(`[Notification Bell] Manually fetching notifications for user ${user.id}`);
       
@@ -106,7 +108,9 @@ export const NotificationIcon: React.FC = () => {
       setError(`Failed to load notifications: ${errorMessage}`);
       showToast('Could not load notifications', 'error');
     } finally {
-      setIsLoading(false);
+      if (!skipLoadingState) {
+        setIsLoading(false);
+      }
     }
   }, [user, showToast, deduplicateNotifications]);
   
@@ -114,9 +118,16 @@ export const NotificationIcon: React.FC = () => {
   const updateNotificationsThrottled = useCallback((newNotifications: Notification[]) => {
     const now = Date.now();
     
+    // For file upload notifications, decrease throttle time to make them appear faster
+    const fileUploadNotifications = newNotifications.filter(n => n.iconType === 'file-upload' && !n.read);
+    const hasFileUploads = fileUploadNotifications.length > 0;
+    
+    // Standard throttle time is 2 minutes, but only 10 seconds for file uploads
+    const throttleTime = hasFileUploads ? 10000 : 120000;
+    
     // Increase throttle time from 30s to 2 minutes for subscription updates
-    if (now - lastSubscriptionUpdate.current < 120000) {
-      console.log('[Notification Bell] Throttling subscription update, too frequent');
+    if (now - lastSubscriptionUpdate.current < throttleTime) {
+      console.log(`[Notification Bell] Throttling subscription update, too frequent (${throttleTime}ms throttle)`);
       return;
     }
     
@@ -146,12 +157,31 @@ export const NotificationIcon: React.FC = () => {
           
           // Only show toast for new notifications if there are more than before
           if (newUnreadCount > unreadCount) {
+            // Check for file upload notifications specifically
+            const fileUploadNotifications = updated.filter(
+              n => n.iconType === 'file-upload' && !n.read
+            );
+            
             // Check for mention notifications specifically
             const mentionNotifications = updated.filter(
               n => n.iconType === 'comment-mention' && !n.read
             );
             
-            if (mentionNotifications.length > 0) {
+            if (fileUploadNotifications.length > 0) {
+              // Show a toast for file uploads
+              const latestUpload = fileUploadNotifications.sort((a, b) => {
+                const timeA = a.createdAt?.toMillis?.() || new Date(a.createdAtISO || Date.now()).getTime();
+                const timeB = b.createdAt?.toMillis?.() || new Date(b.createdAtISO || Date.now()).getTime();
+                return timeB - timeA;
+              })[0];
+              
+              if (latestUpload && latestUpload.metadata) {
+                const guestName = latestUpload.metadata.guestName || 'A guest';
+                showToast(`${guestName} uploaded a file`, 'success');
+              } else {
+                showToast('New file uploaded', 'success');
+              }
+            } else if (mentionNotifications.length > 0) {
               showToast(`You were mentioned in a comment`, 'success');
             } else if (newUnreadCount - unreadCount > 0) {
               showToast('You have new notifications', 'success');
@@ -197,6 +227,7 @@ export const NotificationIcon: React.FC = () => {
         // Set up subscription only after initial fetch completes
         if (!hasActiveSubscription.current) {
           console.log('[Notification Bell] Creating new subscription');
+          
           // Set up real-time updates with throttled callback
           const unsubscribe = subscribeToNotifications(user.id, updateNotificationsThrottled);
           
@@ -295,6 +326,9 @@ export const NotificationIcon: React.FC = () => {
         // Check if this is a task notification
         const isTaskNotification = notification.iconType === 'task-assignment';
         
+        // Check if this is a file upload notification
+        const isFileUploadNotification = notification.iconType === 'file-upload';
+        
         if (isTaskNotification) {
           // For task notifications, use the taskId from metadata
           const taskId = notification.metadata?.taskId;
@@ -309,6 +343,51 @@ export const NotificationIcon: React.FC = () => {
                 timestamp: Date.now()
               }
             });
+            return;
+          }
+        }
+        
+        // Handle file upload notifications specially
+        if (isFileUploadNotification) {
+          // For file upload notifications, get the file ID from metadata
+          const fileId = notification.metadata?.fileId;
+          const folderId = notification.metadata?.folderId;
+          
+          if (fileId && folderId) {
+            // Create a navigation state with information about the file upload
+            const navigationState = {
+              needsProjectSwitch: true,
+              targetFolderId: folderId,
+              targetFileId: fileId,
+              fromNotification: true,
+              timestamp: Date.now(),
+              notificationType: 'file-upload',
+              forceDirect: true,
+              highlightNew: true // Signal to the file viewer that this is a newly uploaded file
+            };
+            
+            // Build target link
+            const targetLink = `/documents/folders/${folderId}/files/${fileId}`;
+            
+            // Dispatch refresh event
+            const eventDetail = {
+              fileId,
+              folderId,
+              notificationType: 'file-upload',
+              fileName: notification.metadata?.fileName,
+              timestamp: Date.now(),
+              source: 'notification'
+            };
+            
+            // Dispatch the event with details
+            const customEvent = new CustomEvent(NOTIFICATION_DOCUMENT_UPDATE_EVENT, { 
+              detail: eventDetail,
+              bubbles: true
+            });
+            document.dispatchEvent(customEvent);
+            
+            // Navigate to the file
+            navigate(targetLink, { state: navigationState, replace: true });
             return;
           }
         }
@@ -450,14 +529,23 @@ export const NotificationIcon: React.FC = () => {
     if (!user) return;
     
     try {
+      // Don't set loading state here since it's managed by the caller
+      // Call the service to mark all notifications as read
       await markAllNotificationsAsRead(user.id);
+      
+      // Update local state to mark all notifications as read
       setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+      
+      // Reset unread count to zero
       setUnreadCount(0);
+      
       showToast('All notifications marked as read', 'success');
     } catch (error) {
       console.error('Error marking all notifications as read:', error);
       showToast('Failed to mark notifications as read', 'error');
+      throw error; // Re-throw to allow caller to handle
     }
+    // Don't manage loading state in finally block
   };
 
   // Handle deleting read notifications
@@ -465,7 +553,7 @@ export const NotificationIcon: React.FC = () => {
     if (!user) return;
     
     try {
-      setIsDeleting(true);
+      // Don't set deleting state here since it's managed by the caller
       const deletedCount = await deleteReadNotifications(user.id);
       
       if (deletedCount > 0) {
@@ -475,12 +563,13 @@ export const NotificationIcon: React.FC = () => {
       } else {
         showToast('No read notifications to delete', 'success');
       }
+      return deletedCount;
     } catch (error) {
       console.error('Error deleting read notifications:', error);
       showToast('Failed to delete read notifications', 'error');
-    } finally {
-      setIsDeleting(false);
+      throw error; // Re-throw to allow caller to handle
     }
+    // Don't manage deleting state in finally block
   };
 
   // Handle deleting a single notification
@@ -542,6 +631,7 @@ export const NotificationIcon: React.FC = () => {
       return formatDistanceToNow(new Date(), { addSuffix: true });
     } catch (error) {
       console.error('Error formatting timestamp:', error, timestamp);
+      console.log('Timestamp:', timestamp);
       return 'some time ago';
     }
   };
@@ -596,34 +686,54 @@ export const NotificationIcon: React.FC = () => {
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}
-            className="absolute right-0 mt-2 w-80 bg-white rounded-lg shadow-lg overflow-hidden border border-gray-200 z-[9999]"
+            className="absolute right-0 mt-2 bg-white rounded-lg shadow-lg overflow-hidden border border-gray-200 z-[9999] w-[350px] max-w-[90vw]"
           >
-            <div className="flex justify-between items-center p-3 border-b border-gray-200">
+            <div className="flex justify-between items-center p-3 border-b border-gray-200 w-full">
               <h3 className="font-semibold text-gray-700">Notifications</h3>
-              <div className="flex space-x-2">
+              <div className="flex space-x-2 flex-shrink-0">
                 {unreadCount > 0 && (
                   <button
-                    onClick={async () => {
-                      await handleMarkAllAsRead();
-                      // Refresh list after marking all as read
-                      fetchNotifications();
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      try {
+                        // Set loading state explicitly for this operation
+                        setIsLoading(true);
+                        await handleMarkAllAsRead();
+                        // Refresh list after marking all as read without changing loading state
+                        await fetchNotifications(true, true);
+                      } catch (error) {
+                        console.error('Error marking all as read:', error);
+                      } finally {
+                        // Clear loading state when everything is done
+                        setIsLoading(false);
+                      }
                     }}
-                    className="text-xs text-primary-600 hover:text-primary-800"
-                    disabled={isDeleting || isLoading}
+                    className="text-xs text-primary-600 hover:text-primary-800 hover:bg-gray-100 px-2 py-1 rounded transition-colors z-10 relative disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+                 
                   >
-                    Mark all as read
+                   Mark all as read
                   </button>
                 )}
                 
                 {readCount > 0 && (
                   <button
-                    onClick={async () => {
-                      await handleDeleteRead();
-                      // Refresh list after deleting read notifications
-                      fetchNotifications();
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      try {
+                        // Set deleting state explicitly for this operation
+                        setIsDeleting(true);
+                        await handleDeleteRead();
+                        // Refresh list after deleting read notifications
+                        await fetchNotifications(true, true);
+                      } catch (error) {
+                        console.error('Error deleting read notifications:', error);
+                      } finally {
+                        // Clear deleting state when everything is done
+                        setIsDeleting(false);
+                      }
                     }}
-                    className="text-xs text-red-600 hover:text-red-800 flex items-center"
-                    disabled={isDeleting || isLoading}
+                    className="text-xs text-red-600 hover:text-red-800 hover:bg-gray-100 px-2 py-1 rounded flex items-center z-10 relative disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+                    
                   >
                     {isDeleting ? (
                       <>
@@ -633,7 +743,7 @@ export const NotificationIcon: React.FC = () => {
                     ) : (
                       <>
                         <Trash2 className="w-3 h-3 mr-1" />
-                        Delete read
+                        <span>Delete read</span>
                       </>
                     )}
                   </button>
@@ -682,13 +792,13 @@ export const NotificationIcon: React.FC = () => {
                       return (
                         <li
                           key={notification.id}
-                          className={`p-3 border-b border-gray-100 hover:bg-gray-50 cursor-pointer transition-colors relative group 
+                          className={`p-3 border-b border-gray-100 hover:bg-gray-50 cursor-pointer transition-colors relative group overflow-hidden
                             ${!notification.read ? 'bg-blue-50' : ''}
                             ${isMentionNotification && !notification.read ? 'bg-blue-100 shadow-sm' : ''}`
                           }
                         >
                           <div 
-                            className="flex-1"
+                            className="flex-1 w-full overflow-hidden"
                             onClick={() => handleNotificationClick(notification)}
                           >
                             <NotificationContent 

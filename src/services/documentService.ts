@@ -12,7 +12,8 @@ import {
   where,
   orderBy,
   setDoc,
-  Timestamp
+  Timestamp,
+  onSnapshot
 } from 'firebase/firestore';
 import {
   ref,
@@ -26,6 +27,9 @@ import { folderService } from './folderService';
 import { userService } from './userService';
 import { createCommentMentionNotifications } from './notificationService';
 import { extractMentions, extractUserIds, resolveUserMentions, UserMention } from '../utils/textUtils';
+
+// Add a global subscription tracker
+let GLOBAL_DOCUMENT_SUBSCRIPTION_ACTIVE = false;
 
 export const documentService = {
   // Get all documents in a folder
@@ -48,6 +52,98 @@ export const documentService = {
       console.error('Error getting documents:', error);
       throw new Error('Failed to get documents');
     }
+  },
+
+  // Subscribe to real-time document updates for a specific folder
+  subscribeToDocuments(
+    folderId: string,
+    callback: (documents: Document[]) => void
+  ): (() => void) {
+    // Generate a unique subscription ID for tracking
+    const subscriptionId = `docs-${folderId}-${Date.now()}`;
+    console.log(`[Document Subscription] Creating subscription ${subscriptionId}`);
+    
+    // Prevent multiple subscriptions
+    if (GLOBAL_DOCUMENT_SUBSCRIPTION_ACTIVE) {
+      console.log(`[Document Subscription] Another subscription is already active, using that one`);
+    }
+    
+    GLOBAL_DOCUMENT_SUBSCRIPTION_ACTIVE = true;
+    
+    // Set up throttling to prevent excessive updates
+    let lastCallbackTime = 0;
+    const MIN_CALLBACK_INTERVAL = 1000; // 1 second minimum between callbacks
+    
+    // Create a query for documents in this folder
+    const q = query(
+      collection(db, 'documents'),
+      where('folderId', '==', folderId),
+      orderBy('updatedAt', 'desc')
+    );
+    
+    console.log(`[Document Subscription] Setting up real-time subscription for folder ${folderId}`);
+    
+    // Process incoming document snapshots
+    const processSnapshot = (snapshot: any) => {
+      try {
+        // Throttle callbacks based on time
+        const now = Date.now();
+        if (now - lastCallbackTime < MIN_CALLBACK_INTERVAL) {
+          console.log('[Document Subscription] Throttling callback, too soon after last callback');
+          return;
+        }
+        
+        // Check if we have any documents
+        if (snapshot.empty) {
+          console.log(`[Document Subscription] No documents found for folder ${folderId}`);
+          callback([]);
+          return;
+        }
+        
+        // Process snapshot to get all documents
+        const documents: Document[] = snapshot.docs
+          .filter((doc: any) => doc.id !== '_metadata')
+          .map((doc: any) => {
+            const data = doc.data();
+            return {
+              id: doc.id,
+              ...data
+            } as Document;
+          });
+        
+        if (documents.length === 0) {
+          console.log(`[Document Subscription] No valid documents in snapshot for folder ${folderId}`);
+          callback([]);
+          return;
+        }
+        
+        // Update timing variable
+        lastCallbackTime = now;
+        
+        // Call the callback with documents
+        console.log(`[Document Subscription] Calling back with ${documents.length} documents`);
+        callback(documents);
+      } catch (error) {
+        console.error('[Document Subscription] Error processing snapshot:', error);
+      }
+    };
+    
+    // Set up the snapshot listener
+    const unsubscribe = onSnapshot(
+      q,
+      { includeMetadataChanges: false },
+      processSnapshot,
+      (error) => {
+        console.error(`[Document Subscription] Error in subscription ${subscriptionId}:`, error);
+      }
+    );
+    
+    // Return unsubscribe function
+    return () => {
+      console.log(`[Document Subscription] Cleaning up subscription ${subscriptionId}`);
+      unsubscribe();
+      GLOBAL_DOCUMENT_SUBSCRIPTION_ACTIVE = false;
+    };
   },
 
   // Create a document with file upload
@@ -411,14 +507,8 @@ export const documentService = {
   // Delete a comment
   async deleteComment(documentId: string, commentId: string): Promise<void> {
     try {
-      const commentRef = doc(db, `documents/${documentId}/comments`, commentId);
+      const commentRef = doc(db, `documents/${documentId}/comments/${commentId}`);
       await deleteDoc(commentRef);
-
-      // Update document metadata
-      const documentRef = doc(db, 'documents', documentId);
-      await updateDoc(documentRef, {
-        'metadata.commentsCount': increment(-1)
-      });
     } catch (error) {
       console.error('Error deleting comment:', error);
       throw new Error('Failed to delete comment');

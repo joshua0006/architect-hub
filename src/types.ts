@@ -142,6 +142,7 @@ export interface Milestone {
   dueDate: string;
   weight: number;
   status: 'pending' | 'in-progress' | 'completed';
+  order?: number;
   metadata?: {
     createdAt: string;
     updatedAt: string;

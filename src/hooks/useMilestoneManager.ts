@@ -31,7 +31,16 @@ export function useMilestoneManager(projectId: string) {
           id: doc.id,
           ...doc.data()
         } as Milestone));
-        setMilestones(updatedMilestones);
+        
+        // Sort by order field if available, otherwise keep the default order
+        const sortedMilestones = updatedMilestones.sort((a, b) => {
+          if (a.order !== undefined && b.order !== undefined) {
+            return a.order - b.order;
+          }
+          return 0;
+        });
+        
+        setMilestones(sortedMilestones);
         setLoading(false);
         setError(null);
       },
@@ -62,13 +71,19 @@ export function useMilestoneManager(projectId: string) {
         throw new Error('Total milestone weights cannot exceed 100%');
       }
 
+      // Set order to be the highest existing order + 1, or 0 if no milestones exist
+      const highestOrder = milestones.length > 0 
+        ? Math.max(...milestones.map(m => m.order !== undefined ? m.order : 0))
+        : -1;
+
       await milestoneService.create({
         projectId,
         title,
         description,
         dueDate,
         weight,
-        status: 'pending'
+        status: 'pending',
+        order: highestOrder + 1
       });
     } catch (err) {
       console.error('Error creating milestone:', err);
@@ -113,12 +128,29 @@ export function useMilestoneManager(projectId: string) {
     }
   }, []);
 
+  // New function to handle reordering of milestones
+  const reorderMilestones = useCallback(async (reorderedMilestones: Milestone[]) => {
+    try {
+      // Create an array of promises for batch updating
+      const updatePromises = reorderedMilestones.map((milestone, index) => {
+        return milestoneService.update(milestone.id, { order: index });
+      });
+
+      // Execute all updates in parallel
+      await Promise.all(updatePromises);
+    } catch (err) {
+      console.error('Error reordering milestones:', err);
+      throw err;
+    }
+  }, []);
+
   return {
     milestones,
     loading,
     error,
     createMilestone,
     updateMilestone,
-    deleteMilestone
+    deleteMilestone,
+    reorderMilestones
   };
 }

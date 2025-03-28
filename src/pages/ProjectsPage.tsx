@@ -1,8 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { Plus } from 'lucide-react';
+import { DragDropContext, Droppable, DropResult } from 'react-beautiful-dnd';
 import ProjectCard from '../components/ProjectCard';
 import { useNavigate } from 'react-router-dom';
 import { useToast } from '../contexts/ToastContext';
+import { useAuth } from '../contexts/AuthContext';
+import { userService } from '../services';
 
 // Mock project data type
 interface Project {
@@ -20,6 +23,7 @@ const ProjectsPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
   const { showToast } = useToast();
+  const { user } = useAuth();
 
   // Mock loading projects
   useEffect(() => {
@@ -54,7 +58,34 @@ const ProjectsPage: React.FC = () => {
           }
         ];
         
-        setProjects(mockProjects);
+        if (user?.id) {
+          // Try to load saved order from user preferences
+          const savedOrder = await userService.getProjectOrder(user.id);
+          
+          if (savedOrder && savedOrder.length > 0) {
+            // Create a map for quick lookup
+            const projectMap = new Map(mockProjects.map(p => [p.id, p]));
+            
+            // Create ordered array from saved IDs, only including projects that exist
+            const orderedProjects = savedOrder
+              .map(id => projectMap.get(id))
+              .filter(p => p !== undefined) as Project[];
+            
+            // Add any projects that aren't in saved order at the end
+            mockProjects.forEach(project => {
+              if (!savedOrder.includes(project.id)) {
+                orderedProjects.push(project);
+              }
+            });
+            
+            setProjects(orderedProjects);
+            console.log('Loaded custom project order from user preferences');
+          } else {
+            setProjects(mockProjects);
+          }
+        } else {
+          setProjects(mockProjects);
+        }
       } catch (err) {
         setError('Failed to load projects');
         console.error('Error fetching projects:', err);
@@ -64,7 +95,7 @@ const ProjectsPage: React.FC = () => {
     };
     
     fetchProjects();
-  }, []);
+  }, [user]);
 
   // Handle deleting a project
   const handleDeleteProject = async (projectId: string) => {
@@ -77,6 +108,16 @@ const ProjectsPage: React.FC = () => {
       
       // Show success message
       showToast('Project successfully deleted', 'success');
+      
+      // Remove the deleted project from saved order if exists
+      if (user?.id) {
+        const savedOrder = await userService.getProjectOrder(user.id);
+        if (savedOrder && savedOrder.includes(projectId)) {
+          const updatedOrder = savedOrder.filter(id => id !== projectId);
+          await userService.saveProjectOrder(user.id, updatedOrder);
+          console.log('Updated saved order after deletion');
+        }
+      }
     } catch (error) {
       console.error('Error deleting project:', error);
       showToast('Failed to delete project', 'error');
@@ -87,6 +128,39 @@ const ProjectsPage: React.FC = () => {
   // Create new project
   const handleCreateProject = () => {
     navigate('/projects/new');
+  };
+
+  // Handle drag end event
+  const handleDragEnd = (result: DropResult) => {
+    const { destination, source } = result;
+
+    // If dropped outside the list or didn't move
+    if (!destination || (destination.index === source.index)) {
+      return;
+    }
+
+    // Reorder the list
+    const reorderedProjects = Array.from(projects);
+    const [removed] = reorderedProjects.splice(source.index, 1);
+    reorderedProjects.splice(destination.index, 0, removed);
+
+    // Update state with new order
+    setProjects(reorderedProjects);
+    
+    // Save the new order to user preferences
+    if (user?.id) {
+      const projectIds = reorderedProjects.map(project => project.id);
+      userService.saveProjectOrder(user.id, projectIds)
+        .then(() => {
+          console.log('Project order saved to user preferences');
+          showToast('Project order updated', 'success');
+        })
+        .catch(error => {
+          console.error('Error saving project order:', error);
+        });
+    } else {
+      showToast('Project order updated', 'success');
+    }
   };
 
   return (
@@ -133,15 +207,27 @@ const ProjectsPage: React.FC = () => {
           </button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {projects.map(project => (
-            <ProjectCard
-              key={project.id}
-              project={project}
-              onDeleteProject={handleDeleteProject}
-            />
-          ))}
-        </div>
+        <DragDropContext onDragEnd={handleDragEnd}>
+          <Droppable droppableId="projects-list">
+            {(provided) => (
+              <div 
+                ref={provided.innerRef}
+                {...provided.droppableProps}
+                className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"
+              >
+                {projects.map((project, index) => (
+                  <ProjectCard
+                    key={project.id}
+                    project={project}
+                    onDeleteProject={handleDeleteProject}
+                    index={index}
+                  />
+                ))}
+                {provided.placeholder}
+              </div>
+            )}
+          </Droppable>
+        </DragDropContext>
       )}
     </div>
   );
