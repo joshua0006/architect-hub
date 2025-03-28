@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Users, Loader2 } from "lucide-react";
 import { Project } from "../types";
 import { User } from "../types/auth";
@@ -78,9 +78,21 @@ export default function PeopleList({ projects, teamMembers, onCreateMember, onUp
   }> | null>(null);
   const navigate = useNavigate();
   const location = useLocation();
+  // Use a ref to store the unsubscribe function
+  const unsubscribeRef = useRef<(() => void) | null>(null);
 
+  
   useEffect(() => {
     loadUsers();
+    setupUserSubscription();
+    
+    // Cleanup function to unsubscribe when component unmounts
+    return () => {
+      if (unsubscribeRef.current) {
+        unsubscribeRef.current();
+        unsubscribeRef.current = null;
+      }
+    };
   }, []);
 
   const loadUsers = async () => {
@@ -96,6 +108,32 @@ export default function PeopleList({ projects, teamMembers, onCreateMember, onUp
       setLoading(false);
     }
   };
+
+  const setupUserSubscription = () => {
+    // Make sure to clean up any existing subscription first
+    if (unsubscribeRef.current) {
+      unsubscribeRef.current();
+      unsubscribeRef.current = null;
+    }
+    
+    // Set up new subscription
+    try {
+      const unsubscribe = userService.subscribeToAllUsers((updatedUsers) => {
+
+        // setUsers(updatedUsers);
+        // setError(null);
+        console.log("Users updated:", updatedUsers);  
+      });
+      
+      // Store the unsubscribe function
+      unsubscribeRef.current = unsubscribe;
+    } catch (err) {
+      console.error('Error setting up user subscription:', err);
+      // If subscription fails, fall back to non-realtime data
+      // loadUsers();
+    }
+  };
+  
 
   const handleProjectSelect = (projectId: string) => {
     // Find the selected project to ensure it exists

@@ -1,4 +1,4 @@
-import { collection, getDocs, query, where, doc, getDoc, updateDoc, arrayUnion, arrayRemove, setDoc, serverTimestamp, addDoc, writeBatch } from 'firebase/firestore';
+import { collection, getDocs, query, where, doc, getDoc, updateDoc, arrayUnion, arrayRemove, setDoc, serverTimestamp, addDoc, writeBatch, onSnapshot } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { User, UserGroup } from '../types';
 
@@ -36,6 +36,25 @@ export const userService = {
     }
   },
 
+  subscribeToAllUsers(callback: (users: User[]) => void) {
+    try {
+      const usersRef = collection(db, 'users');
+      return onSnapshot(usersRef, (snapshot) => {
+        const users = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        } as User));
+        callback(users);
+      }, (error) => {
+        console.error('Error in users subscription:', error);
+        callback([]);
+      });
+    } catch (error) {
+      console.error('Error setting up users subscription:', error);
+      return () => {};
+    }
+  },
+  
   async getUsersByRole(role: string): Promise<User[]> {
     try {
       const usersRef = collection(db, 'users');
