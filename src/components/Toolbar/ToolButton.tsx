@@ -1,7 +1,9 @@
-import React, { useRef } from "react";
+import React, { useEffect, useRef } from "react";
 import { useAnnotationStore } from "../../store/useAnnotationStore";
 import { AnnotationType } from "../../types/annotation";
 import { LucideProps } from "lucide-react";
+import { Folder, EnhancedFolder } from "../Toolbar";
+import { DEFAULT_FOLDER_ACCESS, FolderAccessPermission, PERMISSIONS_MAP, useAuth, UserRole } from "../../contexts/AuthContext";
 
 interface ToolButtonProps {
   tool: AnnotationType;
@@ -10,6 +12,7 @@ interface ToolButtonProps {
   shortcut?: string;
   onClick?: () => void;
   rightIcon?: React.ComponentType<LucideProps>;
+  currentFolder?: Folder | EnhancedFolder | null;
 }
 
 // Track last event time globally to prevent multiple rapid dispatches
@@ -72,8 +75,32 @@ export const ToolButton: React.FC<ToolButtonProps> = ({
   shortcut,
   onClick,
   rightIcon: RightIconComponent,
+  currentFolder,
 }) => {
   const { currentTool, setCurrentTool } = useAnnotationStore();
+  const { user } = useAuth();
+
+
+  useEffect(() => {
+    console.log('currentFolder', currentFolder);
+    console.log('hasFolderWritePermission', hasFolderWritePermission());
+    console.log('tool', tool);
+  }, [currentFolder]);
+
+
+  const hasFolderWritePermission = (): boolean => {
+    if(tool === 'select') {
+      return true;
+    }
+    const role = user?.role as UserRole| undefined;
+    const folderPermission = currentFolder?.metadata?.access as FolderAccessPermission;
+    let writeAccess = DEFAULT_FOLDER_ACCESS;
+    if (role && folderPermission in PERMISSIONS_MAP) {
+      writeAccess = PERMISSIONS_MAP[folderPermission][role] ?? DEFAULT_FOLDER_ACCESS;
+    }
+    return writeAccess.write;
+  }  
+
 
   return (
     <button
@@ -90,6 +117,7 @@ export const ToolButton: React.FC<ToolButtonProps> = ({
           : "text-gray-700 hover:bg-gray-50"
       }`}
       title={shortcut ? `${label} (${shortcut})` : label}
+      disabled={!hasFolderWritePermission()}
     >
       <div className="flex-1 flex items-center gap-2">
         <IconComponent size={20} />

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, memo } from "react";
+import React, { useState, useEffect, useRef, useCallback, memo, useMemo } from "react";
 import { useLocation, useSearchParams } from "react-router-dom";
 
 import {
@@ -418,11 +418,23 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
   
   // Get folder path
   const folderPath = getFolderPath();
+  
+  // Enhanced folder information with path data
+  const enhancedFolderInfo = useMemo(() => {
+    if (!currentFolder) return null;
+    
+    return {
+      ...currentFolder,
+      folderPath,
+      pathString: folderPath.map(f => f.name).join(' > '),
+      parentFolder: currentFolder.parentId ? folders.find(f => f.id === currentFolder.parentId) : null
+    };
+  }, [currentFolder, folderPath, folders]);
 
   useEffect(() => {
     if (!document.id) return;
     console.log("Current folder:", currentFolder);
-
+    
     setLoadingComments(true);
     const commentsRef = collection(db, `documents/${document.id}/comments`);
     const q = query(commentsRef, orderBy("createdAt", "desc"));
@@ -1416,7 +1428,7 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
       <div className="flex-1 bg-gray-100 p-4">
         {document.type === "pdf" ? (
           <div className="flex h-full gap-4">
-            <Toolbar  />
+            <Toolbar currentFolder={enhancedFolderInfo} />
             <div
               className="relative bg-white rounded-lg shadow-sm p-4 flex-1 document-content"
               style={{ height: "100%" }}

@@ -229,15 +229,15 @@ export default function DocumentList({
     );
 
     // Filter folders based on user's write permissions for each folder
-    filteredFolders = filteredFolders.filter(folder => 
-      hasFolderWritePermission(folder.metadata?.access as FolderAccessPermission)
-    );
+    // filteredFolders = filteredFolders.filter(folder => 
+    //   hasFolderWritePermission(folder.metadata?.access as FolderAccessPermission)
+    // );
 
     
     // Filter documents based on user's write permissions for the current folder
-    filteredDocs = filteredDocs.filter(doc => 
-      hasFolderWritePermission(currentFolder?.metadata?.access as FolderAccessPermission)
-    );
+    // filteredDocs = filteredDocs.filter(doc => 
+    //   hasFolderWritePermission(currentFolder?.metadata?.access as FolderAccessPermission)
+    // );
 
     // Apply permission filter based on user role
     // if (user?.role !== 'Staff' && user?.role !== 'Admin') {
@@ -1992,7 +1992,6 @@ export default function DocumentList({
                       <span className="font-medium text-gray-900">
                         {typeof folder.name === 'string' ? folder.name : 'Unnamed folder'}
                       </span>
-                      <p>{folder.metadata?.access}</p>
                     </button>
                     {!isSharedView && (
                       <div className="flex items-center space-x-1">
