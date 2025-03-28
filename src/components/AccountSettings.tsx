@@ -36,6 +36,8 @@ export default function AccountSettings() {
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   
+
+  
   const [formData, setFormData] = useState<UserProfile>({
     photoURL: null,
     title: '',
