@@ -28,7 +28,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Timestamp } from "firebase/firestore";
 import { createShareToken } from '../services/shareService';
 import { useToast } from '../contexts/ToastContext';
-import { useAuth } from '../contexts/AuthContext';
+import { DEFAULT_FOLDER_ACCESS, FolderAccessPermission, PERMISSIONS_MAP, useAuth, UserRole } from '../contexts/AuthContext';
 import { ConfirmDialog } from './ui/ConfirmDialog';
 import { RenameDialog } from './ui/RenameDialog';
 import { PermissionsDialog } from './ui/PermissionsDialog';
@@ -205,94 +205,117 @@ export default function DocumentList({
     (folder) => folder.parentId === currentFolder?.id
   );
 
+
+ const hasFolderWritePermission = (folderPermission: FolderAccessPermission): boolean => {
+  const role = user?.role as UserRole | undefined;
+
+  let writeAccess = DEFAULT_FOLDER_ACCESS;
+  if (role && folderPermission in PERMISSIONS_MAP) {
+    writeAccess = PERMISSIONS_MAP[folderPermission][role] ?? DEFAULT_FOLDER_ACCESS;
+  }
+  return writeAccess.write;
+ }
+
+
   // Filter and sort documents and folders based on search, view filter, and sort order
   const filteredAndSortedItems = () => {
     // Apply search filter for documents
-    let filteredDocs = isSharedView 
-      ? (sharedDocuments || []) 
+    let filteredDocs = isSharedView
+      ? (sharedDocuments || [])
       : localDocuments.filter(doc => doc.folderId === currentFolder?.id);
-    
-    filteredDocs = filteredDocs.filter(doc => 
+
+    filteredDocs = filteredDocs.filter(doc =>
       doc.name && typeof doc.name === 'string' ? 
       doc.name.toLowerCase().includes(searchQuery.toLowerCase()) : 
       false
     );
     
     // Apply search filter for folders
-    let filteredFolders = isSharedView 
-      ? (sharedFolders || []) 
-      : allFolders.filter(folder => 
-          folder.name && typeof folder.name === 'string' ? 
-          folder.name.toLowerCase().includes(searchQuery.toLowerCase()) : 
+    let filteredFolders = isSharedView
+      ? (sharedFolders || [])
+      : allFolders.filter(folder =>
+          folder.name && typeof folder.name === 'string' ?
+          folder.name.toLowerCase().includes(searchQuery.toLowerCase()) :
           false
         );
 
+    // Filter folders based on user's write permissions for each folder
+    // filteredFolders = filteredFolders.filter(folder =>
+    //   hasFolderWritePermission(folder.metadata?.access as FolderAccessPermission)
+    // );
+
+
+    // Filter documents based on user's write permissions for the current folder
+    // filteredDocs = filteredDocs.filter(doc =>
+    //   hasFolderWritePermission(currentFolder?.metadata?.access as FolderAccessPermission)
+    // );
+
     // Apply permission filter based on user role
-    if (user?.role !== 'Staff' && user?.role !== 'Admin') {
-      // For non-staff users, filter based on their role
-      if (user?.role === 'Contractor') {
-        // Contractors can see folders with CONTRACTORS_WRITE or CLIENTS_READ or ALL permission
-        filteredFolders = filteredFolders.filter(folder => {
-          if (folder.metadata && 'access' in folder.metadata) {
-            const access = folder.metadata.access as string;
-            return access === 'CONTRACTORS_WRITE' || access === 'CLIENTS_READ' || access === 'ALL';
-          }
-          return false;
-        });
+    // if (user?.role !== 'Staff' && user?.role !== 'Admin') {
+    //   // For non-staff users, filter based on their role
+    //   if (user?.role === 'Contractor') {
+    //     // Contractors can see folders with CONTRACTORS_WRITE or CLIENTS_READ or ALL permission
+    //     filteredFolders = filteredFolders.filter(folder => {
+    //       if (folder.metadata && 'access' in folder.metadata) {
+    //         const access = folder.metadata.access as string;
+    //         return access === 'CONTRACTORS_WRITE' || access === 'CLIENTS_READ' || access === 'ALL';
+    //       }
+    //       return false;
+    //     });
 
-        filteredDocs = filteredDocs.filter(doc => {
-          if (doc.metadata && 'access' in doc.metadata) {
-            const access = doc.metadata.access as string;
-            return access === 'CONTRACTORS_WRITE' || access === 'CLIENTS_READ' || access === 'ALL';
-          }
-          return false;
-        });
-      } else if (user?.role === 'Client') {
-        // Clients can only see folders with CLIENTS_READ or ALL permission
-        filteredFolders = filteredFolders.filter(folder => {
-          if (folder.metadata && 'access' in folder.metadata) {
-            const access = folder.metadata.access as string;
-            return access === 'CLIENTS_READ' || access === 'ALL';
-          }
-          return false;
-        });
+    //     filteredDocs = filteredDocs.filter(doc => {
+    //       if (doc.metadata && 'access' in doc.metadata) {
+    //         const access = doc.metadata.access as string;
+    //         return access === 'CONTRACTORS_WRITE' || access === 'CLIENTS_READ' || access === 'ALL';
+    //       }
+    //       return false;
+    //     });
+    //   } else if (user?.role === 'Client') {
+    //     // Clients can only see folders with CLIENTS_READ or ALL permission
+    //     filteredFolders = filteredFolders.filter(folder => {
+    //       if (folder.metadata && 'access' in folder.metadata) {
+    //         const access = folder.metadata.access as string;
+    //         return access === 'CLIENTS_READ' || access === 'ALL';
+    //       }
+    //       return false;
+    //     });
 
-        filteredDocs = filteredDocs.filter(doc => {
-          if (doc.metadata && 'access' in doc.metadata) {
-            const access = doc.metadata.access as string;
-            return access === 'CLIENTS_READ' || access === 'ALL';
-          }
-          return false;
-        });
-      } else {
-        // Default handling for any other role
-        filteredFolders = filteredFolders.filter(folder => {
-          if (folder.metadata && 'access' in folder.metadata) {
-            const access = folder.metadata.access as string;
-            return access === 'ALL';
-          }
-          return false;
-        });
+    //     filteredDocs = filteredDocs.filter(doc => {
+    //       if (doc.metadata && 'access' in doc.metadata) {
+    //         const access = doc.metadata.access as string;
+    //         return access === 'CLIENTS_READ' || access === 'ALL';
+    //       }
+    //       return false;
+    //     });
+    //   } else {
+    //     // Default handling for any other role
+    //     filteredFolders = filteredFolders.filter(folder => {
+    //       if (folder.metadata && 'access' in folder.metadata) {
+    //         const access = folder.metadata.access as string;
+    //         return access === 'ALL';
+    //       }
+    //       return false;
+    //     });
 
-        filteredDocs = filteredDocs.filter(doc => {
-          if (doc.metadata && 'access' in doc.metadata) {
-            const access = doc.metadata.access as string;
-            return access === 'ALL';
-          }
-          return false;
-        });
-      }
-    } else {
-      // Staff users see all items regardless of permission
-      console.log('Staff user - showing all items regardless of permission');
-    }
+    //     filteredDocs = filteredDocs.filter(doc => {
+    //       if (doc.metadata && 'access' in doc.metadata) {
+    //         const access = doc.metadata.access as string;
+    //         return access === 'ALL';
+    //       }
+    //       return false;
+    //     });
+    //   }
+    // } else {
+    //   // Staff users see all items regardless of permission
+    //   console.log('Staff user - showing all items regardless of permission');
+    // }
 
     // Apply view filter
-    if (viewFilter === 'files') {
-      filteredFolders = [];
-    } else if (viewFilter === 'folders') {
-      filteredDocs = [];
-    }
+    // if (viewFilter === 'files') {
+    //   filteredFolders = [];
+    // } else if (viewFilter === 'folders') {
+    //   filteredDocs = [];
+    // }
 
     // Sort documents and folders based on sortBy and sortOrder
     const sortFunction = (a: any, b: any) => {
@@ -424,12 +447,18 @@ export default function DocumentList({
     }
     
     if (folder) {
-      // Find the matching folder from our folders array
+      // Find the matching folder from our folders array by ID
+      // This ensures we're using the full folder object from our state
       const matchingFolder = folders.find(f => f.id === folder.id);
       if (matchingFolder) {
         onFolderSelect?.(matchingFolder);
+      } else {
+        console.log(`Folder with ID ${folder.id} not found in folders array`);
+        // If we can't find the folder, we might still want to navigate using the folder object passed
+        onFolderSelect?.(folder as Folder);
       }
     } else {
+      // Navigate to root (no folder)
       onFolderSelect?.(undefined);
     }
   };
@@ -481,7 +510,7 @@ export default function DocumentList({
       } else {
         onDeleteFolder(itemToDelete.id);
       }
-      
+
       // Dispatch event for successful deletion
       const deleteSuccessEvent = new CustomEvent('document-delete-success', {
         bubbles: true,
@@ -494,7 +523,7 @@ export default function DocumentList({
       });
       document.dispatchEvent(deleteSuccessEvent);
       console.log(`[Document List] Dispatched delete success event for ${itemToDelete.type}: ${itemToDelete.id}`);
-      
+
       showToast(`${itemToDelete.name} deleted successfully`, 'success');
     } catch (error) {
       console.error('Delete failed:', error);
@@ -525,18 +554,22 @@ export default function DocumentList({
   // Add this effect to handle selected file from URL
   useEffect(() => {
     if (selectedFile) {
-      console.log("Setting selected document from selectedFile prop:", selectedFile.name ? selectedFile.name : 'unnamed file');
+      // Get the folder information for the selected file
+      const fileFolder = selectedFile.folderId ? folders.find(f => f.id === selectedFile.folderId) : undefined;
+      console.log(`Setting selected document from selectedFile prop: ${selectedFile.name || 'unnamed file'} in folder: ${fileFolder?.name || 'No folder'}`);
       setSelectedDocument(selectedFile);
     }
-  }, [selectedFile]);
+  }, [selectedFile, folders]);
 
   // Add additional effect to handle documents array changes
   useEffect(() => {
     if (documents.length > 0 && !selectedDocument && selectedFile) {
-      console.log("Documents loaded, setting selected document:", selectedFile.name ? selectedFile.name : 'unnamed file');
+      // Get the folder information for the selected file
+      const fileFolder = selectedFile.folderId ? folders.find(f => f.id === selectedFile.folderId) : undefined;
+      console.log(`Documents loaded, setting selected document: ${selectedFile.name || 'unnamed file'} in folder: ${fileFolder?.name || 'No folder'}`);
       setSelectedDocument(selectedFile);
     }
-  }, [documents, selectedDocument, selectedFile]);
+  }, [documents, selectedDocument, selectedFile, folders]);
 
   // Monitor for project changes while we have a selectedFile
   useEffect(() => {
@@ -1775,19 +1808,19 @@ export default function DocumentList({
     }
 
     console.log(`[Document List] Setting up real-time document subscription for folder: ${currentFolder.id}`);
-    
+
     // Set up the subscription
     const unsubscribe = subscribeToFolderDocuments(currentFolder.id, (updatedDocuments) => {
       console.log(`[Document List] Received ${updatedDocuments.length} documents from real-time update`);
-      
+
       // Update local state with the latest documents
       setLocalDocuments(updatedDocuments);
     });
-    
+
     // Store the unsubscribe function
     unsubscribeRef.current = unsubscribe;
     hasActiveSubscription.current = true;
-    
+
     // Cleanup on unmount or when the folder changes
     return () => {
       if (unsubscribeRef.current) {
@@ -1804,9 +1837,9 @@ export default function DocumentList({
     const handleDocumentUpdate = (event: Event) => {
       const customEvent = event as CustomEvent;
       const { folderId, source } = customEvent.detail;
-      
+
       console.log(`[Document List] Document update event received from ${source}:`, customEvent.detail);
-      
+
       // If this update is for our current folder, refresh
       if (currentFolder && folderId === currentFolder.id) {
         console.log(`[Document List] Updating for folder match: ${folderId}`);
@@ -1815,11 +1848,11 @@ export default function DocumentList({
         }
       }
     };
-    
+
     // Listen for both notification updates and direct document updates
     document.addEventListener(NOTIFICATION_DOCUMENT_UPDATE_EVENT, handleDocumentUpdate);
     document.addEventListener(DOCUMENT_UPDATE_EVENT, handleDocumentUpdate);
-    
+
     return () => {
       document.removeEventListener(NOTIFICATION_DOCUMENT_UPDATE_EVENT, handleDocumentUpdate);
       document.removeEventListener(DOCUMENT_UPDATE_EVENT, handleDocumentUpdate);
@@ -1830,28 +1863,28 @@ export default function DocumentList({
   useEffect(() => {
     // Only add these event listeners when we're in a folder
     if (!currentFolder) return;
-    
+
     // Define handler for successful file operations
     const handleFileOperationSuccess = () => {
       console.log(`[Document List] File operation completed, triggering update for folder: ${currentFolder.id}`);
-      
+
       // Trigger document update event
       triggerDocumentUpdate(currentFolder.id);
-      
+
       // Also call onRefresh if available
       if (onRefresh) {
         onRefresh();
       }
     };
-    
+
     // Define custom events for file operations
     const FILE_UPLOAD_SUCCESS_EVENT = 'document-upload-success';
     const FILE_DELETE_SUCCESS_EVENT = 'document-delete-success';
-    
+
     // Add event listeners
     document.addEventListener(FILE_UPLOAD_SUCCESS_EVENT, handleFileOperationSuccess);
     document.addEventListener(FILE_DELETE_SUCCESS_EVENT, handleFileOperationSuccess);
-    
+
     // Return cleanup function
     return () => {
       document.removeEventListener(FILE_UPLOAD_SUCCESS_EVENT, handleFileOperationSuccess);
@@ -1888,7 +1921,7 @@ export default function DocumentList({
             document={selectedDocument}
             onClose={() => setSelectedDocument(undefined)}
             onRefresh={onRefresh}
-            folders={folders.map(f => ({ id: f.id, name: f.name }))}
+            folders={folders} // Pass the full folders array with complete folder information
             onNavigateToFolder={handleBreadcrumbNavigation}
             viewerHeight={600}
             setViewerHeight={(height: number) => {
@@ -2077,8 +2110,9 @@ export default function DocumentList({
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
                 className="space-y-2 px-4 pr-6 overflow-y-auto"
+                style={{paddingTop: '1.5rem', paddingBottom: '1.5rem'}}
               >
-                {subFolders.map((folder) => (
+                {subFolders.map((folder, index) => (
                   <motion.div
                     key={`folder-${folder.id || Math.random().toString(36)}`}
                     initial={{ opacity: 0, y: 20 }}
@@ -2097,21 +2131,24 @@ export default function DocumentList({
                     {!isSharedView && (
                       <div className="flex items-center space-x-1">
                         {/* Only show edit button if user can edit documents */}
-                        {canEditDocuments() && (
+
                           <div className="group relative">
                             <button
                               onClick={(e) => handleEditClick(e, folder.id, 'folder', typeof folder.name === 'string' ? folder.name : 'Unnamed folder')}
-                              className="p-1 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100"
+                              className={`p-1 ${!hasFolderWritePermission(folder?.metadata?.access as FolderAccessPermission) ?
+                                'text-gray-300 cursor-not-allowed' :
+                                'text-gray-400 hover:text-gray-600 hover:bg-gray-100'} rounded-full`}
                               aria-label="Edit folder"
+                              disabled={!hasFolderWritePermission(folder?.metadata?.access as FolderAccessPermission)}
                             >
                               <Edit className="w-5 h-5" />
                             </button>
-                            <div className="absolute bottom-full mb-2 left-1/2 transform -translate-x-1/2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap">
-                              Edit
+                            <div className={`absolute ${index === 0 ? 'top-full mt-2' : 'bottom-full mb-2'} left-1/2 transform -translate-x-1/2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap`}>
+                              {hasFolderWritePermission(folder?.metadata?.access as FolderAccessPermission)
+                                ? "Edit"
+                                : "You don't have permission access"}
                             </div>
                           </div>
-                        )}
-
                       
 
                         {/* Only show share button if user can share documents */}
@@ -2121,6 +2158,7 @@ export default function DocumentList({
                               onClick={() => handleShare(folder.id, true)}
                               className="p-1 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100"
                               aria-label="Share folder"
+
                             >
                               <Share2 className="w-5 h-5" />
                             </button>
@@ -2131,23 +2169,24 @@ export default function DocumentList({
                         )}
 
                         {/* Only show delete button if user can delete documents */}
-                        {canDeleteDocuments() && (
                           <div className="group relative">
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
                                 confirmDelete(folder.id, 'folder', typeof folder.name === 'string' ? folder.name : 'Unnamed folder');
                               }}
-                              className="p-1 text-gray-400 hover:text-red-600 rounded-full hover:bg-red-50"
+                              className={`p-1 ${!hasFolderWritePermission(folder?.metadata?.access as FolderAccessPermission) ?
+                                'text-gray-300 cursor-not-allowed' :
+                                'text-gray-400 hover:text-gray-600 hover:bg-gray-100'} rounded-full`}
                               aria-label="Delete folder"
+                              disabled={!hasFolderWritePermission(folder?.metadata?.access as FolderAccessPermission)}
                             >
                               <Trash2 className="w-5 h-5" />
                             </button>
-                            <div className="absolute bottom-full mb-2 left-1/2 transform -translate-x-1/2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap">
+                            <div className={`absolute ${index === 0 ? 'top-full mt-2' : 'bottom-full mb-2'} left-1/2 transform -translate-x-1/2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap`}>
                               Delete
                             </div>
                           </div>
-                        )}
                       </div>
                     )}
                   </motion.div>
@@ -2165,6 +2204,9 @@ export default function DocumentList({
                         if (isSharedView) {
                           onPreview(doc);
                         } else {
+                          // Get the full current folder info for this document
+                          const documentFolder = doc.folderId ? folders.find(f => f.id === doc.folderId) : undefined;
+                          console.log(`Setting selected document: ${doc.name} in folder: ${documentFolder?.name || 'No folder'}`);
                           setSelectedDocument(doc);
                         }
                       }}
@@ -2188,20 +2230,20 @@ export default function DocumentList({
                     {!isSharedView && (
                       <div className="flex items-center space-x-1">
                         {/* Only show edit button if user can edit documents */}
-                        {canEditDocuments() && (
-                          <div className="group relative">
+
+                          {/* <div className="group relative">
                             <button
                               onClick={(e) => handleEditClick(e, doc.id, 'document', typeof doc.name === 'string' ? doc.name : 'Unnamed document')}
                               className="p-1 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100"
-                              aria-label="Edit document"
+                              disabled={!hasFolderWritePermission(currentFolder?.metadata?.access as FolderAccessPermission)}
                             >
                               <Edit className="w-5 h-5" />
                             </button>
                             <div className="absolute bottom-full mb-2 left-1/2 transform -translate-x-1/2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap">
                               Edit
                             </div>
-                          </div>
-                        )}
+                          </div> */}
+
                         
                         {/* Only show share button if user can share documents */}
                         {canShareDocuments() && (

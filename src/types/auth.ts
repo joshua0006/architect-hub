@@ -1,4 +1,5 @@
-import { UserRole } from './index';
+import { UserRole } from "../contexts/AuthContext";
+
 
 export interface UserProfile {
   photoURL: string | null;

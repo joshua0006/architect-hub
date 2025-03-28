@@ -1,3 +1,5 @@
+import { FolderAccessPermission, UserRole } from "./contexts/AuthContext";
+
 // Document types
 export interface DocumentComment {
   id: string;
@@ -84,7 +86,7 @@ export interface Folder {
     level?: number;
     documentCount?: number;
     lastUpdated?: string;
-    access?: 'ALL' | 'STAFF_ONLY' | 'CONTRACTORS_WRITE' | 'CLIENTS_READ';
+    access?: FolderAccessPermission
   };
 }
 
@@ -156,8 +158,6 @@ export interface TaskCategory {
   isDefault?: boolean;
 }
 
-// User role type
-export type UserRole = 'Staff' | 'Client' | 'Contractor' | 'Admin';
 
 // User types
 export interface UserProfile {

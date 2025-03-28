@@ -42,6 +42,7 @@ export default function AccountSettings() {
     phone: '',
     location: '',
     timezone: 'UTC',
+    bio: '', // Added the missing 'bio' property required by UserProfile type
     notifications: {
       email: true,
       push: true

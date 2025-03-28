@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   TOOLS,
   COLORS,
@@ -8,9 +8,29 @@ import {
 import { ToolbarSection } from "./Toolbar/ToolbarSection";
 import { ToolButton } from "./Toolbar/ToolButton";
 import { useKeyboardShortcutGuide } from "../hooks/useKeyboardShortcutGuide";
-import { HelpCircle } from "lucide-react";
+import { HelpCircle, FolderOpen, ChevronDown, ChevronUp } from "lucide-react";
 import { useAnnotationStore } from "../store/useAnnotationStore";
 import { KeyboardShortcutGuide } from "./KeyboardShortcutGuide";
+
+// Define Folder interface to match DocumentViewer component
+export interface Folder {
+  id: string;
+  name: string;
+  projectId?: string;
+  parentId?: string;
+  metadata?: any;
+}
+
+// Extended folder interface with additional path information
+export interface EnhancedFolder extends Folder {
+  folderPath: Folder[];
+  pathString: string;
+  parentFolder: Folder | null;
+}
+
+interface ToolbarProps {
+  currentFolder?: Folder | EnhancedFolder | null;
+}
 
 // Type assertion helper function
 const getOptionalShortcut = (tool: any): string | undefined => {
@@ -48,7 +68,7 @@ const dispatchAnnotationChangeEvent = (pageNumber: number = 1) => {
   }
 };
 
-export const Toolbar = () => {
+export const Toolbar = ({ currentFolder }: ToolbarProps) => {
   const { isShortcutGuideOpen, setIsShortcutGuideOpen } = useKeyboardShortcutGuide();
   const { 
     currentStyle, 
@@ -58,6 +78,9 @@ export const Toolbar = () => {
     currentDocumentId,
     documents
   } = useAnnotationStore();
+  
+  // State for folder info dropdown
+  const [showFolderInfo, setShowFolderInfo] = useState(false);
   
   // Get current page number from the DOM if available
   const getCurrentPageNumber = (): number => {
@@ -194,6 +217,24 @@ export const Toolbar = () => {
   return (
     <>
       <div className="toolbar-fixed bg-white border-r border-gray-200 overflow-y-auto" style={{ flexShrink: 0, minWidth: '16rem' }}>
+        {/* Folder information section */}
+        {currentFolder && (
+          <div className="p-3 border-b border-gray-200">
+            <div 
+              className="flex items-center justify-between cursor-pointer"
+              onClick={() => setShowFolderInfo(!showFolderInfo)}
+            >
+              <div className="flex items-center gap-2">
+                <FolderOpen size={16} className="text-blue-500" />
+                <span className="font-medium text-gray-800">{currentFolder.name}</span>
+              </div>
+              <button className="text-gray-400 hover:text-gray-600">
+                {showFolderInfo ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+              </button>
+            </div>
+          </div>
+        )}
+        
         <ToolbarSection title="Basic Tools" defaultExpanded>
           {TOOLS.basic.map((tool) => (
             <ToolButton
@@ -202,6 +243,7 @@ export const Toolbar = () => {
               icon={tool.icon}
               label={tool.label}
               shortcut={getOptionalShortcut(tool)}
+              currentFolder={currentFolder}
             />
           ))}
         </ToolbarSection>
@@ -213,6 +255,7 @@ export const Toolbar = () => {
               icon={tool.icon}
               label={tool.label}
               shortcut={getOptionalShortcut(tool)}
+              currentFolder={currentFolder}
             />
           ))}
         </ToolbarSection>
@@ -224,6 +267,7 @@ export const Toolbar = () => {
               icon={tool.icon}
               label={tool.label}
               shortcut={getOptionalShortcut(tool)}
+              currentFolder={currentFolder}
             />
           ))}
         </ToolbarSection>
@@ -235,6 +279,7 @@ export const Toolbar = () => {
               icon={tool.icon}
               label={tool.label}
               shortcut={getOptionalShortcut(tool)}
+              currentFolder={currentFolder}
             />
           ))}
         </ToolbarSection>

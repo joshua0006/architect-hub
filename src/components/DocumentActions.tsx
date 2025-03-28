@@ -3,7 +3,7 @@ import { Plus, Upload, FolderPlus, X, Folder, File, MoreVertical, Share2 } from 
 import { AnimatePresence, motion } from "framer-motion";
 import { Document, Folder as FolderType } from "../types";
 import { useToast } from "../contexts/ToastContext";
-import { useAuth } from "../contexts/AuthContext";
+import { DEFAULT_FOLDER_ACCESS, FolderAccessPermission, PERMISSIONS_MAP, useAuth, UserRole } from "../contexts/AuthContext";
 import GenerateUploadToken from "./GenerateUploadToken";
 
 interface DocumentActionsProps {
@@ -241,6 +241,24 @@ export default function DocumentActions({
     return null;
   }
 
+  const currentFolder = folders.find(f => f.id === currentFolderId);
+
+
+  const hasFolderWritePermission = (): boolean => {
+
+    const folderPermission = currentFolder?.metadata?.access as FolderAccessPermission;
+    
+    const role = user?.role as UserRole | undefined;
+    
+    
+    let writeAccess = DEFAULT_FOLDER_ACCESS;
+    if (role && folderPermission in PERMISSIONS_MAP) {
+      writeAccess = PERMISSIONS_MAP[folderPermission][role] ?? DEFAULT_FOLDER_ACCESS;
+    }
+
+    return writeAccess.write;
+  }  
+
   return (
     <div 
       className="relative" 
@@ -254,14 +272,22 @@ export default function DocumentActions({
       
         
         {/* Create Folder button */}
-        <button
-          onClick={() => setShowFolderInput(true)}
-          className="px-3 py-2 flex items-center space-x-2 bg-slate-300 text-gray-700 rounded-md hover:bg-gray-200 transition-colors"
-          title="Create folder"
-        >
-          <FolderPlus className="w-5 h-5" />
-          <span className="hidden sm:inline">Add Folder</span>
-        </button>
+        <div className="group relative">
+          <button
+            onClick={() => setShowFolderInput(true)}
+            className="px-3 py-2 flex items-center space-x-2 bg-slate-300 text-gray-700 rounded-md hover:bg-gray-200 transition-colors"
+            title="Create folder"
+            disabled={!hasFolderWritePermission()}
+          >
+            <FolderPlus className="w-5 h-5" />
+            <span className="hidden sm:inline">Add Folder </span>
+          </button>
+          <div className={`absolute top-full mb-2 left-1/2 transform -translate-x-1/2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap`}>
+            {hasFolderWritePermission() 
+              ? "Add Folder" 
+              : "You don't have permission!"}
+          </div>
+        </div>
         
         {/* Generate Upload Token button - only for Staff/Admin */}
         {(user?.role === 'Staff' || user?.role === 'Admin') && (
@@ -276,14 +302,23 @@ export default function DocumentActions({
         )}
         
         {/* Replace info message with Upload button */}
-        <button
-          onClick={() => fileInputRef.current?.click()}
-          className="px-3 py-2 flex items-center space-x-2 bg-slate-300 text-gray-700 rounded-md hover:bg-gray-200 transition-colors"
-          title="Upload files"
-        >
-          <Upload className="w-5 h-5" />
-          <span className="hidden sm:inline">Upload</span>
-        </button>
+
+        <div className="group relative">
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            className="px-3 py-2 flex items-center space-x-2 bg-slate-300 text-gray-700 rounded-md hover:bg-gray-200 transition-colors"
+            title="Upload files"
+            disabled={!hasFolderWritePermission()}
+          >
+            <Upload className="w-5 h-5" />
+            <span className="hidden sm:inline">Upload</span>
+          </button>
+          <div className={`absolute top-full mb-2 left-1/2 transform -translate-x-1/2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap`}>
+            {hasFolderWritePermission() 
+              ? "Upload" 
+              : "You don't have permission!"}
+          </div>
+        </div>
       </div>
 
       {/* File input (hidden) */}
