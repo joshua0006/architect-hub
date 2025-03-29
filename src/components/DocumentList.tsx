@@ -52,33 +52,25 @@ interface DocumentListProps {
   folders: Folder[];
   currentFolder?: Folder;
   projectId: string;
-  selectedProject?: Project;  // Add selectedProject as an optional prop
-  onFolderSelect?: (folder?: Folder) => void;
+  selectedProject?: Project;
+  onFolderSelect: (folder?: Folder) => void;
   onPreview: (document: Document) => void;
   onCreateFolder: (name: string, parentId?: string) => Promise<void>;
-  onCreateDocument: (
-    name: string,
-    type: Document["type"],
-    file: File,
-    folderId?: string
-  ) => Promise<void>;
-  // Add new method for multiple file uploads
-  onCreateMultipleDocuments?: (
-    files: File[],
-    folderId?: string
-  ) => Promise<void>;
+  onCreateDocument?: (name: string, type: string, parentId?: string) => Promise<void>;
+  onCreateMultipleDocuments?: (files: File[], parentId?: string) => Promise<void>;
   onUpdateFolder: (id: string, name: string) => Promise<void>;
   onDeleteFolder: (id: string) => Promise<void>;
   onUpdateDocument: (id: string, updates: Partial<Document>) => Promise<void>;
   onDeleteDocument: (id: string) => Promise<void>;
   onRefresh?: () => Promise<void>;
-  onShare: (id: string, isFolder: boolean) => Promise<void>;
-  onUpdateDocumentPermission?: (id: string, permission: 'STAFF_ONLY' | 'CONTRACTORS_WRITE' | 'CLIENTS_READ' | 'ALL') => Promise<void>;
-  onUpdateFolderPermission?: (id: string, permission: 'STAFF_ONLY' | 'CONTRACTORS_WRITE' | 'CLIENTS_READ' | 'ALL') => Promise<void>;
+  onShare?: (id: string, isFolder: boolean) => Promise<void>;
+  onUpdateDocumentPermission?: (id: string, permission: 'STAFF_ONLY' | 'ALL' | 'CONTRACTORS_WRITE' | 'CLIENTS_READ') => Promise<void>;
+  onUpdateFolderPermission?: (id: string, permission: 'STAFF_ONLY' | 'ALL' | 'CONTRACTORS_WRITE' | 'CLIENTS_READ') => Promise<void>;
   isSharedView?: boolean;
   sharedDocuments?: Document[];
   sharedFolders?: Folder[];
   selectedFile?: Document;
+  onFullscreenChange?: (isFullscreen: boolean) => void;
 }
 
 const formatDate = (date: string | Timestamp | Date) => {
@@ -117,6 +109,7 @@ export default function DocumentList({
   sharedDocuments,
   sharedFolders,
   selectedFile,
+  onFullscreenChange,
 }: DocumentListProps) {
   // Add permission checks with useAuth hook
   const { user, canEditDocuments, canDeleteDocuments, canShareDocuments, canUploadDocuments } = useAuth();
@@ -1892,6 +1885,30 @@ export default function DocumentList({
     };
   }, [currentFolder, onRefresh]);
 
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  
+  // Simple function to check if the document is a PDF
+  const isPdf = (doc?: Document) => {
+    if (!doc) return false;
+    if (doc.type === "pdf") return true;
+    
+    // Check by extension if type not explicitly set
+    return doc.name.toLowerCase().endsWith(".pdf");
+  };
+  
+  // Find the Layout component ref or context to update its state when fullscreen changes
+  useEffect(() => {
+    // Make any adjustments to the parent Layout needed when fullscreen changes
+    console.log("PDF fullscreen mode:", isFullscreen);
+    
+    // Extra cleanup or adjustments can go here
+    return () => {
+      if (isFullscreen) {
+        setIsFullscreen(false);
+      }
+    };
+  }, [isFullscreen]);
+
   return (
     <div 
       ref={dropZoneRef}
@@ -1901,18 +1918,21 @@ export default function DocumentList({
       onDragOver={handleDragOver}
       onDrop={handleDrop}
     >
-      <div className="flex justify-between items-center border-b px-4 py-3 bg-white">
-        <DocumentBreadcrumbs
-         folders={folders}
-         currentFolder={currentFolder}
-         selectedDocument={selectedDocument}
-         onNavigate={handleBreadcrumbNavigation}
-         onDocumentClick={() => selectedDocument && onPreview(selectedDocument)}
-        />
-        
-        {/* Replace DocumentActions with the conditional rendering function */}
-        {renderUploadButtons()}
-      </div>
+      {/* Only show header when not in fullscreen */}
+      {!isFullscreen && (
+        <div className="flex justify-between items-center border-b px-4 py-3 bg-white">
+          <DocumentBreadcrumbs
+            folders={folders}
+            currentFolder={currentFolder}
+            selectedDocument={selectedDocument}
+            onNavigate={handleBreadcrumbNavigation}
+            onDocumentClick={() => selectedDocument && onPreview(selectedDocument)}
+          />
+          
+          {/* Replace DocumentActions with the conditional rendering function */}
+          {renderUploadButtons()}
+        </div>
+      )}
       
       {selectedDocument ? (
         <div className="flex-1 min-h-0 flex flex-col">
@@ -1927,6 +1947,11 @@ export default function DocumentList({
             setViewerHeight={(height: number) => {
               console.log('Viewer height updated:', height);
               // You can add state for this if needed
+            }}
+            isFullscreen={isFullscreen}
+            onFullscreenChange={(fullscreen) => {
+              setIsFullscreen(fullscreen);
+              onFullscreenChange?.(fullscreen);
             }}
           />
         </div>
