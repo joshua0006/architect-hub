@@ -171,13 +171,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
       return;
     }
     
-    // Also skip centering if there was a recent annotation interaction (within last 1500ms)
-    const annotationInteractionTime = parseInt(scrollContainer.dataset.annotationInteractionTime || '0');
-    if (Date.now() - annotationInteractionTime < 1500) {
-      console.log('[PDFViewer] Skipping centering due to recent annotation interaction');
-      return;
-    }
-    
     // Calculate center position
     const viewportWidth = scrollContainer.clientWidth;
     const viewportHeight = scrollContainer.clientHeight;
@@ -1363,13 +1356,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
       if (isUserInteraction) {
         console.log(`[PDFViewer] Processing immediate render for user interaction (${source})`);
         lastRenderTime = Date.now();
-        
-        // Record the time of this annotation interaction to prevent auto-centering
-        const scrollContainer = containerRef.current?.querySelector('.overflow-auto') as HTMLElement;
-        if (scrollContainer) {
-          scrollContainer.dataset.annotationInteractionTime = Date.now().toString();
-          console.log('[PDFViewer] Recorded annotation interaction time to prevent auto-centering');
-        }
         
         // Only render if the event is for the current page
         if (targetPageNumber === currentPage) {
