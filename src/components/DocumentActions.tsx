@@ -11,7 +11,7 @@ interface DocumentActionsProps {
   currentFolderId?: string;
   folders: FolderType[];
   onCreateFolder: (name: string, parentId?: string) => Promise<void>;
-  onCreateDocument?: (
+  onCreateDocument: (
     name: string,
     type: "pdf" | "dwg" | "other",
     file: File,
@@ -91,8 +91,8 @@ export default function DocumentActions({
     try {
       setIsUploading(true);
       
-      if (files.length === 1 && onCreateDocument) {
-        // Single file upload with onCreateDocument
+      if (files.length === 1) {
+        // Single file upload
         const file = files[0];
         const fileName = file.name;
         
@@ -108,12 +108,9 @@ export default function DocumentActions({
         await onCreateDocument(fileName, fileType, file, currentFolderId);
         showToast(`File "${fileName}" uploaded successfully`, "success");
       } else if (onCreateMultipleDocuments) {
-        // Multiple files upload or onCreateDocument not available
+        // Multiple files upload
         await onCreateMultipleDocuments(Array.from(files), currentFolderId);
         showToast(`${files.length} files uploaded successfully`, "success");
-      } else {
-        showToast("No upload method available", "error");
-        return;
       }
       
       if (onRefresh) {

@@ -33,8 +33,9 @@ import { ConfirmDialog } from './ui/ConfirmDialog';
 import { RenameDialog } from './ui/RenameDialog';
 import { PermissionsDialog } from './ui/PermissionsDialog';
 import { NOTIFICATION_DOCUMENT_UPDATE_EVENT } from './NotificationIcon';
-import { doc, updateDoc, collection, query, where, getDocs, orderBy, limit } from 'firebase/firestore';
+import { doc, updateDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
+import { collection, query, where, getDocs, orderBy, limit } from 'firebase/firestore';
 import { subscribeToFolderDocuments, DOCUMENT_UPDATE_EVENT, triggerDocumentUpdate } from "../services/documentSubscriptionService";
 
 // Local type definition for the DocumentViewer's Folder type
@@ -1238,121 +1239,497 @@ export default function DocumentList({
     return fileGroups.flat();
   };
 
-  // Function to handle multiple file upload
-  const handleMultipleFileUpload = async (files: File[]) => {
-    if (!onCreateMultipleDocuments) {
-      showToast("Upload not available", "error");
+  // Handle file upload logic - single or batch
+  const handleFileUpload = async (files: File[]) => {
+    if (!files || files.length === 0 || !hasUploadPermission()) {
+      console.warn("No files to upload or no permission");
       return;
     }
+
+    console.log(`Starting upload of ${files.length} files`);
     
     try {
       setIsUploading(true);
-      setUploadProgress(10); // Start progress
-
-      // Group files by folder structure if available
-      const filesByFolder = new Map<string, File[]>();
+      setUploadProgress(0);
       
-      // Default folder - current folder or root
-      const defaultFolderId = currentFolder?.id || '';
-      filesByFolder.set(defaultFolderId, []);
-      
-      // Process each file
-      for (const file of files) {
-        const relativePath = file.webkitRelativePath || '';
-        if (relativePath) {
-          // This is a folder upload with path information
-          const pathParts = relativePath.split('/');
-          if (pathParts.length > 1) {
-            // File is inside subfolder(s)
-            const folderPath = pathParts.slice(0, -1).join('/');
-            
-            if (!filesByFolder.has(folderPath)) {
-              filesByFolder.set(folderPath, []);
-            }
-            
-            filesByFolder.get(folderPath)!.push(file);
-          } else {
-            // File is at root level of uploaded folder
-            filesByFolder.get(defaultFolderId)!.push(file);
-          }
-        } else {
-          // No path info, add to default folder
-          filesByFolder.get(defaultFolderId)!.push(file);
+      if (files.length === 1) {
+        // Single file upload - unchanged
+        const file = files[0];
+        const fileName = file.name;
+        
+        // Determine file type from extension
+        let fileType: "pdf" | "dwg" | "other" = "other";
+        const extension = file.name.split('.').pop()?.toLowerCase();
+        if (extension === 'pdf') {
+          fileType = "pdf";
+        } else if (extension === 'dwg') {
+          fileType = "dwg";
         }
-      }
-      
-      // Create progress increments
-      const progressIncrement = 80 / filesByFolder.size;
-      let currentProgress = 10;
-      let successCount = 0;
-      let errorCount = 0;
-      
-      // Process each folder
-      for (const [folderPath, folderFiles] of filesByFolder.entries()) {
-        if (folderFiles.length === 0) continue;
+        
+        // Simulate progress updates
+        const progressInterval = setInterval(() => {
+          setUploadProgress(prev => {
+            const newProgress = prev + 10;
+            return newProgress >= 90 ? 90 : newProgress;
+          });
+        }, 300);
         
         try {
-          if (folderPath !== defaultFolderId) {
-            // Need to create folder structure
-            const subfolders = folderPath.split('/');
-            
-            // Create folder hierarchy
-            let parentId = currentFolder?.id;
-            for (const subfolder of subfolders) {
-              parentId = await createFolderAndGetId(subfolder, parentId);
-              if (!parentId) {
-                throw new Error(`Failed to create subfolder: ${subfolder}`);
-              }
-            }
-            
-            // Upload files to the created folder
-            if (parentId) {
-              await onCreateMultipleDocuments(folderFiles, parentId);
-            }
-          } else {
-            // Upload to current folder
-            await onCreateMultipleDocuments(folderFiles, currentFolder?.id);
-          }
-          
-          successCount += folderFiles.length;
+          await onCreateDocument(fileName, fileType, file, currentFolder?.id);
+          setUploadedFiles(prev => ({...prev, success: prev.success + 1}));
+          showToast(`File "${fileName}" uploaded successfully`, "success");
         } catch (error) {
-          console.error(`Error processing folder ${folderPath}:`, error);
-          errorCount += folderFiles.length;
+          setUploadedFiles(prev => ({...prev, failed: prev.failed + 1}));
+          throw error;
+        } finally {
+          clearInterval(progressInterval);
+          setUploadProgress(100);
         }
+      } else if (onCreateMultipleDocuments) {
+        // Try to use the batch upload if available
+        console.log(`Uploading ${files.length} files using batch method`);
         
-        // Update progress
-        currentProgress += progressIncrement;
-        setUploadProgress(Math.min(90, currentProgress));
-      }
-      
-      // Show final status
-      setUploadProgress(100);
-      
-      if (errorCount > 0) {
-        if (successCount > 0) {
-          showToast(`Uploaded ${successCount} files, ${errorCount} failed`, "error");
-        } else {
-          showToast(`Failed to upload ${errorCount} files`, "error");
+        // Simulate progress updates
+        const progressInterval = setInterval(() => {
+          setUploadProgress(prev => {
+            const newProgress = prev + 5;
+            return newProgress >= 90 ? 90 : newProgress;
+          });
+        }, 300);
+        
+        try {
+          // Make sure we're passing a valid array to the createMultipleDocuments function
+          await onCreateMultipleDocuments(files, currentFolder?.id);
+          setUploadedFiles(prev => ({...prev, success: files.length}));
+          showToast(`${files.length} files uploaded successfully`, "success");
+        } catch (error) {
+          console.error("Error in multiple file upload:", error);
+          console.log("Falling back to individual file upload method");
+          clearInterval(progressInterval);
+          
+          // If batch upload fails, fall back to individual upload
+          return handleMultipleFileUpload(files);
+        } finally {
+          clearInterval(progressInterval);
+          setUploadProgress(100);
         }
       } else {
-        showToast(`Successfully uploaded ${successCount} files`, "success");
+        // No multiple document upload handler available
+        console.log("Multiple document batch upload not available, using individual upload method");
+        return handleMultipleFileUpload(files);
       }
       
-      // Refresh the document list
       if (onRefresh) {
         await onRefresh();
       }
       
-    } catch (error) {
-      console.error("Error uploading multiple files:", error);
-      showToast("Failed to upload files", "error");
-    } finally {
       // Keep the progress bar at 100% for a moment before closing
       setTimeout(() => {
         setIsUploading(false);
         setUploadProgress(0);
       }, 800);
+      
+    } catch (error) {
+      console.error("Error uploading file(s):", error);
+      showToast("Failed to upload files", "error");
+      
+      // Still set to 100% and close after a delay
+      setUploadProgress(100);
+      setTimeout(() => {
+        setIsUploading(false);
+        setUploadProgress(0);
+      }, 800);
     }
+  };
+
+  // Handle drop event - process files from DataTransfer
+  const handleDrop = async (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    // Only proceed if user has upload permission
+    if (!hasUploadPermission()) {
+      showToast("You don't have permission to upload files in this folder", "error");
+      return;
+    }
+    
+    setIsDragging(false);
+    setShowDragOverlay(false);
+    dragCounter.current = 0;
+    
+    // Check if we have items (for folder support)
+    if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
+      try {
+        console.log(`Processing ${e.dataTransfer.items.length} dropped items (may include folders)`);
+        
+        // Show loading state
+        setIsUploading(true);
+        setUploadProgress(10); // Initial progress
+        setUploadedFiles({
+          total: 0,  // We don't know the total yet
+          success: 0,
+          failed: 0
+        });
+        
+        // Get all files including those in folders
+        const allFiles = await getAllFilesFromDataTransferItems(e.dataTransfer.items);
+        
+        console.log(`Found ${allFiles.length} files in the dropped items`);
+        
+        // Update total file count
+        setUploadedFiles(prev => ({
+          ...prev,
+          total: allFiles.length
+        }));
+        
+        // Now process all the files
+        if (allFiles.length === 0) {
+          showToast("No valid files found in the dropped items", "error");
+          setIsUploading(false);
+          return;
+        }
+        
+        // Check if we have path information (from folders)
+        const hasPathInfo = allFiles.some(file => 'path' in file);
+        
+        if (hasPathInfo) {
+          // Files from folders - handle them individually
+          await handleMultipleFileUpload(allFiles);
+        } else if (allFiles.length === 1) {
+          // Single file
+          handleFileUpload(allFiles);
+        } else {
+          // Multiple files
+          if (onCreateMultipleDocuments) {
+            handleFileUpload(allFiles);
+          } else {
+            handleMultipleFileUpload(allFiles);
+          }
+        }
+        
+      } catch (error) {
+        console.error("Error processing dropped items:", error);
+        showToast("Failed to process dropped items", "error");
+        setIsUploading(false);
+      }
+    } 
+    // Fallback to regular file handling
+    else if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      const droppedFiles = Array.from(e.dataTransfer.files);
+      console.log(`Processing ${droppedFiles.length} dropped files (legacy method)`);
+      
+      // Reset counters and prepare for upload
+      setDraggedFileCount(0);
+      setUploadedFiles({
+        total: droppedFiles.length,
+        success: 0,
+        failed: 0
+      });
+      
+      // Process the files for upload
+      if (droppedFiles.length === 1) {
+        handleFileUpload(droppedFiles);
+      } else {
+        if (onCreateMultipleDocuments) {
+          handleFileUpload(droppedFiles);
+        } else {
+          handleMultipleFileUpload(droppedFiles);
+        }
+      }
+    } else {
+      console.warn("Drop event contained no files or folders");
+    }
+    
+    // Clear the data transfer object
+    e.dataTransfer.clearData();
+  };
+
+  // Replace the folder creation part inside handleMultipleFileUpload
+  // Create a new folder and return its ID directly
+  const createFolderAndGetId = async (name: string, parentId?: string): Promise<string | undefined> => {
+    try {
+      console.log(`Creating folder "${name}" in parent: ${parentId || 'root'}`);
+      
+      // First check if folder already exists to avoid duplication
+      const existingFolder = folders.find(f => 
+        f.name === name && f.parentId === parentId
+      );
+      
+      if (existingFolder) {
+        console.log(`Folder "${name}" already exists with ID: ${existingFolder.id}`);
+        return existingFolder.id;
+      }
+      
+      // Call onCreateFolder which doesn't return the ID
+      await onCreateFolder(name, parentId);
+      console.log(`Folder "${name}" creation initiated, waiting for completion...`);
+      
+      // Give Firebase a moment to complete the operation
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      // Try to refresh the folder list
+      if (onRefresh) {
+        await onRefresh();
+        console.log("Local folder list refreshed");
+      }
+      
+      // First try to find the folder in local state (may have been updated by refresh)
+      let newFolder = folders.find(f => 
+        f.name === name && f.parentId === parentId
+      );
+      
+      if (newFolder) {
+        console.log(`Found newly created folder in local state: ${newFolder.id}`);
+        return newFolder.id;
+      }
+      
+      // If not found locally, try to fetch directly from Firebase
+      console.log("Folder not found in local state, querying Firebase directly...");
+      
+      // Query Firestore directly to find the newly created folder
+      const foldersRef = collection(db, 'folders');
+      let folderQuery = query(
+        foldersRef,
+        where('name', '==', name),
+        where('parentId', '==', parentId || null),
+        orderBy('createdAt', 'desc'),
+        limit(1)
+      );
+      
+      try {
+        const querySnapshot = await getDocs(folderQuery);
+        
+        if (!querySnapshot.empty) {
+          const folderDoc = querySnapshot.docs[0];
+          console.log(`Found folder directly in Firebase: ${folderDoc.id}`);
+          return folderDoc.id;
+        }
+        
+        // If still not found, try a more lenient search
+        console.log("Folder not found with exact criteria, trying broader search...");
+        
+        // Try just by name (in case parentId is different)
+        folderQuery = query(
+          foldersRef,
+          where('name', '==', name),
+          orderBy('createdAt', 'desc'),
+          limit(5)
+        );
+        
+        const nameSnapshot = await getDocs(folderQuery);
+        
+        if (!nameSnapshot.empty) {
+          // Log all found folders for debugging
+          nameSnapshot.docs.forEach(doc => {
+            const data = doc.data();
+            console.log(`Found folder by name: ${doc.id}, parentId: ${data.parentId}, createdAt: ${data.createdAt}`);
+          });
+          
+          // Use the first one
+          const folderDoc = nameSnapshot.docs[0];
+          console.log(`Using folder found by name search: ${folderDoc.id}`);
+          return folderDoc.id;
+        }
+        
+        console.error(`Failed to find newly created folder "${name}" even after Firebase query`);
+        return undefined;
+      } catch (queryError) {
+        console.error("Error querying Firebase for folder:", queryError);
+        return undefined;
+      }
+    } catch (error) {
+      console.error(`Error creating folder "${name}":`, error);
+      return undefined;
+    }
+  };
+
+  // Update the folder creation section in handleMultipleFileUpload
+  const handleMultipleFileUpload = async (files: File[]) => {
+    if (!files || files.length === 0 || !hasUploadPermission()) {
+      console.warn("No files to upload or no permission");
+      return;
+    }
+
+    console.log(`Processing ${files.length} files individually`);
+    setIsUploading(true);
+    setUploadProgress(0);
+    
+    // Reset counters if not already set
+    setUploadedFiles(prev => {
+      if (prev.total !== files.length) {
+        return {
+          total: files.length,
+          success: 0,
+          failed: 0
+        };
+      }
+      return prev;
+    });
+    
+    // Create a mapping of folder paths to folder IDs
+    // This will help us track created folders for faster lookup
+    const folderPathMap: Record<string, string> = {};
+    
+    // Process each file individually
+    let successCount = 0;
+    let failCount = 0;
+    
+    // Calculate progress increment per file
+    const progressIncrement = 100 / files.length;
+    
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const fileName = file.name;
+      
+      // Check if the file should be skipped (e.g., system files, .DS_Store)
+      const skipPatterns = ['.DS_Store', 'Thumbs.db', '.git'];
+      const shouldSkip = skipPatterns.some(pattern => fileName.includes(pattern));
+      
+      if (shouldSkip) {
+        console.log(`Skipping system file: ${fileName}`);
+        setUploadProgress(Math.min(((i + 1) * progressIncrement), 100));
+        continue;
+      }
+      
+      // Determine file type from extension
+      let fileType: "pdf" | "dwg" | "other" = "other";
+      const extension = fileName.split('.').pop()?.toLowerCase();
+      
+      if (extension === 'pdf') {
+        fileType = "pdf";
+      } else if (extension === 'dwg') {
+        fileType = "dwg";
+      } else {
+        // Check if it's a valid document file
+        const validExtensions = ['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'csv', 'rtf'];
+        if (!validExtensions.includes(extension || '') && extension !== undefined) {
+          console.warn(`File with extension .${extension} may not be supported: ${fileName}`);
+        }
+      }
+      
+      try {
+        // Check if file has path information (from folder upload)
+        let targetFolderId = currentFolder?.id;
+        
+        if ('path' in file) {
+          const filePath = (file as any).path;
+          console.log(`Processing file with path: ${filePath}`);
+          
+          // Extract folder structure from path
+          const pathParts = filePath.split('/');
+          
+          // If we have a path with folders
+          if (pathParts.length > 1) {
+            // Remove the filename from the path
+            const folderPath = pathParts.slice(0, -1).join('/');
+            const displayName = pathParts[pathParts.length - 1]; // The file name
+            
+            // Check if we've already created this folder path
+            if (folderPathMap[folderPath]) {
+              // Use the existing folder ID
+              targetFolderId = folderPathMap[folderPath];
+              console.log(`Using existing folder at path ${folderPath} with ID: ${targetFolderId}`);
+            } else {
+              // Need to create the folder structure
+              console.log(`Creating folder structure for: ${folderPath}`);
+              
+              let currentPathId = currentFolder?.id;
+              // Build the folder structure one level at a time
+              for (let j = 0; j < pathParts.length - 1; j++) {
+                const folderName = pathParts[j];
+                const folderPathSoFar = pathParts.slice(0, j + 1).join('/');
+                
+                // Check if this segment is already created
+                if (folderPathMap[folderPathSoFar]) {
+                  currentPathId = folderPathMap[folderPathSoFar];
+                  continue;
+                }
+                
+                // Look for an existing folder with this name in the current folder
+                const existingFolder = folders.find(f => 
+                  f.name === folderName && f.parentId === currentPathId
+                );
+                
+                if (existingFolder) {
+                  // Use existing folder
+                  currentPathId = existingFolder.id;
+                  // Only store if we have a valid ID
+                  if (currentPathId) {
+                    folderPathMap[folderPathSoFar] = currentPathId;
+                    console.log(`Found existing folder "${folderName}" with ID: ${existingFolder.id}`);
+                  }
+                } else {
+                  // Create a new folder and get its ID directly
+                  const newFolderId = await createFolderAndGetId(folderName, currentPathId);
+                  
+                  if (newFolderId) {
+                    currentPathId = newFolderId;
+                    folderPathMap[folderPathSoFar] = newFolderId;
+                    console.log(`Created and mapped folder "${folderName}" with ID: ${newFolderId}`);
+                  } else {
+                    console.warn(`Failed to create/find folder "${folderName}", will upload to parent folder instead`);
+                    // Stop here and use the parent folder we've reached so far
+                    break;
+                  }
+                }
+              }
+              
+              // Set the target folder ID to the deepest folder we were able to create
+              // Only if currentPathId is valid
+              if (currentPathId) {
+                targetFolderId = currentPathId;
+                folderPathMap[folderPath] = currentPathId;
+              }
+            }
+            
+            // Now upload the file to the correct folder
+            console.log(`Uploading file "${displayName}" to folder ID: ${targetFolderId || 'root folder'}`);
+            await onCreateDocument(displayName, fileType, file, targetFolderId);
+          } else {
+            // No folders in path, just upload the file
+            await onCreateDocument(fileName, fileType, file, currentFolder?.id);
+          }
+        } else {
+          // No path information, just upload the file to current folder
+          await onCreateDocument(fileName, fileType, file, currentFolder?.id);
+        }
+        
+        successCount++;
+        setUploadedFiles(prev => ({
+          ...prev, 
+          success: prev.success + 1
+        }));
+      } catch (error) {
+        console.error(`Error uploading file ${fileName}:`, error);
+        failCount++;
+        setUploadedFiles(prev => ({
+          ...prev, 
+          failed: prev.failed + 1
+        }));
+      }
+      
+      // Update progress after each file
+      setUploadProgress(Math.min(((i + 1) * progressIncrement), 100));
+    }
+    
+    // Show completion message
+    if (successCount > 0) {
+      showToast(`${successCount} of ${files.length} files uploaded successfully`, 
+        failCount > 0 ? "error" : "success");
+    } else {
+      showToast("Failed to upload any files", "error");
+    }
+    
+    // Refresh the document list
+    if (onRefresh) {
+      await onRefresh();
+    }
+    
+    // Keep the progress bar at 100% for a moment before closing
+    setTimeout(() => {
+      setIsUploading(false);
+      setUploadProgress(0);
+    }, 800);
   };
 
   const renderUploadButtons = () => {
@@ -1366,6 +1743,7 @@ export default function DocumentList({
         currentFolderId={currentFolder?.id}
         folders={folders}
         onCreateFolder={onCreateFolder}
+        onCreateDocument={onCreateDocument}
         onCreateMultipleDocuments={onCreateMultipleDocuments}
         onRefresh={onRefresh}
         onShare={onShare}
@@ -1530,129 +1908,6 @@ export default function DocumentList({
       }
     };
   }, [isFullscreen]);
-
-  // Create a new folder and return its ID directly
-  const createFolderAndGetId = async (name: string, parentId?: string): Promise<string | undefined> => {
-    try {
-      console.log(`Creating folder "${name}" in parent: ${parentId || 'root'}`);
-      
-      // First check if folder already exists to avoid duplication
-      const existingFolder = folders.find(f => 
-        f.name === name && f.parentId === parentId
-      );
-      
-      if (existingFolder) {
-        console.log(`Folder "${name}" already exists with ID: ${existingFolder.id}`);
-        return existingFolder.id;
-      }
-      
-      // Call onCreateFolder which doesn't return the ID
-      await onCreateFolder(name, parentId);
-      console.log(`Folder "${name}" creation initiated, waiting for completion...`);
-      
-      // Give Firebase a moment to complete the operation
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-      // Try to refresh the folder list
-      if (onRefresh) {
-        await onRefresh();
-        console.log("Local folder list refreshed");
-      }
-      
-      // First try to find the folder in local state (may have been updated by refresh)
-      let newFolder = folders.find(f => 
-        f.name === name && f.parentId === parentId
-      );
-      
-      if (newFolder) {
-        console.log(`Found newly created folder in local state: ${newFolder.id}`);
-        return newFolder.id;
-      }
-      
-      // If not found locally, try to fetch directly from Firebase
-      console.log("Folder not found in local state, querying Firebase directly...");
-      
-      // Query Firestore directly to find the newly created folder
-      const foldersRef = collection(db, 'folders');
-      let folderQuery = query(
-        foldersRef,
-        where('name', '==', name),
-        where('parentId', '==', parentId || null),
-        orderBy('createdAt', 'desc'),
-        limit(1)
-      );
-      
-      try {
-        const querySnapshot = await getDocs(folderQuery);
-        
-        if (!querySnapshot.empty) {
-          const folderDoc = querySnapshot.docs[0];
-          console.log(`Found folder directly in Firebase: ${folderDoc.id}`);
-          return folderDoc.id;
-        }
-        
-        // If still not found, try a more lenient search
-        console.log("Folder not found with exact criteria, trying broader search...");
-        
-        // Try just by name (in case parentId is different)
-        folderQuery = query(
-          foldersRef,
-          where('name', '==', name),
-          orderBy('createdAt', 'desc'),
-          limit(5)
-        );
-        
-        const nameSnapshot = await getDocs(folderQuery);
-        
-        if (!nameSnapshot.empty) {
-          // Log all found folders for debugging
-          nameSnapshot.docs.forEach(doc => {
-            const data = doc.data();
-            console.log(`Found folder by name: ${doc.id}, parentId: ${data.parentId}, createdAt: ${data.createdAt}`);
-          });
-          
-          // Use the first one
-          const folderDoc = nameSnapshot.docs[0];
-          console.log(`Using folder found by name search: ${folderDoc.id}`);
-          return folderDoc.id;
-        }
-        
-        console.error(`Failed to find newly created folder "${name}" even after Firebase query`);
-        return undefined;
-      } catch (queryError) {
-        console.error("Error querying Firebase for folder:", queryError);
-        return undefined;
-      }
-    } catch (error) {
-      console.error(`Error creating folder "${name}":`, error);
-      return undefined;
-    }
-  };
-
-  // Handle drop event - process files from DataTransfer
-  const handleDrop = async (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
-    
-    // Only proceed if user has upload permission
-    if (!hasUploadPermission()) {
-      showToast("You don't have permission to upload files in this folder", "error");
-      return;
-    }
-    
-    setIsDragging(false);
-    setShowDragOverlay(false);
-    dragCounter.current = 0;
-    
-    // Check if we have files
-    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      const files = Array.from(e.dataTransfer.files);
-      await handleMultipleFileUpload(files);
-    }
-    
-    // Clear the data transfer object
-    e.dataTransfer.clearData();
-  };
 
   return (
     <div 
