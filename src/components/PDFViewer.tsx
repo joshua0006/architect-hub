@@ -2058,10 +2058,11 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     }
   }, [isDragging, currentTool, page, viewport, grabCursorClassName]);
 
-  // Create blue cursor images as constants at the component level
-  const BLUE_GRAB_CURSOR = `url("data:image/svg+xml,%3Csvg width='32' height='32' viewBox='0 0 32 32' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M12.5 11C12.5 8.51472 14.5147 6.5 17 6.5C19.4853 6.5 21.5 8.51472 21.5 11V19C21.5 21.4853 19.4853 23.5 17 23.5C14.5147 23.5 12.5 21.4853 12.5 19V11Z' stroke='%233B82F6' stroke-width='2'/%3E%3Cpath d='M8.5 12V10C8.5 6.13401 11.634 3 15.5 3V3C19.366 3 22.5 6.13401 22.5 10V11' stroke='%233B82F6' stroke-width='2'/%3E%3Cpath d='M4.5 14V12C4.5 6.47715 8.97715 2 14.5 2V2' stroke='%233B82F6' stroke-width='2'/%3E%3C/svg%3E")`;
-  
-  const BLUE_GRABBING_CURSOR = `url("data:image/svg+xml,%3Csvg width='32' height='32' viewBox='0 0 32 32' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M12 16V12C12 9.79086 13.7909 8 16 8V8C18.2091 8 20 9.79086 20 12V16' stroke='%233B82F6' stroke-width='2'/%3E%3Cpath d='M25 16V18C25 22.4183 21.4183 26 17 26H15C10.5817 26 7 22.4183 7 18V16' stroke='%233B82F6' stroke-width='2'/%3E%3Cpath d='M5 16H27' stroke='%233B82F6' stroke-width='2'/%3E%3C/svg%3E")`;
+  // Use the cursor-grab.svg from assets folder
+  const BLUE_GRAB_CURSOR = `url("/assets/cursor-grab.svg")`;
+  const BLUE_GRABBING_CURSOR = `url("/assets/cursor-grabbing.svg")`;
+
+  // Add a style tag for the grabbing cursor if it doesn't exist
 
   // Add a style tag for the grabbing cursor if it doesn't exist
   useEffect(() => {
