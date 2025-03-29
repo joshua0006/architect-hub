@@ -25,6 +25,7 @@ import { documentService } from '../services/documentService';
 import { folderService } from '../services/folderService';
 import { doc, updateDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
+import { setupProjectSubscription, setupUserProjectSubscription, cleanupProjectSubscription } from '../services/subscriptionManager';
 
 // Custom components for folder and file routes
 const DocumentsPage: React.FC<{
@@ -332,24 +333,70 @@ export default function AppContent() {
     }
   };
 
+  // Add event listener for project updates from Firebase
+  useEffect(() => {
+    // Setup event listeners for real-time updates
+    const handleProjectsUpdated = (event: CustomEvent) => {
+      const { projects: updatedProjects } = event.detail;
+      console.log('Received real-time project updates:', updatedProjects);
+      setProjects(updatedProjects);
+      
+      // If selectedProject is one of the updated projects, update it
+      if (selectedProject) {
+        const updatedSelectedProject = updatedProjects.find(p => p.id === selectedProject.id);
+        if (updatedSelectedProject) {
+          setSelectedProject(updatedSelectedProject);
+        }
+      }
+    };
+
+    // Add event listener
+    document.addEventListener('projectsUpdated', handleProjectsUpdated as EventListener);
+    document.addEventListener('userProjectsUpdated', handleProjectsUpdated as EventListener);
+    
+    return () => {
+      // Remove event listener on cleanup
+      document.removeEventListener('projectsUpdated', handleProjectsUpdated as EventListener);
+      document.removeEventListener('userProjectsUpdated', handleProjectsUpdated as EventListener);
+    };
+  }, [selectedProject]);
+
+  // Setup Firebase real-time subscription
+  useEffect(() => {
+    if (user) {
+      if (user.role === 'Staff') {
+        // Staff can see all projects
+        console.log('Setting up real-time subscription for all projects');
+        setupProjectSubscription();
+      } else {
+        // Regular users only see their own projects
+        console.log(`Setting up real-time subscription for ${user.id}'s projects`);
+        setupUserProjectSubscription(user.id);
+      }
+    }
+    
+    // Cleanup subscription when component unmounts
+    return () => {
+      console.log('Cleaning up project subscription');
+      cleanupProjectSubscription();
+    };
+  }, [user]);
+
+  // Existing loadProjects function - for initial loading and fallback
   const loadProjects = async () => {
     try {
       let fetchedProjects: Project[] = [];
       
-      // Staff users see all projects, others only see projects they're added to
-      if (user?.role === 'Staff') {
-        // Staff can see all projects
-        fetchedProjects = await projectService.getAll();
-      } else if (user) {
-        // Other users only see projects they're added to
-        fetchedProjects = await projectService.getUserProjects(user.id);
-      } else {
-        // No user logged in - should not happen in protected routes
-        console.warn('No user found when loading projects');
-        fetchedProjects = [];
+      if (user) {
+        if (user.role === 'Staff') {
+          fetchedProjects = await projectService.getAll();
+        } else {
+          fetchedProjects = await projectService.getUserProjects(user.id);
+        }
+        
+        console.log('Loaded projects:', fetchedProjects);
+        setProjects(fetchedProjects);
       }
-      
-      setProjects(fetchedProjects);
       
       // If selectedProject is no longer in the list, it was deleted or user lost access
       if (selectedProject && !fetchedProjects.some(p => p.id === selectedProject.id)) {

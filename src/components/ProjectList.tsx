@@ -515,25 +515,23 @@ export default function ProjectList({
       await projectService.delete(projectId);
       console.log(`Project ${projectId} deleted successfully`);
       
-      // Force refresh of the project list
-      onProjectsChange();
+      // Show success toast
+      showToast('Project deleted successfully', 'success');
+      setIsDeletingProject(null);
       
-      // Wait a moment to ensure the deletion is processed before selecting another project
-      setTimeout(() => {
-        // If the deleted project was selected, reset selection
-        if (selectedId === projectId) {
-          const remainingProjects = projects.filter(p => p.id !== projectId);
-          if (remainingProjects.length > 0) {
-            onSelect(remainingProjects[0]);
-          } else {
-            // If no projects left, pass null to reset selection
-            onSelect(null as any);
-          }
+      // No need to manually update the list as Firebase will trigger a real-time update
+      // The events from subscriptionManager will update the projects automatically
+      
+      // If the deleted project was selected, reset selection
+      if (selectedId === projectId) {
+        const remainingProjects = projects.filter(p => p.id !== projectId);
+        if (remainingProjects.length > 0) {
+          onSelect(remainingProjects[0]);
+        } else {
+          // If no projects left, pass null to reset selection
+          onSelect(null as any);
         }
-        
-        showToast('Project deleted successfully', 'success');
-        setIsDeletingProject(null);
-      }, 500);
+      }
     } catch (error) {
       console.error('Error deleting project:', error);
       showToast('Failed to delete project', 'error');

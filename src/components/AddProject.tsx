@@ -97,10 +97,11 @@ export default function AddProject({ onSuccess, onCancel }: AddProjectProps) {
       };
       
       console.log('Creating project with data:', cleanedData);
-      const newProject = await projectService.create(cleanedData);
-      console.log('Project created successfully:', newProject);
+      await projectService.create(cleanedData);
+      console.log('Project created successfully - real-time updates will refresh the list');
       
-      // Ensure the onSuccess callback is called to refresh the project list
+      // Close the modal but don't need to manually refresh the list
+      // Firebase real-time subscription will update the projects list automatically
       if (onSuccess) {
         onSuccess();
       }

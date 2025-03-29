@@ -16,7 +16,8 @@ import {
   arrayRemove,
   CollectionReference,
   DocumentData,
-  runTransaction
+  runTransaction,
+  onSnapshot
 } from "firebase/firestore";
 import {
   ref,
@@ -816,6 +817,66 @@ export const projectService = {
     } catch (error) {
       console.error("Error removing team member from project:", error);
       throw new Error("Failed to remove team member from project");
+    }
+  },
+
+  subscribeToAllProjects(callback: (projects: Project[]) => void): () => void {
+    try {
+      const projectsRef = collection(db, COLLECTION);
+      return onSnapshot(projectsRef, (snapshot) => {
+        const projects = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data(),
+          // Ensure proper structure with default values
+          name: doc.data().name || "",
+          client: doc.data().client || "",
+          status: doc.data().status || "active",
+          progress: doc.data().progress || 0,
+          startDate: doc.data().startDate || "",
+          endDate: doc.data().endDate || "",
+          teamMemberIds: doc.data().teamMemberIds || [],
+          metadata: doc.data().metadata || {},
+        } as Project));
+        callback(projects);
+      }, (error) => {
+        console.error('Error in projects subscription:', error);
+        callback([]);
+      });
+    } catch (error) {
+      console.error('Error setting up projects subscription:', error);
+      return () => {};
+    }
+  },
+
+  subscribeToUserProjects(userId: string, callback: (projects: Project[]) => void): () => void {
+    try {
+      const q = query(
+        collection(db, COLLECTION),
+        where("teamMemberIds", "array-contains", userId)
+      );
+      
+      return onSnapshot(q, (snapshot) => {
+        const projects = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data(),
+          // Ensure proper structure with default values
+          name: doc.data().name || "",
+          client: doc.data().client || "",
+          status: doc.data().status || "active",
+          progress: doc.data().progress || 0,
+          startDate: doc.data().startDate || "",
+          endDate: doc.data().endDate || "",
+          teamMemberIds: doc.data().teamMemberIds || [],
+          metadata: doc.data().metadata || {},
+        } as Project));
+        callback(projects);
+      }, (error) => {
+        console.error('Error in user projects subscription:', error);
+        callback([]);
+      });
+    } catch (error) {
+      console.error('Error setting up user projects subscription:', error);
+      return () => {};
     }
   },
 };
