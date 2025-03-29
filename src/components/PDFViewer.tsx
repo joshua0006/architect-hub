@@ -2098,6 +2098,8 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     }
   }, []);
 
+
+  
   // Update effect to add/remove the is-dragging class for global cursor control
   useEffect(() => {
     // Apply is-dragging class to document body for global cursor control
