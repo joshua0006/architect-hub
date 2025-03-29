@@ -73,6 +73,9 @@ const DocumentsPage: React.FC<{
   const { showToast } = useToast();
   const { user } = useAuth();
   
+  // Add state for tracking fullscreen mode
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  
   // Check if we need to switch projects based on URL parameter
   useEffect(() => {
     if (urlProjectId && (!selectedProject || selectedProject.id !== urlProjectId)) {
@@ -192,6 +195,7 @@ const DocumentsPage: React.FC<{
           tasks={tasks}
         />
       }
+      fullscreenMode={isFullscreen}
     >
       {selectedProject ? (
         <DocumentList
@@ -211,6 +215,7 @@ const DocumentsPage: React.FC<{
           onShare={handleShare}
           onUpdateDocumentPermission={updateDocumentPermission}
           onUpdateFolderPermission={updateFolderPermission}
+          onFullscreenChange={setIsFullscreen}
         />
       ) : (
         <div className="h-full flex items-center justify-center text-gray-500">

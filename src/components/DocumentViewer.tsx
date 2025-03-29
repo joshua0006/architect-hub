@@ -20,6 +20,9 @@ import {
   Home,
   Edit2,
   Trash,
+  ArrowLeft,
+  Maximize,
+  Minimize,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth } from "../contexts/AuthContext";
@@ -99,6 +102,8 @@ interface DocumentViewerProps {
   isShared?: boolean;
   viewerHeight: number;
   setViewerHeight: (height: number) => void;
+  isFullscreen?: boolean;
+  onFullscreenChange?: (isFullscreen: boolean) => void;
 }
 
 interface CommentMarkerProps {
@@ -344,6 +349,9 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
   folders,
   onRefresh,
   onNavigateToFolder,
+  onClose,
+  isFullscreen = false,
+  onFullscreenChange,
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -1163,8 +1171,13 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
     // Implementation of handleDownload
   };
 
+  const toggleFullscreen = () => {
+    onFullscreenChange?.(!isFullscreen);
+    setIsExpanded(false); // Close expanded section when toggling fullscreen
+  };
+
   return (
-    <div className="flex flex-col h-full">
+    <div className={`flex flex-col ${isFullscreen ? 'fixed inset-0 z-50 bg-white' : 'h-full'}`}>
       {/* Add style tag for highlight animation */}
       <style>{highlightStyles}</style>
       
@@ -1194,11 +1207,19 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
         }`}
       >
         <div
-          className="flex items-center justify-between p-4 cursor-pointer hover:bg-gray-50"
-          onClick={() => setIsExpanded(!isExpanded)}
+          className="flex items-center justify-between p-4 hover:bg-gray-50"
         >
           <div className="flex items-center space-x-4">
-            <div>
+            {isFullscreen && (
+              <button 
+                onClick={toggleFullscreen} 
+                className="mr-2 p-2 rounded-full hover:bg-gray-100 text-gray-600"
+                title="Exit fullscreen"
+              >
+                <ArrowLeft className="w-5 h-5" />
+              </button>
+            )}
+            <div className={isFullscreen ? "cursor-default" : "cursor-pointer"} onClick={!isFullscreen ? () => setIsExpanded(!isExpanded) : undefined}>
               <h2 className="text-lg font-medium text-gray-900">
                 {document.name}
               </h2>
@@ -1241,19 +1262,31 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
             >
               <Download className="w-5 h-5" />
             </a>
-            {isExpanded ? (
-              <ChevronUp className="w-5 h-5 text-gray-400" />
-            ) : (
-              <ChevronDown className="w-5 h-5 text-gray-400" />
+            {document.type === "pdf" && (
+              <button 
+                onClick={toggleFullscreen} 
+                className="p-2 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100"
+                title={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
+              >
+                {isFullscreen ? <Minimize className="w-5 h-5" /> : <Maximize className="w-5 h-5" />}
+              </button>
+            )}
+            {!isFullscreen && (
+              <>
+                {isExpanded ? (
+                  <ChevronUp className="w-5 h-5 text-gray-400 cursor-pointer" onClick={() => setIsExpanded(!isExpanded)} />
+                ) : (
+                  <ChevronDown className="w-5 h-5 text-gray-400 cursor-pointer" onClick={() => setIsExpanded(!isExpanded)} />
+                )}
+              </>
             )}
           </div>
         </div>
 
-        {/* Version History Section */}
-        {isExpanded && (
+        {/* Version History Section - Only show when not in fullscreen */}
+        {isExpanded && !isFullscreen && (
           <div className="px-4 space-y-6">
             {/* Add Folder Information Section */}
-        
 
             <div>
               <h3 className="text-sm font-medium text-gray-900 mb-2 flex items-center">
@@ -1425,12 +1458,12 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
       </div>
 
       {/* Document Content */}
-      <div className="flex-1 bg-gray-100 p-4">
+      <div className={`${isFullscreen ? 'flex-1' : 'flex-1 bg-gray-100 p-4'}`}>
         {document.type === "pdf" ? (
-          <div className="flex h-full gap-4">
+          <div className={`flex h-full ${isFullscreen ? 'gap-0' : 'gap-4'}`}>
             <Toolbar currentFolder={enhancedFolderInfo} />
             <div
-              className="relative bg-white rounded-lg shadow-sm p-4 flex-1 document-content"
+              className={`relative bg-white ${isFullscreen ? '' : 'rounded-lg shadow-sm p-4'} flex-1 document-content`}
               style={{ height: "100%" }}
             >
               <PDFViewer file={document.url} documentId={document.id} />

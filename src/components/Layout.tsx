@@ -6,9 +6,10 @@ import Header from './Header';
 interface LayoutProps {
   sidebar?: ReactNode;
   children: ReactNode;
+  fullscreenMode?: boolean;
 }
 
-export default function Layout({ sidebar, children }: LayoutProps) {
+export default function Layout({ sidebar, children, fullscreenMode = false }: LayoutProps) {
   const location = useLocation();
 
   return (
@@ -16,7 +17,7 @@ export default function Layout({ sidebar, children }: LayoutProps) {
       <Header />
       
       <div className="pt-16 flex">
-        {sidebar && (
+        {sidebar && !fullscreenMode && (
           <aside
             className="relative w-1/4 min-w-[280px] max-w-sm h-[calc(100vh-4rem)] bg-white border-r border-gray-200"
           >
@@ -52,7 +53,7 @@ export default function Layout({ sidebar, children }: LayoutProps) {
         )}
         
         <main
-          className={`flex-1 h-[calc(100vh-4rem)] overflow-y-auto ${sidebar ? 'w-3/4' : 'w-full'}`}
+          className={`flex-1 h-[calc(100vh-4rem)] overflow-y-auto ${fullscreenMode || !sidebar ? 'w-full' : 'w-3/4'}`}
         >
           {children}
         </main>
