@@ -693,34 +693,40 @@ export default function TaskList({
                 />
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <select
-                      value={editingTask.assignedTo.length > 0 ? editingTask.assignedTo[0] : ""}
-                      onChange={(e) =>
-                        setEditingTask({
-                          ...editingTask,
-                          assignedTo: e.target.value ? [e.target.value] : [],
-                        })
-                      }
-                      className="w-full px-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      required
-                    >
-                      <option value="">Select Assignee</option>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Assign to</label>
+                    <div className="max-h-40 overflow-y-auto border border-gray-200 rounded-md p-2">
                       {allUsers.map((user) => (
-                        <option key={user.id} value={user.id}>
-                          {user.displayName || "Unknown User"}
-                          {!user.projectIds?.includes(projectId) &&
-                            " (Will be added to project)"}
-                        </option>
+                        <div key={user.id} className="flex items-center mb-2 last:mb-0">
+                          <input
+                            type="checkbox"
+                            id={`user-${user.id}`}
+                            checked={editingTask.assignedTo.includes(user.id)}
+                            onChange={(e) => {
+                              const newAssignedTo = e.target.checked
+                                ? [...editingTask.assignedTo, user.id]
+                                : editingTask.assignedTo.filter(id => id !== user.id);
+                              setEditingTask({
+                                ...editingTask,
+                                assignedTo: newAssignedTo,
+                              });
+                            }}
+                            className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                          />
+                          <label htmlFor={`user-${user.id}`} className="ml-2 block text-sm text-gray-900">
+                            {user.displayName || "Unknown User"}
+                            {!user.projectIds?.includes(projectId) &&
+                              " (Will be added to project)"}
+                          </label>
+                        </div>
                       ))}
-                    </select>
-                    {editingTask.assignedTo.length > 0 &&
-                      !allUsers
-                        .find((u) => u.id === editingTask.assignedTo[0])
-                        ?.projectIds?.includes(projectId) && (
-                        <p className="mt-1 text-sm text-blue-500">
-                          User will be added to project upon assignment
-                        </p>
-                      )}
+                    </div>
+                    {editingTask.assignedTo.some(userId => 
+                      !allUsers.find(u => u.id === userId)?.projectIds?.includes(projectId)
+                    ) && (
+                      <p className="mt-1 text-sm text-blue-500">
+                        Some users will be added to project upon assignment
+                      </p>
+                    )}
                   </div>
                   <div>
                     <input
@@ -1004,12 +1010,42 @@ export default function TaskList({
 
                     <div className="mt-4 flex items-center justify-between text-sm text-gray-500">
                       <div className="flex items-center space-x-4">
-                        <span>
-                          Assigned to:{" "}
-                          {task.assignedTo.length > 0 
-                            ? allUsers.find((u) => u.id === task.assignedTo[0])?.displayName || "Unknown" 
-                            : "Unassigned"}
-                        </span>
+                        <div className="flex items-center">
+                          <span>Assigned to: </span>
+                          {task.assignedTo.length > 0 ? (
+                            <div className="flex -space-x-1 ml-1">
+                              {task.assignedTo.slice(0, 3).map(userId => {
+                                const user = allUsers.find(u => u.id === userId);
+                                return (
+                                  <div 
+                                    key={userId} 
+                                    className="w-6 h-6 rounded-full bg-gray-100 border border-white overflow-hidden" 
+                                    title={user?.displayName || "Unknown"}
+                                  >
+                                    {user?.profile?.photoURL ? (
+                                      <img 
+                                        src={user.profile.photoURL} 
+                                        alt={user?.displayName?.[0] || "?"}
+                                        className="w-full h-full object-cover"
+                                      />
+                                    ) : (
+                                      <div className="w-full h-full flex items-center justify-center text-xs font-medium bg-blue-100 text-blue-800">
+                                        {user?.displayName?.[0]?.toUpperCase() || "?"}
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                              {task.assignedTo.length > 3 && (
+                                <div className="w-6 h-6 rounded-full bg-gray-100 flex items-center justify-center text-xs font-medium text-gray-800 border border-white">
+                                  +{task.assignedTo.length - 3}
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="ml-1">Unassigned</span>
+                          )}
+                        </div>
                         <span>Due: {task.dueDate}</span>
                         {/* Show subtask progress bar if there are subtasks */}
                         {(subtasksMap[task.id]?.length > 0) && (
