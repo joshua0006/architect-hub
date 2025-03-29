@@ -25,6 +25,7 @@ interface TaskActionsProps {
     category: string,
     parentTaskId?: string // Added parameter for subtask creation
   ) => void;
+  creatingTask: boolean;
 }
 
 export default function TaskActions({
@@ -35,6 +36,7 @@ export default function TaskActions({
   parentTaskCategory,
   isSubtask = false,
   onCreateTask,
+  creatingTask,
 }: TaskActionsProps) {
   const [showForm, setShowForm] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -88,6 +90,10 @@ export default function TaskActions({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // Return immediately if already creating a task
+    if (creatingTask) return;
+    
     setError("");
 
     if (!formData.category) {
@@ -269,6 +275,23 @@ export default function TaskActions({
   // Check if user is staff or admin
   const isStaffOrAdmin = user?.role === 'Staff' || user?.role === 'Admin';
 
+  // Close the form modal automatically when task creation is completed
+  useEffect(() => {
+    // If we were creating a task and now we're not, the task creation is complete
+    if (!creatingTask && showForm) {
+      setShowForm(false);
+      setFormData({
+        title: "",
+        description: "",
+        assignedTo: user?.id ? [user.id] : [],
+        dueDate: "",
+        priority: "medium",
+        category: isSubtask && parentTaskCategory ? parentTaskCategory : "",
+        parentTaskId: parentTaskId || "",
+      });
+    }
+  }, [creatingTask]);
+
   if (isLoading) {
     return (
       <button
@@ -289,11 +312,14 @@ export default function TaskActions({
     <div className="relative">
       <button
         onClick={() => setShowForm(true)}
+        disabled={creatingTask}
         className={`flex items-center space-x-2 px-4 py-2 ${
           isSubtask 
             ? "bg-purple-500 hover:bg-purple-600" 
             : "bg-blue-500 hover:bg-blue-600"
-        } text-white rounded-md transition-colors`}
+        } text-white rounded-md transition-colors ${
+          creatingTask ? "opacity-50 cursor-not-allowed" : ""
+        }`}
         data-testid="create-task-button"
       >
         <Plus className="w-4 h-4" />
@@ -619,10 +645,22 @@ export default function TaskActions({
                 </button>
                 <button
                   type="submit"
-                  disabled={showNewCategoryForm}
-                  className="px-4 py-2 text-sm text-white bg-blue-500 rounded-md hover:bg-blue-600 transition-colors disabled:bg-blue-300 disabled:cursor-not-allowed"
+                  disabled={creatingTask}
+                  className={`px-4 py-2 text-sm text-white bg-blue-500 rounded-md hover:bg-blue-600 transition-colors ${
+                    creatingTask ? 'opacity-50 cursor-not-allowed' : ''
+                  }`}
                 >
-                  {isSubtask ? "Create Subtask" : "Create Task"}
+                  {creatingTask ? (
+                    <div className="flex items-center">
+                      <svg className="animate-spin h-4 w-4 mr-2 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      Creating...
+                    </div>
+                  ) : (
+                    'Create Task'
+                  )}
                 </button>
               </div>
             </form>

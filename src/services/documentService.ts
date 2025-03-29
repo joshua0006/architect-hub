@@ -513,5 +513,58 @@ export const documentService = {
       console.error('Error deleting comment:', error);
       throw new Error('Failed to delete comment');
     }
+  },
+
+  subscribeToDocument(documentId: string, callback: (document: Document | null) => void) {
+    try {
+      const documentRef = doc(db, 'documents', documentId);
+      
+      return onSnapshot(documentRef, (snapshot) => {
+        if (snapshot.exists()) {
+          const documentData = {
+            id: snapshot.id,
+            ...snapshot.data(),
+          } as Document;
+          
+          callback(documentData);
+        } else {
+          console.log(`Document ${documentId} not found`);
+          callback(null);
+        }
+      }, (error) => {
+        console.error('Error in document subscription:', error);
+        callback(null);
+      });
+    } catch (error) {
+      console.error('Error setting up document subscription:', error);
+      return () => {};
+    }
+  },
+  
+  subscribeToDocumentUpdates(folderId: string, callback: (documents: Document[]) => void) {
+    try {
+      const documentsRef = collection(db, 'documents');
+      
+      // If folderId is specified, we'll filter by it in the callback
+      return onSnapshot(documentsRef, (snapshot) => {
+        const documents = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data(),
+        } as Document));
+        
+        // Filter documents by folderId if specified
+        const filteredDocs = folderId 
+          ? documents.filter(doc => doc.folderId === folderId)
+          : documents;
+          
+        callback(filteredDocs);
+      }, (error) => {
+        console.error('Error in documents subscription:', error);
+        callback([]);
+      });
+    } catch (error) {
+      console.error('Error setting up documents subscription:', error);
+      return () => {};
+    }
   }
 };

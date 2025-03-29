@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { ChevronRight, FolderOpen, Home, MoreHorizontal, FileText } from 'lucide-react';
 import { Folder, Document } from '../types';
+import { DOCUMENT_UPDATE_EVENT } from './DocumentViewer';
 
 interface DocumentBreadcrumbsProps {
   folders: Folder[];
@@ -21,6 +22,45 @@ export default function DocumentBreadcrumbs({
   const [showDropdown, setShowDropdown] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const [localSelectedDocument, setLocalSelectedDocument] = useState<Document | undefined>(selectedDocument);
+  
+  // Update local state when prop changes
+  useEffect(() => {
+    setLocalSelectedDocument(selectedDocument);
+  }, [selectedDocument]);
+  
+  // Listen for document update events to refresh breadcrumbs immediately
+  useEffect(() => {
+    const handleDocumentUpdate = (event: Event) => {
+      const customEvent = event as CustomEvent;
+      if (!customEvent.detail) return;
+      
+      const { documentId, documentName, documentVersion, documentUrl } = customEvent.detail;
+      
+      // Check if this is the same document we're currently viewing
+      if (localSelectedDocument && localSelectedDocument.id === documentId) {
+        console.log('Breadcrumbs: Updating document display name in breadcrumbs to:', documentName);
+        
+        // Update the local state to show the new name immediately
+        setLocalSelectedDocument(prev => {
+          if (!prev) return undefined;
+          return {
+            ...prev,
+            name: documentName,
+            version: documentVersion,
+            url: documentUrl
+          };
+        });
+      }
+    };
+    
+    // Add listener for the custom event
+    document.body.addEventListener(DOCUMENT_UPDATE_EVENT, handleDocumentUpdate);
+    
+    return () => {
+      document.body.removeEventListener(DOCUMENT_UPDATE_EVENT, handleDocumentUpdate);
+    };
+  }, [localSelectedDocument]);
   
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -219,7 +259,7 @@ export default function DocumentBreadcrumbs({
         )}
 
         {/* Show selected document at the end if available */}
-        {selectedDocument && (
+        {localSelectedDocument && (
           <>
             {/* Chevron before document */}
             <div className="flex items-center my-1">
@@ -233,11 +273,11 @@ export default function DocumentBreadcrumbs({
                 onClick={onDocumentClick}
                 aria-current="page"
               >
-                {getDocumentIcon(selectedDocument.type)}
-                <span className="truncate max-w-xs">{selectedDocument.name}</span>
-                {selectedDocument.type && (
+                {getDocumentIcon(localSelectedDocument.type)}
+                <span className="truncate max-w-xs">{localSelectedDocument.name}</span>
+                {localSelectedDocument.type && (
                   <span className="ml-2 px-1.5 py-0.5 text-xs rounded bg-gray-100 text-gray-600 uppercase">
-                    {selectedDocument.type}
+                    {localSelectedDocument.type}
                   </span>
                 )}
               </div>

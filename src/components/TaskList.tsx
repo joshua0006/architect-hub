@@ -9,6 +9,8 @@ import {
   Plus,
   ChevronRight,
   ChevronUp,
+  Filter,
+  SlidersHorizontal,
 } from "lucide-react";
 import { Task, TeamMember, User } from "../types";
 import TaskActions from "./TaskActions";
@@ -53,7 +55,10 @@ export default function TaskList({
 }: TaskListProps) {
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
+  const [selectedUser, setSelectedUser] = useState<string>("all");
+  const [selectedStatus, setSelectedStatus] = useState<string>("all");
   const [showStatusMenu, setShowStatusMenu] = useState<string | null>(null);
+  const [showFiltersDropdown, setShowFiltersDropdown] = useState(false);
   const { settings, isLoading } = useOrganization();
   const { user, canAssignTasks, canUpdateTaskStatus, canEditTask, canDeleteTask } = useAuth();
   const [allUsers, setAllUsers] = useState<User[]>([]);
@@ -71,6 +76,12 @@ export default function TaskList({
   // References to store unsubscribe functions
   const taskUnsubscribeRef = useRef<(() => void) | null>(null);
   const subtaskUnsubscribeRef = useRef<(() => void) | null>(null);
+  
+  const [showCustomUserDropdown, setShowCustomUserDropdown] = useState(false);
+  
+  // Add new state for loading states
+  const [addingSubTask, setAddingSubTask] = useState<{[taskId: string]: boolean}>({});
+  const [creatingTask, setCreatingTask] = useState(false);
   
   useEffect(() => {
     loadUsers();
@@ -281,8 +292,12 @@ export default function TaskList({
     }
   };
 
+  // Update the filtered tasks logic to also filter by status
   const filteredTasks = tasks.filter(
-    (task) => selectedCategory === "all" || task.category === selectedCategory
+    (task) => 
+      (selectedCategory === "all" || task.category === selectedCategory) &&
+      (selectedUser === "all" || task.assignedTo.includes(selectedUser)) &&
+      (selectedStatus === "all" || task.status === selectedStatus)
   );
 
   // Filter main tasks (not subtasks)
@@ -291,9 +306,10 @@ export default function TaskList({
   // Add function to add sub-task
   const addSubTask = async (parentTaskId: string) => {
     const title = newSubTaskTitle[parentTaskId]?.trim();
-    if (!title) return;
+    if (!title || addingSubTask[parentTaskId]) return;
     
     try {
+      setAddingSubTask(prev => ({ ...prev, [parentTaskId]: true }));
       // Create subtask data object with only defined values
       const subtaskData: any = {
         parentTaskId, // This one is required and always defined
@@ -317,6 +333,8 @@ export default function TaskList({
       }));
     } catch (err) {
       console.error("Error creating subtask:", err);
+    } finally {
+      setAddingSubTask(prev => ({ ...prev, [parentTaskId]: false }));
     }
   };
 
@@ -353,6 +371,7 @@ export default function TaskList({
     parentTaskId?: string
   ) => {
     try {
+      setCreatingTask(true);
       // Create task directly with Firebase
       // Create task object without undefined values
       const taskData: any = {
@@ -374,6 +393,8 @@ export default function TaskList({
       await taskService.create(taskData);
     } catch (err) {
       console.error("Error creating task:", err);
+    } finally {
+      setCreatingTask(false);
     }
   };
 
@@ -386,8 +407,37 @@ export default function TaskList({
   if (isLoading) {
     return (
       <div className="p-6">
-        <div className="flex items-center justify-center h-32">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
+        <div className="flex flex-col space-y-4">
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex space-x-2">
+              <div className="w-16 h-8 bg-gray-200 rounded-md animate-pulse"></div>
+              <div className="w-24 h-8 bg-gray-200 rounded-md animate-pulse"></div>
+              <div className="w-20 h-8 bg-gray-200 rounded-md animate-pulse"></div>
+            </div>
+            <div className="w-32 h-8 bg-gray-200 rounded-md animate-pulse"></div>
+          </div>
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="p-4 bg-white border border-gray-200 rounded-lg shadow-sm">
+              <div className="flex items-start justify-between animate-pulse">
+                <div className="w-full">
+                  <div className="flex items-center space-x-3 mb-2">
+                    <div className="w-24 h-6 bg-gray-200 rounded-md"></div>
+                    <div className="w-48 h-6 bg-gray-200 rounded-md"></div>
+                    <div className="w-16 h-6 bg-gray-200 rounded-md"></div>
+                  </div>
+                  <div className="w-3/4 h-4 bg-gray-200 rounded-md mb-4"></div>
+                  <div className="w-full h-12 bg-gray-100 rounded-md mb-4"></div>
+                  <div className="flex justify-between">
+                    <div className="flex space-x-4">
+                      <div className="w-32 h-4 bg-gray-200 rounded-md"></div>
+                      <div className="w-24 h-4 bg-gray-200 rounded-md"></div>
+                    </div>
+                    <div className="w-16 h-4 bg-gray-200 rounded-md"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))}
         </div>
       </div>
     );
@@ -395,44 +445,215 @@ export default function TaskList({
 
   return (
     <div className="p-6">
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex space-x-2">
-          <button
-            key="all"
-            onClick={() => setSelectedCategory("all")}
-            className={`px-4 py-2 text-sm rounded-md transition-colors ${
-              selectedCategory === "all"
-                ? "bg-blue-500 text-white"
-                : "bg-white text-gray-600 hover:bg-gray-50"
-            }`}
-          >
-            All
-          </button>
-          {settings?.taskCategories?.map((category) => (
-            <button
-              key={category.id}
-              onClick={() => setSelectedCategory(category.id)}
-              className={`px-4 py-2 text-sm rounded-md transition-colors flex items-center space-x-2 ${
-                selectedCategory === category.id
-                  ? "bg-blue-500 text-white"
-                  : "bg-white text-gray-600 hover:bg-gray-50"
-              }`}
-            >
-              <div
-                className="w-3 h-3 rounded-full"
-                style={{ backgroundColor: category.color }}
+      <div className="flex flex-col mb-6 space-y-4">
+       {/* New horizontal filter layout */}
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          {/* Category Filter - Inline */}
+          <div className="flex items-center flex-grow">
+            <div className="flex flex-wrap gap-2">
+              <button
+                key="all-categories"
+                onClick={() => setSelectedCategory("all")}
+                className={`px-4 py-2 text-md rounded-md transition-colors ${
+                  selectedCategory === "all"
+                    ? "bg-blue-500 text-white"
+                    : "bg-gray-200 text-gray-700 hover:bg-gray-200"
+                }`}
+              >
+                All
+              </button>
+              {settings?.taskCategories?.map((category) => (
+                <button
+                  key={category.id}
+                  onClick={() => setSelectedCategory(category.id)}
+                  className={`px-4 py-2 text-md rounded-md transition-colors flex items-center space-x-1.5 ${
+                    selectedCategory === category.id
+                      ? "bg-blue-500 text-white"
+                      : "bg-gray-200 text-gray-700 hover:bg-gray-200"
+                  }`}
+                >
+                  <div
+                    className="w-2 h-2 rounded-full"
+                    style={{ backgroundColor: category.color }}
+                  />
+                  <span>{category.name}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+          
+          {/* Action buttons aligned right */}
+          <div className="flex items-center space-x-3">
+            {/* Filters dropdown button */}
+            <div className="relative">
+              <button
+                onClick={() => setShowFiltersDropdown(!showFiltersDropdown)}
+                className="flex items-center space-x-2 px-4 py-2 text-md bg-white border border-gray-200 rounded-md shadow-sm hover:bg-gray-50 transition-colors"
+              >
+                <SlidersHorizontal className="w-4 h-4 text-gray-500" />
+                <span>Filters</span>
+                <ChevronDown className="w-4 h-4 text-gray-500" />
+              </button>
+              
+              <AnimatePresence>
+                {showFiltersDropdown && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    className="absolute right-0 mt-2 w-72 bg-white rounded-lg shadow-lg z-10 border border-gray-200 p-4"
+                  >
+                    {/* Status Filter */}
+                    <div className="mb-4">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Status</label>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          onClick={() => setSelectedStatus("all")}
+                          className={`px-3 py-1.5 text-xs rounded-md transition-colors ${
+                            selectedStatus === "all" 
+                              ? "bg-blue-500 text-white"
+                              : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                          }`}
+                        >
+                          All
+                        </button>
+                        {statusOptions.map((option) => (
+                          <button
+                            key={option.value}
+                            onClick={() => setSelectedStatus(option.value)}
+                            className={`px-3 py-1.5 text-xs rounded-md transition-colors ${
+                              selectedStatus === option.value
+                                ? "bg-blue-500 text-white"
+                                : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                            }`}
+                          >
+                            {option.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Updated Assigned To filter */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Assigned To</label>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          onClick={() => setSelectedUser("all")}
+                          className={`px-3 py-1.5 text-xs rounded-md transition-colors ${
+                            selectedUser === "all"
+                              ? "bg-blue-500 text-white"
+                              : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                          }`}
+                        >
+                          All
+                        </button>
+                        
+                        {user && (
+                          <button
+                            onClick={() => setSelectedUser(user.id)}
+                            className={`px-3 py-1.5 text-xs rounded-md transition-colors ${
+                              selectedUser === user.id
+                                ? "bg-blue-500 text-white"
+                                : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                            }`}
+                          >
+                            Me
+                          </button>
+                        )}
+
+                        <div className="relative">
+                          <button
+                            onClick={() => setShowCustomUserDropdown(!showCustomUserDropdown)}
+                            className={`px-3 py-1.5 text-xs rounded-md transition-colors ${
+                              selectedUser !== "all" && selectedUser !== user?.id
+                                ? "bg-blue-500 text-white"
+                                : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                            }`}
+                          >
+                            Custom
+                            <ChevronDown className="w-4 h-4 inline-block ml-1" />
+                          </button>
+
+                          <AnimatePresence>
+                            {showCustomUserDropdown && (
+                              <motion.div
+                                initial={{ opacity: 0, y: -10 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                exit={{ opacity: 0, y: -10 }}
+                                className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg z-10 border border-gray-200 p-2"
+                              >
+                                <div className="max-h-60 overflow-y-auto">
+                                  {allUsers
+                                    .filter(u => u.id !== user?.id)
+                                    .map((user) => (
+                                      <button
+                                        key={user.id}
+                                        onClick={() => {
+                                          setSelectedUser(user.id);
+                                          setShowCustomUserDropdown(false);
+                                        }}
+                                        className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 rounded-md"
+                                      >
+                                        {user.displayName || "Unknown User"}
+                                      </button>
+                                  ))}
+                                </div>
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
+                        </div>
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+            
+            {canAssignTasks() && (
+              <TaskActions
+                projectId={projectId}
+                teamMembers={teamMembers}
+                categories={settings?.taskCategories || []}
+                onCreateTask={handleCreateTask}
+                creatingTask={creatingTask}
               />
-              <span>{category.name}</span>
-            </button>
-          ))}
+            )}
+          </div>
         </div>
-        {canAssignTasks() && (
-          <TaskActions
-            projectId={projectId}
-            teamMembers={teamMembers}
-            categories={settings?.taskCategories || []}
-            onCreateTask={handleCreateTask}
-          />
+
+        {/* Filter summary display */}
+        {(selectedStatus !== "all" || selectedUser !== "all") && (
+          <div className="flex flex-wrap gap-2 text-sm">
+            {selectedStatus !== "all" && (
+              <div className="flex items-center space-x-1 px-2 py-1 bg-blue-50 text-blue-700 rounded-md">
+                <span>Status: </span>
+                <span className="font-medium capitalize">{selectedStatus}</span>
+                <button 
+                  onClick={() => setSelectedStatus("all")}
+                  className="ml-1 hover:text-blue-900"
+                >
+                  ×
+                </button>
+              </div>
+            )}
+            
+            {selectedUser !== "all" && (
+              <div className="flex items-center space-x-1 px-2 py-1 bg-blue-50 text-blue-700 rounded-md">
+                <span>Assigned to: </span>
+                <span className="font-medium">
+                  {selectedUser === user?.id 
+                    ? "Me" 
+                    : allUsers.find(u => u.id === selectedUser)?.displayName || "Unknown"}
+                </span>
+                <button 
+                  onClick={() => setSelectedUser("all")}
+                  className="ml-1 hover:text-blue-900"
+                >
+                  ×
+                </button>
+              </div>
+            )}
+          </div>
         )}
       </div>
 
@@ -552,10 +773,10 @@ export default function TaskList({
               <>
               
                 <div 
-                  className={`flex items-start justify-between ${subtasksMap[task.id]?.length > 0 ? 'border-l-4 pl-3' : ''}`}
+                  className={`flex items-start justify-between border-l-4 pl-3`}
                   style={{
                     cursor: 'pointer',
-                    ...(subtasksMap[task.id]?.length > 0 ? { borderLeftColor: getCategoryColor(task.category) } : {})
+                    borderLeftColor: getCategoryColor(task.category)
                   }}
                   onClick={(e) => {
                     // Don't trigger if user is clicking on buttons or status menu
@@ -657,86 +878,129 @@ export default function TaskList({
                       {task.description}
                     </p>
 
-                    {/* Show sub-tasks section when expanded */}
-                    {expandedTask === String(task.id) && (
-                      <div className="mt-4 pl-6 border-l-2 bg-gray-100 rounded-md p-2" onClick={e => e.stopPropagation()}>
-                        <div className="flex items-center justify-between mb-2">
-                          <h4 className="text-sm font-medium text-gray-700">Sub-tasks</h4>
-                          <div className="text-xs text-gray-500">
-                            {subtasksMap[task.id]?.filter(st => st.status === 'completed').length || 0}/{subtasksMap[task.id]?.length || 0} completed
-                          </div>
-                        </div>
-                        
-                        {/* Sub-tasks list */}
-                        <div className="space-y-2 mb-3 ">
-                          {(subtasksMap[task.id] || []).map(subtask => (
-                            <div key={subtask.id} className="flex items-center group">
-                              <button 
-                                onClick={(e) => {
-                                  e.stopPropagation(); // Prevent card expansion
-                                  toggleSubTaskCompletion(subtask);
-                                }}
-                                className="p-1 mr-2"
-                              >
-                                {subtask.status === 'completed' ? (
-                                  <CheckCircle2 className="w-4 h-4 text-green-500" />
-                                ) : (
-                                  <Circle className="w-4 h-4 text-gray-300" />
-                                )}
-                              </button>
-                              <label 
-                                className={`text-sm flex-1 cursor-pointer ${subtask.status === 'completed' ? 'line-through text-gray-400' : 'text-gray-700'}`}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  toggleSubTaskCompletion(subtask);
-                                }}
-                              >
-                                {subtask.title}
-                              </label>
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation(); // Prevent card expansion
-                                  deleteSubTask(subtask.id);
-                                }}
-                                className="p-1 opacity-0 group-hover:opacity-100 transition-opacity"
-                              >
-                                <Trash2 className="w-3 h-3 text-gray-400 hover:text-red-500" />
-                              </button>
+                    {/* Show sub-tasks section when expanded with animation */}
+                    <AnimatePresence>
+                      {expandedTask === String(task.id) && (
+                        <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ 
+                          opacity: 1,
+                          height: "auto",
+                          transition: {
+                            opacity: { duration: 0.2 },
+                            height: { duration: 0.3, ease: [0.4, 0, 0.2, 1] }
+                          }
+                        }}
+                        exit={{ 
+                          opacity: 0,
+                          height: 0,
+                          transition: {
+                            opacity: { duration: 0.15 },
+                            height: { duration: 0.25, ease: [0.4, 0, 0.2, 1] }
+                          }
+                        }}
+                        className="pl-6 border-l-2 bg-gray-100 rounded-md overflow-hidden mt-2 p-2"
+                        onClick={e => e.stopPropagation()}
+                      >
+                        <motion.div
+        initial={{ y: -10 }}
+        animate={{ y: 0 }}
+        exit={{ y: -10 }}
+        transition={{ duration: 0.2 }}
+        className="p-2"
+      >
+                          <div className="flex items-center justify-between mb-2">
+                            <h4 className="text-sm font-medium text-gray-700">Sub-tasks</h4>
+                            <div className="text-xs text-gray-500">
+                              {subtasksMap[task.id]?.filter(st => st.status === 'completed').length || 0}/{subtasksMap[task.id]?.length || 0} completed
                             </div>
-                          ))}
-                        </div>
-                        
-                        {/* Add new sub-task input */}
-                        <div className="flex items-center">
-                          <input
-                            type="text"
-                            placeholder="Add a sub-task..."
-                            value={newSubTaskTitle[task.id] || ''}
-                            onChange={(e) => setNewSubTaskTitle(prev => ({
-                              ...prev,
-                              [task.id]: e.target.value
-                            }))}
-                            onKeyPress={(e) => {
-                              if (e.key === 'Enter') {
-                                e.preventDefault();
+                          </div>
+                          
+                          {/* Sub-tasks list */}
+                          <div className="space-y-2 mb-3 ">
+                            {(subtasksMap[task.id] || []).map(subtask => (
+                               
+                              <div key={subtask.id} className="flex items-center group">
+                                <button 
+                                  onClick={(e) => {
+                                    e.stopPropagation(); // Prevent card expansion
+                                    toggleSubTaskCompletion(subtask);
+                                  }}
+                                  className="p-1 mr-2"
+                                >
+                                  {subtask.status === 'completed' ? (
+                                    <CheckCircle2 className="w-4 h-4 text-green-500" />
+                                  ) : (
+                                    <Circle className="w-4 h-4 text-gray-300" />
+                                  )}
+                                </button>
+                                <label 
+                                  className={`text-md flex-1 cursor-pointer ${subtask.status === 'completed' ? 'line-through text-gray-400' : 'text-gray-700'}`}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    toggleSubTaskCompletion(subtask);
+                                  }}
+                                >
+                                  {subtask.title}
+                                </label>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation(); // Prevent card expansion
+                                    deleteSubTask(subtask.id);
+                                  }}
+                                  className="p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                                >
+                                  <Trash2 className="w-5 h-5 text-gray-400 hover:text-red-500" />
+                                </button>
+                              </div>
+                             
+                            ))}
+                          </div>
+                          
+                          {/* Add new sub-task input */}
+                          <div className="flex items-center">
+                            <input
+                              type="text"
+                              placeholder="Add a sub-task..."
+                              value={newSubTaskTitle[task.id] || ''}
+                              onChange={(e) => setNewSubTaskTitle(prev => ({
+                                ...prev,
+                                [task.id]: e.target.value
+                              }))}
+                              onKeyPress={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  addSubTask(task.id);
+                                }
+                              }}
+                              disabled={addingSubTask[task.id]}
+                              className={`flex-1 text-md px-2 py-1 border-b border-gray-200 focus:outline-none ${
+                                addingSubTask[task.id] ? 'opacity-50' : 'focus:border-blue-500'
+                              }`}
+                            />
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation(); // Prevent card expansion
                                 addSubTask(task.id);
-                              }
-                            }}
-                            className="flex-1 text-sm px-2 py-1 border-b border-gray-200 focus:outline-none focus:border-blue-500"
-                          />
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation(); // Prevent card expansion
-                              addSubTask(task.id);
-                            }}
-                            className="ml-2 p-1 text-blue-500 hover:text-blue-600"
-                          >
-                            <Plus className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </div>
-                    )}
+                              }}
+                              disabled={addingSubTask[task.id]}
+                              className="ml-2 p-1 text-blue-500 hover:text-blue-600 disabled:opacity-50"
+                            >
+                              {addingSubTask[task.id] ? (
+                                <svg className="animate-spin h-5 w-5 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                </svg>
+                              ) : (
+                                <Plus className="w-5 h-5" />
+                              )}
+                            </button>
+                          </div>
+                        </motion.div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
 
                     <div className="mt-4 flex items-center justify-between text-sm text-gray-500">
                       <div className="flex items-center space-x-4">

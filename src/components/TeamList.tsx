@@ -524,7 +524,12 @@ export default function TeamList({
                                   <p className="text-xs text-gray-500">
                                     Last active:{" "}
                                     {formatDateToTimezone(
-                                      new Date(member.metadata.lastLogin as string | number | Date),
+                                      new Date(
+                                        typeof member.metadata.lastLogin === 'object' && 
+                                        'seconds' in member.metadata.lastLogin ? 
+                                          (member.metadata.lastLogin as {seconds: number}).seconds * 1000 : 
+                                          member.metadata.lastLogin
+                                      ),
                                       settings.timezone
                                     )}
                                   </p>
