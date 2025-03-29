@@ -250,6 +250,10 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
     }
     
     if (currentTool === "select") {
+      // Prevent default behavior for interactions with annotations
+      e.preventDefault();
+      e.stopPropagation();
+      
       // Check if we're clicking on a selected annotation
       const clickedAnnotation = selectedAnnotations.find(
         (annotation) => isPointInAnnotation(point, annotation)
@@ -400,7 +404,18 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
     if (currentTool === "select") {
       // Handle circle center mode
       if (isCircleCenterMode && moveOffset && selectedAnnotations.length === 1) {
+        // Prevent default behavior to stop scroll interference
+        e.preventDefault();
+        e.stopPropagation();
+        
+        // Record annotation interaction time to prevent auto-centering
+        const scrollContainer = canvasRef.current?.parentElement?.parentElement;
+        if (scrollContainer) {
+          scrollContainer.dataset.annotationInteractionTime = Date.now().toString();
+        }
+        
         const annotation = selectedAnnotations[0];
+
         if (annotation.type === "circle") {
           const dx = point.x - moveOffset.x;
           const dy = point.y - moveOffset.y;
@@ -426,6 +441,16 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
       
       // Handle resizing
       if (isResizing && selectedAnnotations.length === 1) {
+        // Prevent default behavior to stop scroll interference
+        e.preventDefault();
+        e.stopPropagation();
+        
+        // Record annotation interaction time to prevent auto-centering
+        const scrollContainer = canvasRef.current?.parentElement?.parentElement;
+        if (scrollContainer) {
+          scrollContainer.dataset.annotationInteractionTime = Date.now().toString();
+        }
+        
         const annotation = selectedAnnotations[0];
 
         if (!isValidResize(annotation, activeHandle!)) {
@@ -453,6 +478,16 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
 
       // Handle moving
       if (moveOffset && selectedAnnotations.length > 0) {
+        // Prevent default behavior to stop scroll interference
+        e.preventDefault();
+        e.stopPropagation();
+        
+        // Record annotation interaction time to prevent auto-centering
+        const scrollContainer = canvasRef.current?.parentElement?.parentElement;
+        if (scrollContainer) {
+          scrollContainer.dataset.annotationInteractionTime = Date.now().toString();
+        }
+        
         const dx = point.x - moveOffset.x;
         const dy = point.y - moveOffset.y;
 
@@ -555,6 +590,15 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
 
   const handleMouseUp = (e: React.MouseEvent) => {
     if (e.button !== 0) return;
+
+    // If we had been dragging annotations or resizing, mark the annotation interaction time
+    if (moveOffset || isResizing) {
+      const scrollContainer = canvasRef.current?.parentElement?.parentElement;
+      if (scrollContainer) {
+        scrollContainer.dataset.annotationInteractionTime = Date.now().toString();
+        console.log('[AnnotationCanvas] Recorded annotation interaction time after completing drag/resize');
+      }
+    }
 
     // Handle text tool dragging completion
     if (isTextDragging && textDragStart && textDragEnd) {
