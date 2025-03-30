@@ -56,7 +56,7 @@ interface DocumentListProps {
   onFolderSelect: (folder?: Folder) => void;
   onPreview: (document: Document) => void;
   onCreateFolder: (name: string, parentId?: string) => Promise<void>;
-  onCreateDocument?: (name: string, type: string, parentId?: string) => Promise<void>;
+  onCreateDocument?: (name: string, type: "pdf" | "dwg" | "other", file: File, folderId?: string) => Promise<void>;
   onCreateMultipleDocuments?: (files: File[], parentId?: string) => Promise<void>;
   onUpdateFolder: (id: string, name: string) => Promise<void>;
   onDeleteFolder: (id: string) => Promise<void>;
@@ -1275,9 +1275,13 @@ export default function DocumentList({
         }, 300);
         
         try {
-          await onCreateDocument(fileName, fileType, file, currentFolder?.id);
-          setUploadedFiles(prev => ({...prev, success: prev.success + 1}));
-          showToast(`File "${fileName}" uploaded successfully`, "success");
+          if (onCreateDocument) {
+            await onCreateDocument(fileName, fileType, file, currentFolder?.id);
+            setUploadedFiles(prev => ({...prev, success: prev.success + 1}));
+            showToast(`File "${fileName}" uploaded successfully`, "success");
+          } else {
+            throw new Error("Document creation is not available");
+          }
         } catch (error) {
           setUploadedFiles(prev => ({...prev, failed: prev.failed + 1}));
           throw error;
@@ -1684,14 +1688,26 @@ export default function DocumentList({
             
             // Now upload the file to the correct folder
             console.log(`Uploading file "${displayName}" to folder ID: ${targetFolderId || 'root folder'}`);
-            await onCreateDocument(displayName, fileType, file, targetFolderId);
+            if (onCreateDocument) {
+              await onCreateDocument(displayName, fileType, file, targetFolderId);
+            } else {
+              throw new Error("Document creation is not available");
+            }
           } else {
             // No folders in path, just upload the file
-            await onCreateDocument(fileName, fileType, file, currentFolder?.id);
+            if (onCreateDocument) {
+              await onCreateDocument(fileName, fileType, file, currentFolder?.id);
+            } else {
+              throw new Error("Document creation is not available");
+            }
           }
         } else {
           // No path information, just upload the file to current folder
-          await onCreateDocument(fileName, fileType, file, currentFolder?.id);
+          if (onCreateDocument) {
+            await onCreateDocument(fileName, fileType, file, currentFolder?.id);
+          } else {
+            throw new Error("Document creation is not available");
+          }
         }
         
         successCount++;
@@ -1737,13 +1753,23 @@ export default function DocumentList({
       return null;
     }
     
+    // Create a properly typed wrapper function that always returns a function, never undefined
+    const createDocumentHandler = onCreateDocument ? 
+      (name: string, type: "pdf" | "dwg" | "other", file: File, folderId?: string) => 
+        onCreateDocument(name, type, file, folderId) : 
+      // Fallback implementation that shows an error message
+      ((name: string, type: "pdf" | "dwg" | "other", file: File, folderId?: string): Promise<void> => {
+        showToast("Document creation is not available", "error");
+        return Promise.reject(new Error("Document creation is not available"));
+      }) as (name: string, type: "pdf" | "dwg" | "other", file: File, folderId?: string) => Promise<void>;
+    
     return (
       <DocumentActions
         projectId={projectId}
         currentFolderId={currentFolder?.id}
         folders={folders}
         onCreateFolder={onCreateFolder}
-        onCreateDocument={onCreateDocument}
+        onCreateDocument={createDocumentHandler}
         onCreateMultipleDocuments={onCreateMultipleDocuments}
         onRefresh={onRefresh}
         onShare={onShare}
