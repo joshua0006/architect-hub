@@ -1094,6 +1094,11 @@ export default function DocumentList({
     e.preventDefault();
     e.stopPropagation();
     
+    // Don't show drag overlay when in document viewer mode
+    if (selectedDocument) {
+      return;
+    }
+    
     // Only proceed if user has upload permission
     if (!hasUploadPermission()) {
       if (dragCounter.current === 0) {
@@ -1123,7 +1128,7 @@ export default function DocumentList({
       // Only show overlay after a short delay to prevent flashing during quick passes
       if (dragCounter.current === 1) {
         setTimeout(() => {
-          if (dragCounter.current > 0) {
+          if (dragCounter.current > 0 && !selectedDocument) {
             setIsDragging(true);
             setShowDragOverlay(true);
           }
@@ -1135,6 +1140,11 @@ export default function DocumentList({
   const handleDragOut = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
+    
+    // Ignore when in document viewer
+    if (selectedDocument) {
+      return;
+    }
     
     // Only proceed if user has upload permission
     if (!hasUploadPermission()) return;
@@ -1150,8 +1160,8 @@ export default function DocumentList({
     e.preventDefault();
     e.stopPropagation();
     
-    // Only proceed if user has upload permission
-    if (!hasUploadPermission()) return;
+    // Only proceed if user has upload permission and not in document viewer
+    if (!hasUploadPermission() || selectedDocument) return;
   };
 
   // Process the item - could be a file or directory
@@ -1350,6 +1360,11 @@ export default function DocumentList({
   const handleDrop = async (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
+    
+    // Skip file processing if we're in document viewer
+    if (selectedDocument) {
+      return;
+    }
     
     // Only proceed if user has upload permission
     if (!hasUploadPermission()) {
@@ -2409,7 +2424,7 @@ export default function DocumentList({
 
       {/* Drag and drop overlay */}
       <AnimatePresence>
-        {showDragOverlay && hasUploadPermission() && (
+        {showDragOverlay && hasUploadPermission() && !selectedDocument && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}

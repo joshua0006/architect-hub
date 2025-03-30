@@ -1,6 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { ChevronRight, FolderOpen, Home, MoreHorizontal, FileText } from 'lucide-react';
 import { Folder, Document } from '../types';
+import { doc, onSnapshot } from 'firebase/firestore';
+import { db } from '../lib/firebase';
 
 interface DocumentBreadcrumbsProps {
   folders: Folder[];
@@ -21,6 +23,9 @@ export default function DocumentBreadcrumbs({
   const [showDropdown, setShowDropdown] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const [currentVersion, setCurrentVersion] = useState<number | undefined>(selectedDocument?.version);
+  const [documentName, setDocumentName] = useState<string | undefined>(selectedDocument?.name);
+  const unsubscribeRef = useRef<(() => void) | null>(null);
   
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -54,6 +59,52 @@ export default function DocumentBreadcrumbs({
       document.removeEventListener('keydown', handleKeyDown);
     };
   }, [currentFolder, selectedDocument, onNavigate]);
+
+  // Add setupVersionSubscription function
+  const setupVersionSubscription = () => {
+    // Clean up any existing subscription first
+    if (unsubscribeRef.current) {
+      unsubscribeRef.current();
+      unsubscribeRef.current = null;
+    }
+
+    if (!selectedDocument?.id) return;
+
+    try {
+      // Set up new subscription
+      const docRef = doc(db, "documents", selectedDocument.id);
+      
+      unsubscribeRef.current = onSnapshot(docRef, (snapshot) => {
+        if (snapshot.exists()) {
+          const data = snapshot.data();
+          setCurrentVersion(data.version || 0);
+          // Update document name if it has changed
+          if (data.name && data.name !== documentName) {
+            setDocumentName(data.name);
+          }
+        }
+      });
+    } catch (err) {
+      console.error("Error setting up version subscription:", err);
+    }
+  };
+
+  // Update documentName when selectedDocument changes
+  useEffect(() => {
+    setDocumentName(selectedDocument?.name);
+  }, [selectedDocument?.name]);
+
+  // Add cleanup effect for version subscription
+  useEffect(() => {
+    setupVersionSubscription();
+    
+    return () => {
+      if (unsubscribeRef.current) {
+        unsubscribeRef.current();
+        unsubscribeRef.current = null;
+      }
+    };
+  }, [selectedDocument?.id]);
 
   const generateBreadcrumbPath = () => {
     const path: Folder[] = [];
@@ -234,10 +285,15 @@ export default function DocumentBreadcrumbs({
                 aria-current="page"
               >
                 {getDocumentIcon(selectedDocument.type)}
-                <span className="truncate max-w-xs">{selectedDocument.name}</span>
+                <span className="truncate max-w-xs">{documentName || selectedDocument.name}</span>
                 {selectedDocument.type && (
                   <span className="ml-2 px-1.5 py-0.5 text-xs rounded bg-gray-100 text-gray-600 uppercase">
                     {selectedDocument.type}
+                  </span>
+                )}
+                {currentVersion !== undefined && (
+                  <span className="ml-2 text-xs text-gray-500">
+                    v{currentVersion}
                   </span>
                 )}
               </div>

@@ -51,7 +51,10 @@ export default function ProjectDetails({
 
   // Load team members for the project
   const loadTeamMembers = async () => {
-    if (!project.teamMemberIds?.length) return;
+    if (!project.teamMemberIds?.length) {
+      setTeamMembers([]);
+      return;
+    }
     
     try {
       setLoadingTeamMembers(true);
@@ -294,6 +297,8 @@ export default function ProjectDetails({
           project={project}
           onSuccess={() => {
             setShowEditProject(false);
+            // Project updates will be handled automatically through Firebase real-time
+            // Still call onProjectUpdate for any UI-specific refreshes needed
             onProjectUpdate?.();
           }}
           onCancel={() => setShowEditProject(false)}

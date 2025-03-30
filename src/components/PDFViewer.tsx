@@ -1119,6 +1119,102 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     }
   }, [page, canvasRef, viewport, scale, currentPage, document, documentId, showToast]);
   
+  // Add a new function to download just the current page without annotations
+  const downloadCurrentPage = useCallback(async () => {
+    if (!pdf || !page || !viewport) {
+      showToast("Cannot download - PDF not fully loaded", "error");
+      return;
+    }
+    
+    try {
+      setIsExporting(true);
+      
+      // Get annotations for the current page from store
+      const currentDoc = document ? useAnnotationStore.getState().documents[documentId] : null;
+      const pageAnnotations = currentDoc?.annotations?.filter(
+        a => a.pageNumber === currentPage
+      ) || [];
+      
+      console.log(`[PDFViewer] Downloading page ${currentPage} with ${pageAnnotations.length} annotations`);
+      
+      // Create a new PDF document with just the current page
+      const pdfDoc = new jsPDF({
+        orientation: viewport.width > viewport.height ? "landscape" : "portrait",
+        unit: "pt",
+        format: [viewport.width, viewport.height]
+      });
+      
+      // Create a temporary canvas for rendering
+      const canvas = document.createElement("canvas");
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      const ctx = canvas.getContext("2d", { alpha: true });
+      
+      if (!ctx) {
+        throw new Error("Failed to get canvas context");
+      }
+      
+      // Set white background
+      ctx.fillStyle = "#FFFFFF";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      
+      // Render the current page to the canvas
+      const renderTask = page.render({
+        canvasContext: ctx,
+        viewport: page.getViewport({ scale })
+      });
+      
+      await renderTask.promise;
+      
+      // Draw annotations on top if there are any
+      if (pageAnnotations.length > 0) {
+        console.log(`[PDFViewer] Drawing ${pageAnnotations.length} annotations on download canvas`);
+        
+        // Draw regular annotations first
+        const regularAnnotations = pageAnnotations.filter(a => a.type !== 'highlight');
+        regularAnnotations.forEach(annotation => {
+          try {
+            drawAnnotation(ctx, annotation, scale);
+          } catch (err) {
+            console.error("Error drawing annotation during download:", err);
+          }
+        });
+        
+        // Draw highlights with multiply blend mode
+        const highlightAnnotations = pageAnnotations.filter(a => a.type === 'highlight');
+        if (highlightAnnotations.length > 0) {
+          ctx.save();
+          ctx.globalCompositeOperation = 'multiply';
+          
+          highlightAnnotations.forEach(annotation => {
+            try {
+              drawAnnotation(ctx, annotation, scale);
+            } catch (err) {
+              console.error("Error drawing highlight during download:", err);
+            }
+          });
+          
+          ctx.restore();
+        }
+      }
+      
+      // Add the annotated page to the PDF
+      const imgData = canvas.toDataURL("image/jpeg", 0.95);
+      pdfDoc.addImage(imgData, "JPEG", 0, 0, viewport.width, viewport.height);
+      
+      // Save the PDF with a name including the page number
+      const fileName = `page-${currentPage}${documentId ? `-${documentId}` : ''}-with-annotations.pdf`;
+      pdfDoc.save(fileName);
+      
+      showToast(`Page ${currentPage} with annotations downloaded successfully`, "success");
+    } catch (error) {
+      console.error("Download page error:", error);
+      showToast(`Download failed: ${error instanceof Error ? error.message : 'Unknown error'}`, "error");
+    } finally {
+      setIsExporting(false);
+    }
+  }, [pdf, page, viewport, scale, currentPage, documentId, document, showToast]);
+  
   // Export all annotations as JSON
   const handleExportAnnotations = useCallback(() => {
     try {
@@ -2217,6 +2313,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
           onZoomIn={handleZoomIn}
           onZoomOut={handleZoomOut}
           onResetZoom={handleResetZoom}
+          onDownloadCurrentPage={downloadCurrentPage}
         />
       )}
       
