@@ -1388,7 +1388,7 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
   }, [document.name]);
 
   return (
-    <div className={`flex flex-col ${isFullscreen ? 'fixed inset-0 z-50 bg-white' : 'h-full'}`}>
+    <div className={`flex flex-col ${isFullscreen ? 'fixed inset-0 z-50 bg-white' : 'h-full overflow-auto'}`}>
       {/* Add style tag for highlight animation */}
       <style>{highlightStyles}</style>
       
@@ -1690,7 +1690,7 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
 
       {/* Document Content */}
       <div 
-        className={`${isFullscreen ? 'flex-1' : 'flex-1 bg-gray-100 p-4'}`}
+        className={`${isFullscreen ? 'flex-1' : 'flex-1 bg-gray-100 p-4 overflow-auto'}`}
         onDragOver={(e) => {
           // Prevent default to allow drop but don't set isDragging 
           // when we're in the PDF viewer area or fullscreen
@@ -1705,7 +1705,7 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
           <div className={`flex h-full ${isFullscreen ? 'gap-0' : 'gap-4'}`}>
             <Toolbar currentFolder={enhancedFolderInfo} />
             <div
-              className={`relative bg-white ${isFullscreen ? '' : 'rounded-lg shadow-sm p-4'} flex-1 document-content`}
+              className={`relative bg-white ${isFullscreen ? '' : 'rounded-lg shadow-sm p-4'} flex-1 document-content overflow-auto`}
               style={{ height: "100%" }}
               onDragOver={(e) => e.preventDefault()}
               onDrop={(e) => e.preventDefault()}
@@ -1714,7 +1714,7 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
             </div>
           </div>
         ) : isImage(document.name, document.metadata?.contentType) ? (
-          <div className="h-full flex items-center justify-center bg-white rounded-lg shadow-sm p-4 document-content">
+          <div className="h-full flex items-center justify-center bg-white rounded-lg shadow-sm p-4 document-content overflow-auto">
             <img 
               src={document.url} 
               alt={document.name} 
@@ -1723,7 +1723,7 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
             />
           </div>
         ) : isVideo(document.name, document.metadata?.contentType) ? (
-          <div className="h-full flex items-center justify-center bg-white rounded-lg shadow-sm p-4 document-content">
+          <div className="h-full flex items-center justify-center bg-white rounded-lg shadow-sm p-4 document-content overflow-auto">
             <video 
               src={document.url} 
               controls 
@@ -1734,7 +1734,7 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
             </video>
           </div>
         ) : isAudio(document.name, document.metadata?.contentType) ? (
-          <div className="h-full flex items-center justify-center bg-white rounded-lg shadow-sm p-4 document-content">
+          <div className="h-full flex items-center justify-center bg-white rounded-lg shadow-sm p-4 document-content overflow-auto">
             <div className="flex flex-col items-center">
               <p className="mb-2 text-gray-700">{document.name}</p>
               <audio 
@@ -1748,7 +1748,7 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
             </div>
           </div>
         ) : (
-          <div className="h-full flex items-center justify-center bg-white rounded-lg shadow-sm document-content">
+          <div className="h-full flex items-center justify-center bg-white rounded-lg shadow-sm document-content overflow-auto">
             <div className="text-center">
               <p className="text-gray-500 mb-4">
                 This file type cannot be previewed directly
