@@ -32,6 +32,7 @@ interface PDFControlsProps {
   onExportAllPages: (quality?: "standard" | "hd") => void;
   onExportAnnotations: () => void;
   onImportAnnotations: (file: File) => void;
+  onDownloadCurrentPage: () => void;
 }
 
 export const PDFControls: React.FC<PDFControlsProps> = ({
@@ -51,6 +52,7 @@ export const PDFControls: React.FC<PDFControlsProps> = ({
   onExportAllPages,
   onExportAnnotations,
   onImportAnnotations,
+  onDownloadCurrentPage,
 }) => {
   const { setIsShortcutGuideOpen } = useKeyboardShortcutGuide();
 
@@ -60,6 +62,7 @@ export const PDFControls: React.FC<PDFControlsProps> = ({
   return (
     <div className="bg-white border-b flex w-full items-center justify-between py-2 px-4 select-none">
       <div className="flex items-center">
+        {/* Page Navigation Controls */}
         <div className="flex items-center">
           <button
             onClick={onPrevPage}
@@ -86,15 +89,13 @@ export const PDFControls: React.FC<PDFControlsProps> = ({
           >
             <ChevronRight className="text-gray-700" size={20} />
           </button>
-
-          <div className="h-6 w-px bg-gray-200 ml-1" />
-  
         </div>
 
-        <div className="h-6 w-px bg-gray-200" />
+        {/* Separator */}
+        <div className="h-6 w-px bg-gray-200 mx-3" />
         
         {/* Zoom Controls */}
-        <div className="flex items-center space-x-1 ml-2">
+        <div className="flex items-center">
           <button
             onClick={onZoomOut}
             className="p-1 rounded hover:bg-gray-100 transition-colors duration-200"
@@ -104,7 +105,7 @@ export const PDFControls: React.FC<PDFControlsProps> = ({
             <ZoomOut className="text-gray-700" size={20} />
           </button>
           
-          <span className="text-sm font-medium text-gray-700 min-w-[4rem] text-center">
+          <span className="mx-2 text-sm font-medium text-gray-700 min-w-[4rem] text-center">
             {Math.round(scale * 100)}%
           </span>
           
@@ -116,50 +117,67 @@ export const PDFControls: React.FC<PDFControlsProps> = ({
           >
             <ZoomIn className="text-gray-700" size={20} />
           </button>
-          
-          <button
-            onClick={onFitToWidth}
-            className="p-1 flex items-center gap-2 rounded hover:bg-gray-100 transition-colors duration-200"
-            title="Fit to Width"
-            aria-label="Fit to Width"
-          >
-            <Maximize className="text-gray-700" size={20} />
-            <span className="text-gray-700 text-sm font-medium">Fit Width</span>
-          </button>
-          
-          <button
-            onClick={onResetZoom}
-            className="p-1 flex items-center gap-2 rounded hover:bg-gray-100 transition-colors duration-200"
-            title="Reset Zoom (Ctrl+0)"
-            aria-label="Reset Zoom"
-          >
-            <RefreshCw className="text-gray-700" size={20} />
-            <span className="text-gray-700 text-sm font-medium">Reset</span>
-          </button>
         </div>
         
-        <div className="h-6 w-px bg-gray-200 ml-2" />
+        {/* Separator */}
+        <div className="h-6 w-px bg-gray-200 mx-3" />
         
-        <div className="relative group">
-          <div className="flex">
-            <button
-              onClick={() => onExportAllPages("hd")}
-              className="p-1 flex items-center gap-2 rounded-l hover:bg-blue-100 ml-2 transition-colors duration-200"
-              title="Download HD PDF with annotations"
-              disabled={isExporting}
-            >
-              <Download size={20} className={isExporting ? "text-gray-400" : "text-blue-600"} /> 
-              <span className="text-blue-600 font-medium">Download PDF</span>
-              {isExporting && (
-                <span className="ml-1 text-xs text-gray-500">Exporting...</span>
-              )}
-            </button>
-            
-           
-          </div>
-       
+        {/* Fit Width Button */}
+        <button
+          onClick={onFitToWidth}
+          className="p-1 flex items-center gap-2 rounded hover:bg-gray-100 transition-colors duration-200"
+          title="Fit to Width"
+          aria-label="Fit to Width"
+        >
+          <Maximize className="text-gray-700" size={20} />
+          <span className="text-gray-700 text-sm font-medium">Fit Width</span>
+        </button>
+        
+        {/* Separator */}
+        <div className="h-6 w-px bg-gray-200 mx-3" />
+        
+        {/* Reset Button */}
+        <button
+          onClick={onResetZoom}
+          className="p-1 flex items-center gap-2 rounded hover:bg-gray-100 transition-colors duration-200"
+          title="Reset Zoom (Ctrl+0)"
+          aria-label="Reset Zoom"
+        >
+          <RefreshCw className="text-gray-700" size={20} />
+          <span className="text-gray-700 text-sm font-medium">Reset</span>
+        </button>
+        
+        {/* Separator */}
+        <div className="h-6 w-px bg-gray-200 mx-3" />
+        
+        {/* Download Options */}
+        <div className="flex items-center">
+          <button
+            onClick={() => onExportAllPages("hd")}
+            className="p-1 flex items-center gap-2 rounded-l hover:bg-blue-100 transition-colors duration-200"
+            title="Download HD PDF with annotations"
+            disabled={isExporting}
+          >
+            <Download size={20} className={isExporting ? "text-gray-400" : "text-blue-600"} /> 
+            <span className="text-blue-600 font-medium">Download PDF</span>
+            {isExporting && (
+              <span className="ml-1 text-xs text-gray-500">Exporting...</span>
+            )}
+          </button>
+          
+          {/* Separator within download options */}
+          <div className="h-6 w-px bg-gray-200 mx-1" />
+          
+          <button
+            onClick={onDownloadCurrentPage}
+            className="p-1 flex items-center gap-2 rounded-r hover:bg-blue-100 transition-colors duration-200"
+            title={`Download current page (${currentPage})`}
+            disabled={isExporting}
+          >
+            <FileDown size={20} className={isExporting ? "text-gray-400" : "text-blue-600"} />
+            <span className="text-blue-600 font-medium">Current Page</span>
+          </button>
         </div>
-      
       </div>
       
       <div></div>

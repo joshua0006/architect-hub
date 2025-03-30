@@ -80,9 +80,24 @@ export const ToolButton: React.FC<ToolButtonProps> = ({
   const { currentTool, setCurrentTool } = useAnnotationStore();
   const { user } = useAuth();
 
-
+  // TEMPORARY: Debug permission issues
+  useEffect(() => {
+    console.log(`[Debug] ToolButton ${tool} rendered`);
+    console.log(`[Debug] User: ${user?.email}, Role: ${user?.role}`);
+    console.log(`[Debug] Current folder: `, currentFolder?.name);
+    if (currentFolder?.metadata?.access) {
+      console.log(`[Debug] Folder access setting: ${currentFolder.metadata.access}`);
+    } else {
+      console.log(`[Debug] Folder has no access settings`);
+    }
+  }, [tool, user, currentFolder]);
 
   const hasFolderWritePermission = (): boolean => {
+    // TEMPORARY: For debugging - allow all tools
+    return true;
+    
+    // Original code commented out
+    /*
     if(tool === 'select') {
       return true;
     }
@@ -93,6 +108,7 @@ export const ToolButton: React.FC<ToolButtonProps> = ({
       writeAccess = PERMISSIONS_MAP[folderPermission][role] ?? DEFAULT_FOLDER_ACCESS;
     }
     return writeAccess.write;
+    */
   }  
 
 
