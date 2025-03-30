@@ -385,6 +385,7 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
   const commentRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const [showToast, setShowToast] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
+  const dropZoneRef = useRef<HTMLDivElement>(null);
   
   // Add CSS for highlight animation in JSX
   const highlightStyles = `
@@ -1142,21 +1143,46 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
     }
   };
 
-  const handleDragOver = (e: React.DragEvent) => {
+  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
+    // Don't stop propagation to allow our drop zone to receive the event
     setIsDragging(true);
   };
 
-  const handleDragLeave = (e: React.DragEvent) => {
+  const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
-    setIsDragging(false);
+    // Check if we're leaving to an element outside our drop zone
+    const relatedTarget = e.relatedTarget as Node;
+    const isLeavingDropZone = !dropZoneRef.current?.contains(relatedTarget);
+    
+    if (isLeavingDropZone) {
+      setIsDragging(false);
+    }
   };
 
-  const handleDrop = async (e: React.DragEvent) => {
+  const handleDrop = async (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
+    e.stopPropagation(); // Stop propagation after we handle the drop
+    
+    // Only process drops when not in fullscreen
+    if (isFullscreen) return;
+    
     setIsDragging(false);
-    const file = e.dataTransfer.files[0];
-    if (file) await handleFileUpload(file);
+    
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      const file = e.dataTransfer.files[0];
+      
+      // Validate the file before uploading
+      const validationError = validateFile(file);
+      if (validationError) {
+        setUploadError(validationError);
+        // Clear error after a few seconds
+        setTimeout(() => setUploadError(null), 5000);
+        return;
+      }
+      
+      await handleFileUpload(file);
+    }
   };
 
   const handleCommentChange = (newValue: string) => {
@@ -1174,6 +1200,66 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
   const toggleFullscreen = () => {
     onFullscreenChange?.(!isFullscreen);
     setIsExpanded(false); // Close expanded section when toggling fullscreen
+  };
+
+  // Add a useEffect to make sure no global drag overlay is shown when in document viewer
+  useEffect(() => {
+    // Function to prevent default on drag events except for our drop zone
+    const preventDragDefault = (e: DragEvent) => {
+      // Check if the event target is our drop zone or a child of it
+      const isDropZoneTarget = dropZoneRef.current && 
+        (dropZoneRef.current === e.target || 
+         dropZoneRef.current.contains(e.target as Node));
+      
+      // Only prevent drag events outside our drop zone
+      if (!isDropZoneTarget) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+
+    // Add these event listeners to the document to prevent any global drag events
+    // This will stop the document list's overlay from appearing
+    window.document.addEventListener('dragenter', preventDragDefault, true);
+    window.document.addEventListener('dragover', preventDragDefault, true);
+    window.document.addEventListener('dragleave', preventDragDefault, true);
+    window.document.addEventListener('drop', preventDragDefault, true);
+
+    return () => {
+      // Clean up event listeners on unmount
+      window.document.removeEventListener('dragenter', preventDragDefault, true);
+      window.document.removeEventListener('dragover', preventDragDefault, true);
+      window.document.removeEventListener('dragleave', preventDragDefault, true);
+      window.document.removeEventListener('drop', preventDragDefault, true);
+    };
+  }, []);
+
+  // Add handler for drag enter
+  const handleDragEnter = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    
+    // Only enable drag indicators if we have PDF files
+    if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
+      // Check if at least one file is a PDF
+      const hasPDF = Array.from(e.dataTransfer.items).some(item => {
+        return item.kind === 'file' && 
+               (item.type === 'application/pdf' || 
+                (item.type === '' && item.getAsFile()?.name.toLowerCase().endsWith('.pdf')));
+      });
+      
+      if (hasPDF) {
+        setIsDragging(true);
+      }
+    } else if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      // Fallback to check files
+      const hasPDF = Array.from(e.dataTransfer.files).some(file => {
+        return file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+      });
+      
+      if (hasPDF) {
+        setIsDragging(true);
+      }
+    }
   };
 
   return (
@@ -1369,14 +1455,17 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
                 <Upload className="w-4 h-4 mr-1" /> Update Document
               </h3>
               <div
-                onDragOver={handleDragOver}
-                onDragLeave={handleDragLeave}
-                onDrop={handleDrop}
+                ref={dropZoneRef}
+                onDragEnter={!isFullscreen ? handleDragEnter : (e) => e.preventDefault()}
+                onDragOver={!isFullscreen ? handleDragOver : (e) => e.preventDefault()}
+                onDragLeave={!isFullscreen ? handleDragLeave : (e) => e.preventDefault()}
+                onDrop={!isFullscreen ? handleDrop : (e) => e.preventDefault()}
+                onClick={(e) => e.stopPropagation()} // Prevent click propagation
                 className={`mb-4 p-6 border-2 border-dashed rounded-lg text-center transition-colors ${
                   isDragging || isUploading
                     ? "border-blue-500 bg-blue-50"
                     : "border-gray-300 hover:border-gray-400"
-                }`}
+                } ${isFullscreen ? 'pointer-events-none opacity-50' : ''}`}
               >
                 {isUploading ? (
                   <div className="flex flex-col items-center space-y-2">
@@ -1395,9 +1484,9 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
                   </div>
                 ) : (
                   <>
-                    <FileUp className="w-12 h-12 mx-auto text-gray-400 mb-2" />
-                    <p className="text-sm text-gray-600 mb-1">
-                      Drag & drop a new version here
+                    <FileUp className={`w-12 h-12 mx-auto ${isDragging ? 'text-blue-500' : 'text-gray-400'} mb-2 transition-colors`} />
+                    <p className={`text-sm ${isDragging ? 'text-blue-700 font-medium' : 'text-gray-600'} mb-1 transition-colors`}>
+                      {isDragging ? 'Drop PDF here to upload' : 'Drag & drop a new version here'}
                     </p>
                     <p className="text-xs text-gray-500 mb-2">or</p>
                     <button
@@ -1458,13 +1547,26 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
       </div>
 
       {/* Document Content */}
-      <div className={`${isFullscreen ? 'flex-1' : 'flex-1 bg-gray-100 p-4'}`}>
+      <div 
+        className={`${isFullscreen ? 'flex-1' : 'flex-1 bg-gray-100 p-4'}`}
+        onDragOver={(e) => {
+          // Prevent default to allow drop but don't set isDragging 
+          // when we're in the PDF viewer area or fullscreen
+          e.preventDefault();
+        }}
+        onDrop={(e) => {
+          // Prevent default behavior to avoid browser opening the file
+          e.preventDefault();
+        }}
+      >
         {document.type === "pdf" ? (
           <div className={`flex h-full ${isFullscreen ? 'gap-0' : 'gap-4'}`}>
             <Toolbar currentFolder={enhancedFolderInfo} />
             <div
               className={`relative bg-white ${isFullscreen ? '' : 'rounded-lg shadow-sm p-4'} flex-1 document-content`}
               style={{ height: "100%" }}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => e.preventDefault()}
             >
               <PDFViewer file={document.url} documentId={document.id} />
             </div>
