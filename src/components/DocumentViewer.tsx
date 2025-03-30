@@ -23,6 +23,7 @@ import {
   ArrowLeft,
   Maximize,
   Minimize,
+  List,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth } from "../contexts/AuthContext";
@@ -341,6 +342,82 @@ const CommentSection = memo(
   )
 );
 
+// Add VersionHistoryModal component
+const VersionHistoryModal = ({
+  versions,
+  currentVersion,
+  onClose,
+}: {
+  versions: DocumentVersion[];
+  currentVersion: number;
+  onClose: () => void;
+}) => {
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-lg w-full max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
+        <div className="p-4 border-b border-gray-200 flex justify-between items-center">
+          <h3 className="text-lg font-medium text-gray-900 flex items-center">
+            <History className="w-5 h-5 mr-2" /> Version History
+          </h3>
+          <button
+            onClick={onClose}
+            className="p-1 hover:bg-gray-100 rounded-full"
+          >
+            <X className="w-5 h-5 text-gray-500" />
+          </button>
+        </div>
+        <div className="overflow-y-auto flex-1 p-4">
+          <div className="space-y-3">
+            {versions.map((version) => (
+              <div
+                key={version.id}
+                className="flex items-center justify-between p-3 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                <div className="flex-1">
+                  <div className="flex items-center space-x-2">
+                    <span className="font-medium text-gray-900">
+                      Version {version.version}
+                    </span>
+                    {version.version === currentVersion && (
+                      <span className="px-2 py-0.5 text-xs bg-blue-100 text-blue-800 rounded-full">
+                        Current
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-1 text-sm text-gray-500">
+                    <p>Uploaded {formatDate(version.uploadedAt)}</p>
+                    <p className="text-xs">
+                      {version.metadata.originalFilename} (
+                      {(version.metadata.size / (1024 * 1024)).toFixed(2)} MB)
+                    </p>
+                  </div>
+                </div>
+                {version.accessible ? (
+                  <a
+                    href={version.url}
+                    download
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="ml-4 px-3 py-1.5 text-sm text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-md transition-colors flex items-center space-x-1"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span>Download</span>
+                  </a>
+                ) : (
+                  <div className="ml-4 px-3 py-1.5 text-sm text-gray-500 flex items-center space-x-1">
+                    <AlertCircle className="w-4 h-4" />
+                    <span>Unavailable</span>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const DocumentViewer: React.FC<DocumentViewerProps> = ({
   document,
   viewerHeight,
@@ -362,6 +439,8 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [versions, setVersions] = useState<DocumentVersion[]>([]);
   const [loadingVersions, setLoadingVersions] = useState(false);
+  const [currentVersion, setCurrentVersion] = useState<number>(document.version);
+  const [currentDocName, setCurrentDocName] = useState<string>(document.name);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const resizeStartY = useRef<number>(0);
   const startHeight = useRef<number>(0);
@@ -386,6 +465,9 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
   const [showToast, setShowToast] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
   const dropZoneRef = useRef<HTMLDivElement>(null);
+  const unsubscribeRef = useRef<(() => void) | null>(null);
+  const [showAllVersions, setShowAllVersions] = useState(false);
+  const MAX_VISIBLE_VERSIONS = 3;
   
   // Add CSS for highlight animation in JSX
   const highlightStyles = `
@@ -1262,6 +1344,49 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
     }
   };
 
+  // Add setupVersionSubscription function
+  const setupVersionSubscription = () => {
+    // Clean up any existing subscription first
+    if (unsubscribeRef.current) {
+      unsubscribeRef.current();
+      unsubscribeRef.current = null;
+    }
+
+    try {
+      // Set up new subscription
+      const docRef = doc(db, "documents", document.id);
+      
+      unsubscribeRef.current = onSnapshot(docRef, (snapshot) => {
+        if (snapshot.exists()) {
+          const data = snapshot.data();
+          setCurrentVersion(data.version || 0);
+          if (data.name && data.name !== currentDocName) {
+            setCurrentDocName(data.name);
+          }
+        }
+      });
+    } catch (err) {
+      console.error("Error setting up version subscription:", err);
+    }
+  };
+
+  // Add cleanup effect for document subscription
+  useEffect(() => {
+    setupVersionSubscription();
+    
+    return () => {
+      if (unsubscribeRef.current) {
+        unsubscribeRef.current();
+        unsubscribeRef.current = null;
+      }
+    };
+  }, [document.id]);
+
+  // Update currentDocName when document prop changes
+  useEffect(() => {
+    setCurrentDocName(document.name);
+  }, [document.name]);
+
   return (
     <div className={`flex flex-col ${isFullscreen ? 'fixed inset-0 z-50 bg-white' : 'h-full'}`}>
       {/* Add style tag for highlight animation */}
@@ -1307,10 +1432,10 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
             )}
             <div className={isFullscreen ? "cursor-default" : "cursor-pointer"} onClick={!isFullscreen ? () => setIsExpanded(!isExpanded) : undefined}>
               <h2 className="text-lg font-medium text-gray-900">
-                {document.name}
+                {currentDocName}
               </h2>
               <p className="text-sm text-gray-500">
-                Version {document.version} • Last modified{" "}
+                Version {currentVersion} • Last modified{" "}
                 {formatDate(document.dateModified)}
               </p>
               {/* Add folder path as breadcrumbs */}
@@ -1372,12 +1497,21 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
         {/* Version History Section - Only show when not in fullscreen */}
         {isExpanded && !isFullscreen && (
           <div className="px-4 space-y-6">
-            {/* Add Folder Information Section */}
-
             <div>
-              <h3 className="text-sm font-medium text-gray-900 mb-2 flex items-center">
-                <History className="w-4 h-4 mr-1" /> Version History
-              </h3>
+              <div className="flex justify-between items-center mb-2">
+                <h3 className="text-sm font-medium text-gray-900 flex items-center">
+                  <History className="w-4 h-4 mr-1" /> Version History
+                </h3>
+                {versions.length > MAX_VISIBLE_VERSIONS && (
+                  <button
+                    onClick={() => setShowAllVersions(true)}
+                    className="text-sm text-blue-600 hover:text-blue-700 flex items-center"
+                  >
+                    <List className="w-4 h-4 mr-1" />
+                    View All Versions
+                  </button>
+                )}
+              </div>
               <div className="space-y-2">
                 <AnimatePresence mode="wait">
                   {loadingVersions ? (
@@ -1390,55 +1524,54 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
                       <Loader2 className="w-6 h-6 animate-spin text-blue-500" />
                     </motion.div>
                   ) : (
-                    versions.map((version) => (
-                      <motion.div
-                        key={version.id}
-                        initial={{ opacity: 0, y: 20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -20 }}
-                        className="flex items-center justify-between p-3 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
-                      >
-                        <div className="flex-1">
-                          <div className="flex items-center space-x-2">
-                            <span className="font-medium text-gray-900">
-                              Version {version.version}
-                            </span>
-                            {version.version === document.version && (
-                              <span className="px-2 py-0.5 text-xs bg-blue-100 text-blue-800 rounded-full">
-                                Current
+                    versions
+                      .slice(0, MAX_VISIBLE_VERSIONS)
+                      .map((version) => (
+                        <motion.div
+                          key={version.id}
+                          initial={{ opacity: 0, y: 20 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: -20 }}
+                          className="flex items-center justify-between p-3 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                        >
+                          <div className="flex-1">
+                            <div className="flex items-center space-x-2">
+                              <span className="font-medium text-gray-900">
+                                Version {version.version}
                               </span>
-                            )}
+                              {version.version === currentVersion && (
+                                <span className="px-2 py-0.5 text-xs bg-blue-100 text-blue-800 rounded-full">
+                                  Current
+                                </span>
+                              )}
+                            </div>
+                            <div className="mt-1 text-sm text-gray-500">
+                              <p>Uploaded {formatDate(version.uploadedAt)}</p>
+                              <p className="text-xs">
+                                {version.metadata.originalFilename} (
+                                {(version.metadata.size / (1024 * 1024)).toFixed(2)} MB)
+                              </p>
+                            </div>
                           </div>
-                          <div className="mt-1 text-sm text-gray-500">
-                            <p>Uploaded {formatDate(version.uploadedAt)}</p>
-                            <p className="text-xs">
-                              {version.metadata.originalFilename} (
-                              {(version.metadata.size / (1024 * 1024)).toFixed(
-                                2
-                              )}{" "}
-                              MB)
-                            </p>
-                          </div>
-                        </div>
-                        {version.accessible ? (
-                          <a
-                            href={version.url}
-                            download
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="ml-4 px-3 py-1.5 text-sm text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-md transition-colors flex items-center space-x-1"
-                          >
-                            <Download className="w-4 h-4" />
-                            <span>Download</span>
-                          </a>
-                        ) : (
-                          <div className="ml-4 px-3 py-1.5 text-sm text-gray-500 flex items-center space-x-1">
-                            <AlertCircle className="w-4 h-4" />
-                            <span>Unavailable</span>
-                          </div>
-                        )}
-                      </motion.div>
-                    ))
+                          {version.accessible ? (
+                            <a
+                              href={version.url}
+                              download
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="ml-4 px-3 py-1.5 text-sm text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-md transition-colors flex items-center space-x-1"
+                            >
+                              <Download className="w-4 h-4" />
+                              <span>Download</span>
+                            </a>
+                          ) : (
+                            <div className="ml-4 px-3 py-1.5 text-sm text-gray-500 flex items-center space-x-1">
+                              <AlertCircle className="w-4 h-4" />
+                              <span>Unavailable</span>
+                            </div>
+                          )}
+                        </motion.div>
+                      ))
                   )}
                 </AnimatePresence>
                 {!loadingVersions && versions.length === 0 && (
@@ -1448,6 +1581,15 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
                 )}
               </div>
             </div>
+
+            {/* Add Modal */}
+            {showAllVersions && (
+              <VersionHistoryModal
+                versions={versions}
+                currentVersion={currentVersion}
+                onClose={() => setShowAllVersions(false)}
+              />
+            )}
 
             {/* File Upload Section */}
             <div>
