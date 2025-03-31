@@ -157,7 +157,61 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     return page.getViewport({ scale });
   }, [page, scale]);
 
-  // Function to center the document in the view
+  // Add these refs near the top with other refs
+  const lastScrollPositionRef = useRef<{ x: number; y: number } | null>(null);
+  const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Add this function after the other handler functions
+  const handleScroll = useCallback(() => {
+    if (!scrollContainerRef.current) return;
+    
+    // Clear any existing timeout
+    if (scrollTimeoutRef.current) {
+      clearTimeout(scrollTimeoutRef.current);
+    }
+    
+    // Store current scroll position
+    const scrollContainer = scrollContainerRef.current;
+    lastScrollPositionRef.current = {
+      x: scrollContainer.scrollLeft,
+      y: scrollContainer.scrollTop
+    };
+    
+    // Set a timeout to save the scroll position after scrolling stops
+    scrollTimeoutRef.current = setTimeout(() => {
+      if (scrollContainerRef.current) {
+        const finalScrollPosition = {
+          x: scrollContainerRef.current.scrollLeft,
+          y: scrollContainerRef.current.scrollTop
+        };
+        
+        // Store the final scroll position
+        lastScrollPositionRef.current = finalScrollPosition;
+        
+        // Log the saved position
+        console.log('[PDFViewer] Saved scroll position:', finalScrollPosition);
+      }
+    }, 150); // Wait 150ms after scrolling stops before saving
+  }, []);
+
+  // Add this effect to handle scroll events
+  useEffect(() => {
+    const scrollContainer = scrollContainerRef.current;
+    if (!scrollContainer) return;
+    
+    // Add scroll event listener
+    scrollContainer.addEventListener('scroll', handleScroll);
+    
+    // Cleanup
+    return () => {
+      scrollContainer.removeEventListener('scroll', handleScroll);
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current);
+      }
+    };
+  }, [handleScroll]);
+
+  // Update the scrollToCenterDocument function to respect saved scroll position
   const scrollToCenterDocument = useCallback(() => {
     if (!containerRef.current || !page || isDragging) return;
     
@@ -171,7 +225,15 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
       return;
     }
     
-    // Calculate center position
+    // If we have a saved scroll position, use it instead of centering
+    if (lastScrollPositionRef.current) {
+      console.log('[PDFViewer] Restoring saved scroll position:', lastScrollPositionRef.current);
+      scrollContainer.scrollLeft = lastScrollPositionRef.current.x;
+      scrollContainer.scrollTop = lastScrollPositionRef.current.y;
+      return;
+    }
+    
+    // Calculate center position if no saved position exists
     const viewportWidth = scrollContainer.clientWidth;
     const viewportHeight = scrollContainer.clientHeight;
     const contentWidth = viewport.width;
@@ -2361,6 +2423,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
+          onScroll={handleScroll}
         >
           {/* Initial Loading Animation - before PDF processing has started */}
           {isInitialLoading && !hasStartedLoading && !renderError && (
