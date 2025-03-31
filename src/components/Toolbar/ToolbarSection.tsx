@@ -16,6 +16,11 @@ export const ToolbarSection: React.FC<ToolbarSectionProps> = ({
     title === "Architectural Symbols" ? true : defaultExpanded
   );
 
+  // Add debug logging for Actions section
+  if (title === "Actions") {
+    console.log("[ToolbarSection] Rendering Actions section:", { children });
+  }
+
   return (
     <div className="border-b border-gray-200 last:border-b-0">
       <button

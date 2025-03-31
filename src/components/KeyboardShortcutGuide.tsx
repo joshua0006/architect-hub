@@ -17,6 +17,7 @@ const SHORTCUT_SECTIONS: ShortcutSection[] = [
     title: "Tools",
     shortcuts: [
       { label: "Select", shortcut: KEYBOARD_SHORTCUTS.tools.select },
+      { label: "Drag", shortcut: KEYBOARD_SHORTCUTS.tools.drag },
       { label: "Freehand", shortcut: KEYBOARD_SHORTCUTS.tools.freehand },
       { label: "Rectangle", shortcut: KEYBOARD_SHORTCUTS.tools.rectangle },
       { label: "Circle", shortcut: KEYBOARD_SHORTCUTS.tools.circle },

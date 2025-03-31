@@ -35,6 +35,30 @@ import {
   isValidResize,
 } from "../utils/resizeUtils";
 
+interface TextInputProps {
+  position: Point;
+  onComplete: (text: string) => void;
+  onCancel: () => void;
+  scale: number;
+  isSticky: boolean;
+  initialText?: string;
+  dimensions?: { width: number; height: number } | null;
+}
+
+interface AnnotationStyle {
+  color: string;
+  lineWidth: number;
+  opacity: number;
+  circleDiameterMode?: boolean;
+  textOptions?: {
+    fontSize?: number;
+    fontFamily?: string;
+    bold?: boolean;
+    italic?: boolean;
+    text?: string;
+  };
+}
+
 interface AnnotationCanvasProps {
   documentId: string;
   pageNumber: number;
@@ -83,6 +107,16 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
   const store = useAnnotationStore();
   const { currentTool, currentStyle, currentDrawMode } = store;
   const documentState = store.documents[documentId] || initialDocumentState();
+
+  // Add these refs for optimized auto-scrolling
+  const autoScrollingRef = useRef<boolean>(false);
+  const scrollSpeedRef = useRef({ x: 0, y: 0 });
+  const scrollAnimationFrameRef = useRef<number | null>(null);
+  const SCROLL_THRESHOLD = 80; // Increased threshold for earlier scroll trigger
+  const MAX_SCROLL_SPEED = 15; // Reduced max speed for smoother scrolling
+  const MIN_SCROLL_SPEED = 2; // Minimum scroll speed
+  const ACCELERATION = 0.2; // Reduced acceleration for smoother ramping
+  const DECELERATION = 0.92; // Smooth deceleration factor
 
   const dispatchAnnotationChangeEvent = useCallback(
     (source: string, forceRender: boolean = false) => {
@@ -239,6 +273,12 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
     // Prevent default behavior to avoid selections
     e.preventDefault();
     
+    // If drag tool is active, don't do any annotation operations
+    // Let the PDFViewer component handle the panning
+    if (currentTool === "drag") {
+      return;
+    }
+    
     const point = getCanvasPoint(e);
     
     // Handle text and sticky note tools differently
@@ -365,567 +405,7 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
     render();
   };
 
-  const handleMouseMove = (e: React.MouseEvent) => {
-    const point = getCanvasPoint(e);
-    
-    // Update cursor position for tool indicators
-    setCursorPosition(point);
-    
-    // Handle text tool dragging
-    if (isTextDragging && textDragStart) {
-      setTextDragEnd(point);
-      render(); // Render drag preview
-      return;
-    }
-
-    if (selectionBox) {
-      // Update selection box end point
-      setSelectionBox((prev) => (prev ? { ...prev, end: point } : null));
-
-      // Find annotations within selection box
-      const annotations = documentState.annotations.filter((annotation) => {
-        if (annotation.pageNumber !== pageNumber) return false;
-        return isAnnotationInSelectionBox(
-          annotation,
-          selectionBox.start,
-          point
-        );
-      });
-
-      // Update selected annotations
-      store.selectAnnotations(annotations);
-      return;
-    }
-
-    if (currentTool === "select") {
-      // Handle circle center mode
-      if (isCircleCenterMode && moveOffset && selectedAnnotations.length === 1) {
-        const annotation = selectedAnnotations[0];
-        if (annotation.type === "circle") {
-          const dx = point.x - moveOffset.x;
-          const dy = point.y - moveOffset.y;
-          
-          // Create new points by moving both points by the same offset
-          const newPoints = annotation.points.map(p => ({
-            x: p.x + dx,
-            y: p.y + dy
-          }));
-          
-          // Update the annotation
-          const updatedAnnotation = {
-            ...annotation,
-            points: newPoints
-          };
-          
-          store.updateAnnotation(documentId, updatedAnnotation);
-          setSelectedAnnotations([updatedAnnotation]);
-          setMoveOffset(point);
-          return;
-        }
-      }
-      
-      // Handle resizing
-      if (isResizing && selectedAnnotations.length === 1) {
-        const annotation = selectedAnnotations[0];
-
-        if (!isValidResize(annotation, activeHandle!)) {
-          return;
-        }
-
-        const newPoints = getResizedPoints(
-          annotation.points,
-          activeHandle!,
-          point,
-          e.shiftKey,
-          10,
-          annotation
-        );
-
-        const updatedAnnotation = {
-          ...annotation,
-          points: newPoints,
-        };
-
-        store.updateAnnotation(documentId, updatedAnnotation);
-        setSelectedAnnotations([updatedAnnotation]);
-        return;
-      }
-
-      // Handle moving
-      if (moveOffset && selectedAnnotations.length > 0) {
-        const dx = point.x - moveOffset.x;
-        const dy = point.y - moveOffset.y;
-
-        const updatedAnnotations = selectedAnnotations.map((annotation) => {
-          const newPoints = annotation.points.map((p) => ({
-            x: p.x + dx,
-            y: p.y + dy,
-          }));
-
-          return {
-            ...annotation,
-            points: newPoints,
-          };
-        });
-
-        updatedAnnotations.forEach((annotation) => {
-          store.updateAnnotation(documentId, annotation);
-        });
-
-        setSelectedAnnotations(updatedAnnotations);
-        setMoveOffset(point);
-        return;
-      }
-
-      // Update cursor based on hover
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-
-      // Update cursor for selected circles
-      if (selectedAnnotations.length === 1 && selectedAnnotations[0].type === "circle") {
-        const circleAnnotation = selectedAnnotations[0];
-        const handle = getResizeHandleForCircle(point, circleAnnotation);
-        
-        if (handle) {
-          // Show resize cursor based on the handle position
-          canvas.style.cursor = getResizeCursor(handle);
-          return;
-        } else if (isPointInsideCircle(point, circleAnnotation)) {
-          // Show move cursor when inside the circle but not on a handle
-          canvas.style.cursor = "move";
-          return;
-        }
-      }
-
-      // For other annotations, use the existing code
-      if (selectedAnnotations.length === 1) {
-        const handle = getResizeHandle(point, selectedAnnotations[0]);
-        if (handle) {
-          canvas.style.cursor = getResizeCursor(handle);
-          return;
-        }
-      }
-
-      const isOverSelected = selectedAnnotations.some((annotation) =>
-        isPointInAnnotation(point, annotation)
-      );
-      canvas.style.cursor = isOverSelected ? "move" : "default";
-    } else if (isDrawing) {
-      if (currentTool === "freehand") {
-        // Use the dedicated freehand drawing handler
-        handleFreehandDraw(point);
-      } else {
-        // For other tools, just update end point while keeping start point fixed
-        setCurrentPoints((prev) => [prev[0], { x: point.x, y: point.y }]);
-        render();
-      }
-    } else if (currentTool === "select" as AnnotationType) {
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-
-      // Check for resize handles first when a single annotation is selected
-      if (selectedAnnotations.length === 1) {
-        const handle = getResizeHandle(point, selectedAnnotations[0]);
-        if (handle) {
-          canvas.style.cursor = getResizeCursor(handle);
-          return;
-        }
-      }
-
-      // Check if hovering over any selected annotation
-      const hoverSelected = selectedAnnotations.some((annotation) =>
-        isPointInAnnotation(point, annotation)
-      );
-
-      if (hoverSelected) {
-        canvas.style.cursor = "move";
-        return;
-      }
-
-      // Check if hovering over any annotation
-      const hoverAnnotation = documentState.annotations.find(
-        (annotation) =>
-          annotation.pageNumber === pageNumber &&
-          isPointInAnnotation(point, annotation)
-      );
-
-      canvas.style.cursor = hoverAnnotation ? "move" : "default";
-    }
-  };
-
-  const handleMouseUp = (e: React.MouseEvent) => {
-    if (e.button !== 0) return;
-
-    // Handle text tool dragging completion
-    if (isTextDragging && textDragStart && textDragEnd) {
-      // Calculate the rectangle dimensions
-      const left = Math.min(textDragStart.x, textDragEnd.x);
-      const top = Math.min(textDragStart.y, textDragEnd.y);
-      const width = Math.abs(textDragEnd.x - textDragStart.x);
-      const height = Math.abs(textDragEnd.y - textDragStart.y);
-      
-      // Only open the text input if the drag distance is significant
-      // Minimum dimensions to prevent accidental drags
-      const MIN_DIMENSIONS = 5 / scale;
-      
-      if (width > MIN_DIMENSIONS || height > MIN_DIMENSIONS) {
-        // For significant drags, use the area as a constraint for the text input
-        setTextInputPosition({ x: left, y: top });
-        setEditingAnnotation(null);
-        setIsEditingText(true);
-        
-        // Store dimensions to use for the text layout
-        setTextDimensions({ width, height });
-        
-        // Set if we're in sticky note mode
-        setStickyNoteScale(currentTool === "stickyNote" ? 1 : 0);
-      } else {
-        // For clicks or very small drags, revert to simple click behavior
-        setTextInputPosition(textDragStart);
-        setEditingAnnotation(null);
-        setIsEditingText(true);
-        setTextDimensions(null);
-        setStickyNoteScale(currentTool === "stickyNote" ? 1 : 0);
-      }
-      
-      // Reset drag state
-      setIsTextDragging(false);
-      setTextDragStart(null);
-      setTextDragEnd(null);
-      return;
-    }
-
-    // Reset circle center mode
-    setIsCircleCenterMode(false);
-
-    if (isDrawing) {
-      if (currentTool === "freehand") {
-        // Only create freehand annotation if we have enough points
-        if (currentPoints.length >= 2) {
-          const newAnnotation: Annotation = {
-            id: Date.now().toString(),
-            type: "freehand",
-            points: currentPoints,
-            style: currentStyle,
-            pageNumber,
-            timestamp: Date.now(),
-            userId: "current-user",
-          };
-
-          store.addAnnotation(documentId, newAnnotation);
-          
-          // Dispatch the annotation change event to ensure it's rendered immediately
-          dispatchAnnotationChangeEvent('userDrawing', true);
-        }
-      } else if (currentPoints.length === 2) {
-        // For non-freehand tools with 2 points (like line, rectangle, etc.)
-        const [start, end] = currentPoints;
-
-        // Check if the shape has a minimum size
-        const dx = Math.abs(end.x - start.x);
-        const dy = Math.abs(end.y - start.y);
-
-        // Only create annotation if the shape has a minimum size
-        if (dx >= 5 || dy >= 5) {
-          // For rectangle-like shapes, ensure we have four corner points
-          let annotationPoints = currentPoints;
-          
-          // Special handling for highlight: create a polygon with 4 points
-          if (currentTool === "highlight") {
-            // Create a rectangle/polygon for highlights
-            annotationPoints = [
-              { x: start.x, y: start.y },
-              { x: end.x, y: start.y },
-              { x: end.x, y: end.y },
-              { x: start.x, y: end.y }
-            ];
-          }
-          
-          const newAnnotation: Annotation = {
-            id: Date.now().toString(),
-            type: currentTool,
-            points: annotationPoints,
-            style: {
-              ...currentStyle,
-              // Ensure opacity is appropriate for highlights
-              opacity: currentTool === "highlight" ? 0.3 : currentStyle.opacity,
-              // Ensure line width is appropriate for highlights
-              lineWidth: currentTool === "highlight" ? 12 : currentStyle.lineWidth
-            },
-            pageNumber,
-            timestamp: Date.now(),
-            userId: "current-user",
-          };
-
-          store.addAnnotation(documentId, newAnnotation);
-
-          // Clear selection to prevent immediate resizing
-          store.clearSelection();
-          setSelectedAnnotations([]);
-          
-          // Dispatch the annotation change event
-          dispatchAnnotationChangeEvent('userDrawing', true);
-        }
-      }
-    }
-
-    // Always clean up states
-    setIsDrawing(false);
-    setCurrentPoints([]);
-    lastPointRef.current = null;
-    setMoveOffset(null);
-    setActiveHandle(null);
-    setSelectionBox(null);
-    setIsResizing(false);
-
-    // Force render to clear any preview
-    render();
-  };
-
-  const handleMouseLeave = () => {
-    if (isDrawing && currentTool === "freehand" && currentPoints.length >= 2) {
-      // Save the drawing if we have points
-      // For freehand drawings, we just use the raw points since there's no smoothPoints function
-      const newAnnotation: Annotation = {
-        id: Date.now().toString(),
-        type: "freehand",
-        points: currentPoints,
-        style: currentStyle,
-        pageNumber,
-        timestamp: Date.now(),
-        userId: "current-user",
-      };
-
-      store.addAnnotation(documentId, newAnnotation);
-    }
-
-    // Clean up all states
-    setIsDrawing(false);
-    setCurrentPoints([]);
-    lastPointRef.current = null;
-    setMoveOffset(null);
-    setActiveHandle(null);
-    setSelectionBox(null);
-    setIsResizing(false);
-  };
-
-  const handleDoubleClick = (e: React.MouseEvent) => {
-    if (isEditingText) return;
-    
-    const point = getCanvasPoint(e);
-    const annotations = documentState.annotations.filter(
-      (a) => a.pageNumber === pageNumber
-    );
-    
-    // Find if user clicked on an existing text or sticky note annotation
-    const textAnnotation = annotations.find(
-      (a) => 
-        (a.type === "text" || a.type === "stickyNote") && 
-        isPointInTextAnnotation(point, a, scale)
-    );
-    
-    if (textAnnotation) {
-      setEditingAnnotation(textAnnotation);
-      setTextInputPosition(textAnnotation.points[0]);
-      setIsEditingText(true);
-      setStickyNoteScale(textAnnotation.type === "stickyNote" ? 1 : 0);
-    }
-  };
-
-  const handleTextComplete = (text: string) => {
-    setIsEditingText(false);
-    
-    if (editingAnnotation) {
-      // Handle editing existing text annotation
-      const updatedAnnotation = {
-        ...editingAnnotation,
-        text,
-        style: {
-          ...editingAnnotation.style,
-          text,
-        },
-      };
-      store.updateAnnotation(documentId, updatedAnnotation);
-    } else if (textInputPosition) {
-      // Handle creating new text annotation
-      const isSticky = stickyNoteScale > 0;
-      
-      // For regular text, preserve user style. Sticky notes use fixed style.
-      const textStyle = isSticky 
-        ? { color: '#FFD700', lineWidth: 1, opacity: 1 } // Minimal style - the createStickyNoteAnnotation will replace it
-        : { ...currentStyle };
-      
-      // Use the exact position from the preview
-      // This ensures the annotation appears exactly where the preview was shown
-      handleTextToolCompletion(
-        textInputPosition,
-        text,
-        isSticky,
-        textStyle,
-        pageNumber,
-        "current-user", // Replace with actual user ID when available
-        documentId,
-        store.addAnnotation
-      );
-      
-      // Reset tool to select after adding text/sticky note
-      store.setCurrentTool("select");
-    }
-    
-    setTextInputPosition(null);
-    setEditingAnnotation(null);
-    setTextDimensions(null);
-    dispatchAnnotationChangeEvent("textComplete");
-  };
-
-  const handleTextCancel = () => {
-    setTextInputPosition(null);
-    setIsEditingText(false);
-    setEditingAnnotation(null);
-  };
-
-  const isAnnotationInSelectionBox = (
-    annotation: Annotation,
-    start: Point,
-    end: Point
-  ): boolean => {
-    const bounds = getShapeBounds(annotation.points);
-    const selectionBounds = {
-      left: Math.min(start.x, end.x),
-      right: Math.max(start.x, end.x),
-      top: Math.min(start.y, end.y),
-      bottom: Math.max(start.y, end.y),
-    };
-
-    // For text and sticky notes, use center point
-    if (annotation.type === "text" || annotation.type === "stickyNote") {
-      const center = {
-        x: bounds.left + (bounds.right - bounds.left) / 2,
-        y: bounds.top + (bounds.bottom - bounds.top) / 2,
-      };
-      return (
-        center.x >= selectionBounds.left &&
-        center.x <= selectionBounds.right &&
-        center.y >= selectionBounds.top &&
-        center.y <= selectionBounds.bottom
-      );
-    }
-
-    // For stamps, require full containment
-    if (annotation.type === "stamp" || annotation.type === "stampApproved" || 
-        annotation.type === "stampRejected" || annotation.type === "stampRevision") {
-      return (
-        bounds.left >= selectionBounds.left &&
-        bounds.right <= selectionBounds.right &&
-        bounds.top >= selectionBounds.top &&
-        bounds.bottom <= selectionBounds.bottom
-      );
-    }
-
-    // For other shapes, check if any corner is inside the selection box
-    // or if the selection box intersects with any edge
-    const corners = [
-      { x: bounds.left, y: bounds.top },
-      { x: bounds.right, y: bounds.top },
-      { x: bounds.left, y: bounds.bottom },
-      { x: bounds.right, y: bounds.bottom },
-    ];
-
-    // Check if any corner is inside selection box
-    const anyCornerInside = corners.some(
-      (corner) =>
-        corner.x >= selectionBounds.left &&
-        corner.x <= selectionBounds.right &&
-        corner.y >= selectionBounds.top &&
-        corner.y <= selectionBounds.bottom
-    );
-
-    if (anyCornerInside) return true;
-
-    // Check for intersection with selection box edges
-    const edges = [
-      [corners[0], corners[1]], // Top
-      [corners[1], corners[3]], // Right
-      [corners[2], corners[3]], // Bottom
-      [corners[0], corners[2]], // Left
-    ];
-
-    const selectionEdges = [
-      [
-        { x: selectionBounds.left, y: selectionBounds.top },
-        { x: selectionBounds.right, y: selectionBounds.top },
-      ],
-      [
-        { x: selectionBounds.right, y: selectionBounds.top },
-        { x: selectionBounds.right, y: selectionBounds.bottom },
-      ],
-      [
-        { x: selectionBounds.left, y: selectionBounds.bottom },
-        { x: selectionBounds.right, y: selectionBounds.bottom },
-      ],
-      [
-        { x: selectionBounds.left, y: selectionBounds.top },
-        { x: selectionBounds.left, y: selectionBounds.bottom },
-      ],
-    ];
-
-    return edges.some((edge) =>
-      selectionEdges.some((selEdge) =>
-        doLinesIntersect(edge[0], edge[1], selEdge[0], selEdge[1])
-      )
-    );
-  };
-
-  // Helper function to check if two line segments intersect
-  const doLinesIntersect = (
-    p1: Point,
-    p2: Point,
-    p3: Point,
-    p4: Point
-  ): boolean => {
-    const denominator =
-      (p4.y - p3.y) * (p2.x - p1.x) - (p4.x - p3.x) * (p2.y - p1.y);
-    if (denominator === 0) return false;
-
-    const ua =
-      ((p4.x - p3.x) * (p1.y - p3.y) - (p4.y - p3.y) * (p1.x - p3.x)) /
-      denominator;
-    const ub =
-      ((p2.x - p1.x) * (p1.y - p3.y) - (p2.y - p1.y) * (p1.x - p3.x)) /
-      denominator;
-
-    return ua >= 0 && ua <= 1 && ub >= 0 && ub <= 1;
-  };
-
-  const handleContextMenu = (e: React.MouseEvent) => {
-    e.preventDefault();
-
-    const point = getCanvasPoint(e);
-
-    // Check if clicking on a selected annotation
-    const clickedAnnotation = documentState.annotations.find(
-      (annotation) =>
-        annotation.pageNumber === pageNumber &&
-        isPointInAnnotation(point, annotation)
-    );
-
-    if (clickedAnnotation) {
-      // If clicking on an unselected annotation, select it
-      if (!selectedAnnotations.some((a) => a.id === clickedAnnotation.id)) {
-        store.selectAnnotation(clickedAnnotation, e.shiftKey);
-      }
-
-      // Show context menu
-      setContextMenu({
-        position: { x: e.clientX, y: e.clientY },
-      });
-    } else {
-      // Clear selection if clicking outside annotations
-      store.clearSelection();
-      setContextMenu(null);
-    }
-  };
-
+  // Move render function declaration to the top, before it's used
   const render = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -1314,6 +794,651 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
     }
   };
 
+  // Update the handleAutoScroll function for smoother behavior
+  const handleAutoScroll = useCallback((e: React.MouseEvent) => {
+    const scrollContainer = canvasRef.current?.parentElement?.parentElement;
+    if (!scrollContainer || !moveOffset) return;
+
+    const containerRect = scrollContainer.getBoundingClientRect();
+    const { top, right, bottom, left } = containerRect;
+
+    // Calculate distances from edges
+    const distanceFromTop = e.clientY - top;
+    const distanceFromBottom = bottom - e.clientY;
+    const distanceFromLeft = e.clientX - left;
+    const distanceFromRight = right - e.clientX;
+
+    // Calculate scroll speeds with smooth acceleration
+    const calculateSpeed = (distance: number, currentSpeed: number): number => {
+      if (distance > SCROLL_THRESHOLD) return 0;
+      
+      // Calculate base speed using quadratic easing
+      const normalizedDistance = (SCROLL_THRESHOLD - distance) / SCROLL_THRESHOLD;
+      const targetSpeed = normalizedDistance * normalizedDistance * MAX_SCROLL_SPEED;
+      
+      // Apply smooth acceleration/deceleration
+      if (targetSpeed > Math.abs(currentSpeed)) {
+        // Accelerating
+        return currentSpeed + (targetSpeed - Math.abs(currentSpeed)) * ACCELERATION;
+      } else {
+        // Decelerating
+        return targetSpeed;
+      }
+    };
+
+    // Calculate new speeds with inertia
+    const newSpeedY = calculateSpeed(
+      Math.min(distanceFromTop, distanceFromBottom),
+      scrollSpeedRef.current.y
+    ) * (distanceFromTop < distanceFromBottom ? -1 : 1);
+
+    const newSpeedX = calculateSpeed(
+      Math.min(distanceFromLeft, distanceFromRight),
+      scrollSpeedRef.current.x
+    ) * (distanceFromLeft < distanceFromRight ? -1 : 1);
+
+    // Apply minimum speed threshold for smoother movement
+    const applyMinSpeed = (speed: number) => {
+      if (Math.abs(speed) < MIN_SCROLL_SPEED) return 0;
+      return speed;
+    };
+
+    // Update scroll speeds with smooth transitions
+    scrollSpeedRef.current = {
+      x: applyMinSpeed(newSpeedX),
+      y: applyMinSpeed(newSpeedY)
+    };
+
+    // Start auto-scrolling if not already started
+    if (!autoScrollingRef.current && (scrollSpeedRef.current.x !== 0 || scrollSpeedRef.current.y !== 0)) {
+      autoScrollingRef.current = true;
+      
+      const scroll = () => {
+        if (!autoScrollingRef.current || !moveOffset) {
+          if (scrollAnimationFrameRef.current) {
+            cancelAnimationFrame(scrollAnimationFrameRef.current);
+            scrollAnimationFrameRef.current = null;
+          }
+          return;
+        }
+
+        // Apply scrolling with smooth transitions
+        if (scrollSpeedRef.current.y !== 0) {
+          scrollContainer.scrollTop += scrollSpeedRef.current.y;
+        }
+        if (scrollSpeedRef.current.x !== 0) {
+          scrollContainer.scrollLeft += scrollSpeedRef.current.x;
+        }
+
+        // Update selected annotations position during scroll
+        if (selectedAnnotations.length > 0) {
+          const updatedAnnotations = selectedAnnotations.map(annotation => ({
+            ...annotation,
+            points: annotation.points.map(p => ({
+              x: p.x + scrollSpeedRef.current.x / scale,
+              y: p.y + scrollSpeedRef.current.y / scale,
+            })),
+          }));
+
+          // Update store and selection state
+          updatedAnnotations.forEach(annotation => {
+            store.updateAnnotation(documentId, annotation);
+          });
+          setSelectedAnnotations(updatedAnnotations);
+
+          // Force render to update visual position
+          render();
+        }
+
+        // Continue animation
+        scrollAnimationFrameRef.current = requestAnimationFrame(scroll);
+      };
+
+      scrollAnimationFrameRef.current = requestAnimationFrame(scroll);
+    }
+  }, [moveOffset, scale, selectedAnnotations, documentId, store]);
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    const point = getCanvasPoint(e);
+    
+    // Update cursor position for tool indicators
+    setCursorPosition(point);
+    
+    // If drag tool is active, don't perform annotation operations
+    if (currentTool === "drag") {
+      return;
+    }
+    
+    // Handle text tool dragging
+    if (isTextDragging && textDragStart) {
+      setTextDragEnd(point);
+      render();
+      return;
+    }
+
+    // Handle auto-scrolling during object movement
+    if (moveOffset && selectedAnnotations.length > 0) {
+      handleAutoScroll(e);
+    } else {
+      // Stop auto-scrolling if not moving objects
+      autoScrollingRef.current = false;
+      if (scrollAnimationFrameRef.current) {
+        cancelAnimationFrame(scrollAnimationFrameRef.current);
+        scrollAnimationFrameRef.current = null;
+      }
+    }
+
+    if (selectionBox) {
+      // Update selection box end point
+      setSelectionBox((prev) => (prev ? { ...prev, end: point } : null));
+
+      // Find annotations within selection box
+      const annotations = documentState.annotations.filter((annotation) => {
+        if (annotation.pageNumber !== pageNumber) return false;
+        return isAnnotationInSelectionBox(
+          annotation,
+          selectionBox.start,
+          point
+        );
+      });
+
+      // Update selected annotations
+      store.selectAnnotations(annotations);
+      return;
+    }
+
+    if (currentTool === "select") {
+      // Handle circle center mode
+      if (isCircleCenterMode && moveOffset && selectedAnnotations.length === 1) {
+        const annotation = selectedAnnotations[0];
+        if (annotation.type === "circle") {
+          const dx = point.x - moveOffset.x;
+          const dy = point.y - moveOffset.y;
+          
+          // Create new points by moving both points by the same offset
+          const newPoints = annotation.points.map(p => ({
+            x: p.x + dx,
+            y: p.y + dy
+          }));
+          
+          // Update the annotation
+          const updatedAnnotation = {
+            ...annotation,
+            points: newPoints
+          };
+          
+          store.updateAnnotation(documentId, updatedAnnotation);
+          setSelectedAnnotations([updatedAnnotation]);
+          setMoveOffset(point);
+          return;
+        }
+      }
+      
+      // Handle resizing
+      if (isResizing && selectedAnnotations.length === 1) {
+        const annotation = selectedAnnotations[0];
+
+        if (!isValidResize(annotation, activeHandle!)) {
+          return;
+        }
+
+        const newPoints = getResizedPoints(
+          annotation.points,
+          activeHandle!,
+          point,
+          e.shiftKey,
+          10,
+          annotation
+        );
+
+        const updatedAnnotation = {
+          ...annotation,
+          points: newPoints,
+        };
+
+        store.updateAnnotation(documentId, updatedAnnotation);
+        setSelectedAnnotations([updatedAnnotation]);
+        return;
+      }
+
+      // Handle moving
+      if (moveOffset && selectedAnnotations.length > 0) {
+        const dx = point.x - moveOffset.x;
+        const dy = point.y - moveOffset.y;
+
+        const updatedAnnotations = selectedAnnotations.map((annotation) => ({
+          ...annotation,
+          points: annotation.points.map((p) => ({
+            x: p.x + dx,
+            y: p.y + dy,
+          })),
+        }));
+
+        updatedAnnotations.forEach((annotation) => {
+          store.updateAnnotation(documentId, annotation);
+        });
+
+        setSelectedAnnotations(updatedAnnotations);
+        setMoveOffset(point);
+        return;
+      }
+
+      // Update cursor based on hover
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+
+      // Update cursor for selected circles
+      if (selectedAnnotations.length === 1 && selectedAnnotations[0].type === "circle") {
+        const circleAnnotation = selectedAnnotations[0];
+        const handle = getResizeHandleForCircle(point, circleAnnotation);
+        
+        if (handle) {
+          // Show resize cursor based on the handle position
+          canvas.style.cursor = getResizeCursor(handle);
+          return;
+        } else if (isPointInsideCircle(point, circleAnnotation)) {
+          // Show move cursor when inside the circle but not on a handle
+          canvas.style.cursor = "move";
+          return;
+        }
+      }
+
+      // For other annotations, use the existing code
+      if (selectedAnnotations.length === 1) {
+        const handle = getResizeHandle(point, selectedAnnotations[0]);
+        if (handle) {
+          canvas.style.cursor = getResizeCursor(handle);
+          return;
+        }
+      }
+
+      const isOverSelected = selectedAnnotations.some((annotation) =>
+        isPointInAnnotation(point, annotation)
+      );
+      
+      // Set the cursor based on hover state - use move only when over annotations
+      canvas.style.cursor = isOverSelected ? "move" : "default";
+      
+      // If not over selected annotations, check if hovering over any annotation
+      if (!isOverSelected) {
+        const hoverAnnotation = documentState.annotations.find(
+          (annotation) =>
+            annotation.pageNumber === pageNumber &&
+            isPointInAnnotation(point, annotation)
+        );
+        
+        // Use move cursor if hovering over any annotation, otherwise default cursor
+        canvas.style.cursor = hoverAnnotation ? "move" : "default";
+      }
+    } else if (isDrawing) {
+      if (currentTool === "freehand") {
+        // Use the dedicated freehand drawing handler
+        handleFreehandDraw(point);
+      } else {
+        // For other tools, just update end point while keeping start point fixed
+        setCurrentPoints((prev) => [prev[0], { x: point.x, y: point.y }]);
+        render();
+      }
+    } else if (currentTool === "select" as AnnotationType) {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+
+      // Check for resize handles first when a single annotation is selected
+      if (selectedAnnotations.length === 1) {
+        const handle = getResizeHandle(point, selectedAnnotations[0]);
+        if (handle) {
+          canvas.style.cursor = getResizeCursor(handle);
+          return;
+        }
+      }
+
+      // Check if hovering over any selected annotation
+      const hoverSelected = selectedAnnotations.some((annotation) =>
+        isPointInAnnotation(point, annotation)
+      );
+
+      if (hoverSelected) {
+        canvas.style.cursor = "move"; // Keep move cursor for draggable annotations
+        return;
+      }
+
+      // Check if hovering over any annotation
+      const hoverAnnotation = documentState.annotations.find(
+        (annotation) =>
+          annotation.pageNumber === pageNumber &&
+          isPointInAnnotation(point, annotation)
+      );
+
+      canvas.style.cursor = hoverAnnotation ? "move" : "default"; // Use default cursor when not over any annotation
+    }
+  };
+
+  const handleMouseUp = useCallback((e: React.MouseEvent) => {
+    if (e.button !== 0) return;
+
+    // Stop auto-scrolling with smooth deceleration
+    if (autoScrollingRef.current) {
+      const decelerate = () => {
+        scrollSpeedRef.current = {
+          x: scrollSpeedRef.current.x * DECELERATION,
+          y: scrollSpeedRef.current.y * DECELERATION
+        };
+
+        if (Math.abs(scrollSpeedRef.current.x) < 0.1 && Math.abs(scrollSpeedRef.current.y) < 0.1) {
+          autoScrollingRef.current = false;
+          if (scrollAnimationFrameRef.current) {
+            cancelAnimationFrame(scrollAnimationFrameRef.current);
+            scrollAnimationFrameRef.current = null;
+          }
+          return;
+        }
+
+        requestAnimationFrame(decelerate);
+      };
+
+      decelerate();
+    }
+
+    // Handle completion of drawing operations
+    if (isDrawing && currentPoints.length > 0) {
+      // Create new annotation based on the current tool
+      const newAnnotation: Annotation = {
+        id: Date.now().toString(),
+        type: currentTool as AnnotationType,
+        points: currentPoints,
+        style: currentStyle,
+        pageNumber,
+        timestamp: Date.now(),
+        userId: "current-user",
+        version: 1,
+      };
+
+      // Add the annotation to the store
+      store.addAnnotation(documentId, newAnnotation);
+
+      // Dispatch event to notify about the change
+      dispatchAnnotationChangeEvent("userDrawing", true);
+    }
+
+    // Handle text tool completion
+    if (isTextDragging && textDragStart && textDragEnd) {
+      const isSticky = currentTool === "stickyNote";
+      setIsTextDragging(false);
+      setTextDragStart(null);
+      setTextDragEnd(null);
+
+      // Calculate dimensions for text input
+      const left = Math.min(textDragStart.x, textDragEnd.x);
+      const top = Math.min(textDragStart.y, textDragEnd.y);
+      const width = Math.abs(textDragEnd.x - textDragStart.x);
+      const height = Math.abs(textDragEnd.y - textDragStart.y);
+
+      // Only show text input if dragged area is large enough
+      const MIN_SIZE = 20 / scale;
+      if (width > MIN_SIZE && height > MIN_SIZE) {
+        setTextInputPosition({ x: left, y: top });
+        setTextDimensions({ width, height });
+        setIsEditingText(true);
+      }
+    }
+
+    // Reset all movement and drawing states
+    setMoveOffset(null);
+    setIsResizing(false);
+    setActiveHandle(null);
+    setSelectionBox(null);
+    setIsDrawing(false);
+    setCurrentPoints([]);
+    lastPointRef.current = null;
+
+    // Force render to ensure clean state
+    render();
+  }, [isDrawing, currentPoints, currentTool, currentStyle, pageNumber, documentId, store, scale, isTextDragging, textDragStart, textDragEnd, dispatchAnnotationChangeEvent, render]);
+
+  const handleMouseLeave = () => {
+    if (isDrawing && currentTool === "freehand" && currentPoints.length >= 2) {
+      // Save the drawing if we have points
+      // For freehand drawings, we just use the raw points since there's no smoothPoints function
+      const newAnnotation: Annotation = {
+        id: Date.now().toString(),
+        type: "freehand",
+        points: currentPoints,
+        style: currentStyle,
+        pageNumber,
+        timestamp: Date.now(),
+        userId: "current-user",
+      };
+
+      store.addAnnotation(documentId, newAnnotation);
+    }
+
+    // Clean up all states
+    setIsDrawing(false);
+    setCurrentPoints([]);
+    lastPointRef.current = null;
+    setMoveOffset(null);
+    setActiveHandle(null);
+    setSelectionBox(null);
+    setIsResizing(false);
+  };
+
+  const handleDoubleClick = (e: React.MouseEvent) => {
+    if (isEditingText) return;
+    
+    const point = getCanvasPoint(e);
+    const annotations = documentState.annotations.filter(
+      (a) => a.pageNumber === pageNumber
+    );
+    
+    // Find if user clicked on an existing text or sticky note annotation
+    const textAnnotation = annotations.find(
+      (a) => 
+        (a.type === "text" || a.type === "stickyNote") && 
+        isPointInTextAnnotation(point, a, scale)
+    );
+    
+    if (textAnnotation) {
+      setEditingAnnotation(textAnnotation);
+      setTextInputPosition(textAnnotation.points[0]);
+      setIsEditingText(true);
+      setStickyNoteScale(textAnnotation.type === "stickyNote" ? 1 : 0);
+    }
+  };
+
+  const handleTextComplete = (text: string) => {
+    setIsEditingText(false);
+    
+    if (editingAnnotation) {
+      // Handle editing existing text annotation
+      const updatedAnnotation = {
+        ...editingAnnotation,
+        text,
+        style: {
+          ...editingAnnotation.style,
+          text,
+        },
+      };
+      store.updateAnnotation(documentId, updatedAnnotation);
+    } else if (textInputPosition) {
+      // Handle creating new text annotation
+      const isSticky = stickyNoteScale > 0;
+      
+      // For regular text, preserve user style. Sticky notes use fixed style.
+      const textStyle = isSticky 
+        ? { color: '#FFD700', lineWidth: 1, opacity: 1 } // Minimal style - the createStickyNoteAnnotation will replace it
+        : { ...currentStyle };
+      
+      // Use the exact position from the preview
+      // This ensures the annotation appears exactly where the preview was shown
+      handleTextToolCompletion(
+        textInputPosition,
+        text,
+        isSticky,
+        textStyle,
+        pageNumber,
+        "current-user", // Replace with actual user ID when available
+        documentId,
+        store.addAnnotation
+      );
+      
+      // Reset tool to select after adding text/sticky note
+      store.setCurrentTool("select");
+    }
+    
+    setTextInputPosition(null);
+    setEditingAnnotation(null);
+    setTextDimensions(null);
+    dispatchAnnotationChangeEvent("textComplete");
+  };
+
+  const handleTextCancel = () => {
+    setTextInputPosition(null);
+    setIsEditingText(false);
+    setEditingAnnotation(null);
+  };
+
+  const isAnnotationInSelectionBox = (
+    annotation: Annotation,
+    start: Point,
+    end: Point
+  ): boolean => {
+    const bounds = getShapeBounds(annotation.points);
+    const selectionBounds = {
+      left: Math.min(start.x, end.x),
+      right: Math.max(start.x, end.x),
+      top: Math.min(start.y, end.y),
+      bottom: Math.max(start.y, end.y),
+    };
+
+    // For text and sticky notes, use center point
+    if (annotation.type === "text" || annotation.type === "stickyNote") {
+      const center = {
+        x: bounds.left + (bounds.right - bounds.left) / 2,
+        y: bounds.top + (bounds.bottom - bounds.top) / 2,
+      };
+      return (
+        center.x >= selectionBounds.left &&
+        center.x <= selectionBounds.right &&
+        center.y >= selectionBounds.top &&
+        center.y <= selectionBounds.bottom
+      );
+    }
+
+    // For stamps, require full containment
+    if (annotation.type === "stamp" || annotation.type === "stampApproved" || 
+        annotation.type === "stampRejected" || annotation.type === "stampRevision") {
+      return (
+        bounds.left >= selectionBounds.left &&
+        bounds.right <= selectionBounds.right &&
+        bounds.top >= selectionBounds.top &&
+        bounds.bottom <= selectionBounds.bottom
+      );
+    }
+
+    // For other shapes, check if any corner is inside the selection box
+    // or if the selection box intersects with any edge
+    const corners = [
+      { x: bounds.left, y: bounds.top },
+      { x: bounds.right, y: bounds.top },
+      { x: bounds.left, y: bounds.bottom },
+      { x: bounds.right, y: bounds.bottom },
+    ];
+
+    // Check if any corner is inside selection box
+    const anyCornerInside = corners.some(
+      (corner) =>
+        corner.x >= selectionBounds.left &&
+        corner.x <= selectionBounds.right &&
+        corner.y >= selectionBounds.top &&
+        corner.y <= selectionBounds.bottom
+    );
+
+    if (anyCornerInside) return true;
+
+    // Check for intersection with selection box edges
+    const edges = [
+      [corners[0], corners[1]], // Top
+      [corners[1], corners[3]], // Right
+      [corners[2], corners[3]], // Bottom
+      [corners[0], corners[2]], // Left
+    ];
+
+    const selectionEdges = [
+      [
+        { x: selectionBounds.left, y: selectionBounds.top },
+        { x: selectionBounds.right, y: selectionBounds.top },
+      ],
+      [
+        { x: selectionBounds.right, y: selectionBounds.top },
+        { x: selectionBounds.right, y: selectionBounds.bottom },
+      ],
+      [
+        { x: selectionBounds.left, y: selectionBounds.bottom },
+        { x: selectionBounds.right, y: selectionBounds.bottom },
+      ],
+      [
+        { x: selectionBounds.left, y: selectionBounds.top },
+        { x: selectionBounds.left, y: selectionBounds.bottom },
+      ],
+    ];
+
+    return edges.some((edge) =>
+      selectionEdges.some((selEdge) =>
+        doLinesIntersect(edge[0], edge[1], selEdge[0], selEdge[1])
+      )
+    );
+  };
+
+  // Helper function to check if two line segments intersect
+  const doLinesIntersect = (
+    p1: Point,
+    p2: Point,
+    p3: Point,
+    p4: Point
+  ): boolean => {
+    const denominator =
+      (p4.y - p3.y) * (p2.x - p1.x) - (p4.x - p3.x) * (p2.y - p1.y);
+    if (denominator === 0) return false;
+
+    const ua =
+      ((p4.x - p3.x) * (p1.y - p3.y) - (p4.y - p3.y) * (p1.x - p3.x)) /
+      denominator;
+    const ub =
+      ((p2.x - p1.x) * (p1.y - p3.y) - (p2.y - p1.y) * (p1.x - p3.x)) /
+      denominator;
+
+    return ua >= 0 && ua <= 1 && ub >= 0 && ub <= 1;
+  };
+
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+
+    const point = getCanvasPoint(e);
+
+    // Check if clicking on a selected annotation
+    const clickedAnnotation = documentState.annotations.find(
+      (annotation) =>
+        annotation.pageNumber === pageNumber &&
+        isPointInAnnotation(point, annotation)
+    );
+
+    if (clickedAnnotation) {
+      // If clicking on an unselected annotation, select it
+      if (!selectedAnnotations.some((a) => a.id === clickedAnnotation.id)) {
+        store.selectAnnotation(clickedAnnotation, e.shiftKey);
+      }
+
+      // Show context menu
+      setContextMenu({
+        position: { x: e.clientX, y: e.clientY },
+      });
+    } else {
+      // Clear selection if clicking outside annotations
+      store.clearSelection();
+      setContextMenu(null);
+    }
+  };
+
   // Re-render when scale changes or page changes
   useEffect(() => {
     // Request animation frame for smoother transitions during scale changes
@@ -1383,12 +1508,24 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
       
       // Existing key handler code...
       if (e.key === "Delete" || e.key === "Backspace") {
+        console.log('[AnnotationCanvas] Delete/Backspace key pressed');
+        console.log('[AnnotationCanvas] Selected annotations:', selectedAnnotations);
+        
         if (selectedAnnotations.length > 0) {
+          console.log(`[AnnotationCanvas] Deleting ${selectedAnnotations.length} annotations`);
           // Delete all selected annotations one by one
           selectedAnnotations.forEach((annotation) => {
+            console.log(`[AnnotationCanvas] Deleting annotation:`, {
+              id: annotation.id,
+              type: annotation.type,
+              pageNumber: annotation.pageNumber
+            });
             store.deleteAnnotation(documentId, annotation.id);
           });
           setSelectedAnnotations([]);
+          console.log('[AnnotationCanvas] Deletion complete, cleared selection');
+        } else {
+          console.log('[AnnotationCanvas] No annotations selected to delete');
         }
       }
       
@@ -1843,6 +1980,16 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
     handleMouseDown(e);
   };
 
+  // Add cleanup for animation frame
+  useEffect(() => {
+    return () => {
+      if (scrollAnimationFrameRef.current) {
+        cancelAnimationFrame(scrollAnimationFrameRef.current);
+        scrollAnimationFrameRef.current = null;
+      }
+    };
+  }, []);
+
   return (
     <>
       <canvas
@@ -1907,12 +2054,14 @@ const getCursor = (
   switch (tool) {
     case "select":
       return "default";
+    case "drag":
+      return "grab";
     case "freehand":
       return "crosshair";
     case "text":
       return "text";
     case "stickyNote":
-      return "cell"; // Cell cursor looks like a plus in a box, good for sticky notes
+      return "cell";
     default:
       return "crosshair";
   }

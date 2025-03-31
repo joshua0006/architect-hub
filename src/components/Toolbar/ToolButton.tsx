@@ -80,25 +80,20 @@ export const ToolButton: React.FC<ToolButtonProps> = ({
   const { currentTool, setCurrentTool } = useAnnotationStore();
   const { user } = useAuth();
 
-  // TEMPORARY: Debug permission issues
+  // Add debug logs
   useEffect(() => {
-    console.log(`[Debug] ToolButton ${tool} rendered`);
-    console.log(`[Debug] User: ${user?.email}, Role: ${user?.role}`);
-    console.log(`[Debug] Current folder: `, currentFolder?.name);
-    if (currentFolder?.metadata?.access) {
-      console.log(`[Debug] Folder access setting: ${currentFolder.metadata.access}`);
-    } else {
-      console.log(`[Debug] Folder has no access settings`);
+    if (tool === 'delete') {
+      console.log('[ToolButton] Delete tool initialized with props:', {
+        tool,
+        label,
+        shortcut,
+        currentTool: currentTool === tool ? 'active' : 'inactive'
+      });
     }
-  }, [tool, user, currentFolder]);
+  }, [tool, currentTool]);
 
   const hasFolderWritePermission = (): boolean => {
-    // TEMPORARY: For debugging - allow all tools
-    return true;
-    
-    // Original code commented out
-    /*
-    if(tool === 'select') {
+    if(tool === 'select' || tool === 'drag') {
       return true;
     }
     const role = user?.role as UserRole| undefined;
@@ -108,19 +103,21 @@ export const ToolButton: React.FC<ToolButtonProps> = ({
       writeAccess = PERMISSIONS_MAP[folderPermission][role] ?? DEFAULT_FOLDER_ACCESS;
     }
     return writeAccess.write;
-    */
   }  
 
+  const handleClick = () => {
+    setCurrentTool(tool);
+    
+    // Call any additional onClick handler
+    onClick?.();
+    
+    // Dispatch event to trigger re-rendering of the PDF canvas
+    dispatchToolChangeEvent();
+  };
 
   return (
     <button
-      onClick={() => {
-        setCurrentTool(tool);
-        onClick?.();
-        
-        // Dispatch event to trigger re-rendering of the PDF canvas
-        dispatchToolChangeEvent();
-      }}
+      onClick={handleClick}
       className={`flex items-center gap-2 px-3 py-2 rounded-md w-full transition-colors ${
         currentTool === tool
           ? "bg-blue-50 text-blue-600"
