@@ -395,7 +395,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     setCurrentPage(nextPage);
   }, [currentPage, pdf?.numPages, isExporting, pageChangeInProgress, isRendering]);
 
-  // Add this at the top, right after refs
+  // Add these refs near the top with other refs
   let hasLoggedRenderSkip = false;
 
   // Update the renderPdfPage function to implement caching
@@ -431,8 +431,14 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
         return;
       }
 
-      // Generate a cache key based on fileId and scale
-      const cacheKey = `${fileId}_${scale.toFixed(2)}`;
+      // Calculate quality multiplier based on scale
+      // Higher zoom levels use higher quality rendering for better text clarity
+      const qualityMultiplier = scale > 2.5 ? 2.0 : 
+                               scale > 1.5 ? 1.5 : 
+                               scale > 1.0 ? 1.2 : 1.0;
+      
+      // Generate a cache key based on fileId, scale, and quality multiplier
+      const cacheKey = `${fileId}_${scale.toFixed(2)}_${qualityMultiplier.toFixed(1)}`;
       
       // Check if we have this page cached
       if (pageCanvasCache.has(cacheKey)) {
@@ -504,7 +510,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
       setIsRendering(true);
       
       // Log only when starting a new render (not for retries)
-      console.log(`[PDFViewer] Rendering page ${currentPage}`);
+      console.log(`[PDFViewer] Rendering page ${currentPage} with quality multiplier ${qualityMultiplier}`);
 
       // Get the PDF page
       pdf.getPage(currentPage).then(
@@ -523,18 +529,31 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
             
             // For initial rendering, prioritize fitting to width
             // while maintaining aspect ratio
-            const scale = widthScale;
+            const displayScale = scale;
             
-            viewport = page.getViewport({ scale });
+            // Apply quality multiplier to the viewport scale for better text quality
+            // but render at the display scale for proper sizing
+            viewport = page.getViewport({ scale: displayScale * qualityMultiplier });
 
-            // Set canvas dimensions to match viewport exactly
+            // Set canvas dimensions to match the high-quality viewport
             canvas.height = viewport.height;
             canvas.width = viewport.width;
+            
+            // Scale down the display canvas size to match the display scale
+            // This maintains the same visual size while rendering at higher resolution
+            canvas.style.width = `${viewport.width / qualityMultiplier}px`;
+            canvas.style.height = `${viewport.height / qualityMultiplier}px`;
+            
+            // Enable high-quality image rendering on the context
+            (ctx as any).imageSmoothingEnabled = true;
+            (ctx as any).imageSmoothingQuality = 'high';
 
-            // Define render parameters
+            // Define render parameters with enhanced text rendering
             const renderContext = {
               canvasContext: ctx,
               viewport: viewport,
+              // Use print intent for better text quality at high zoom levels
+              intent: scale > 1.5 ? "print" : "display"
             };
 
             // Start the render task
@@ -545,7 +564,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
               () => {
                 // Cache the rendered page
                 const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-                const cacheKey = `${fileId}_${scale.toFixed(2)}`;
                 
                 // Initialize cache maps if needed
                 if (!pageCanvasCache.has(cacheKey)) {
@@ -628,48 +646,55 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
                 setIsRendering(false);
                 setRenderComplete(true);
                 
-                // Center the document after a brief delay to ensure UI is updated
+                // Center the document
                 setTimeout(() => {
                   scrollToCenterDocument();
                 }, 50);
+                
               },
-              (error: Error) => {
-                // Handle render failure
-                console.error(`[PDFViewer] Error rendering page ${currentPage}:`, error);
-                
-                // Reset all state flags on error
+              (error: Error | any) => {
+                console.error('[PDFViewer] Error rendering PDF page:', error);
                 renderLockRef.current = false;
-                setIsRendering(false);
+                setRenderError(error instanceof Error ? error : new Error(String(error)));
                 setPageChangeInProgress(false);
-                
-                // Clear any previous timeout
-                if (renderTimeoutRef.current) {
-                  clearTimeout(renderTimeoutRef.current);
-                  renderTimeoutRef.current = null;
-                }
+                setIsRendering(false);
               }
             );
-          } catch (err) {
-            console.error('[PDFViewer] Error setting up render:', err);
+          } catch (error) {
+            console.error('[PDFViewer] Error during page setup:', error);
             renderLockRef.current = false;
-            setIsRendering(false);
+            setRenderError(error instanceof Error ? error : new Error(String(error)));
             setPageChangeInProgress(false);
+            setIsRendering(false);
           }
         },
         (error) => {
-          console.error(`[PDFViewer] Failed to get page ${currentPage}:`, error);
+          console.error('[PDFViewer] Error getting PDF page:', error);
           renderLockRef.current = false;
-          setIsRendering(false);
+          setRenderError(error instanceof Error ? error : new Error(String(error)));
           setPageChangeInProgress(false);
+          setIsRendering(false);
         }
       );
-    } catch (err) {
-      console.error('[PDFViewer] Exception during render:', err);
+    } catch (error) {
+      console.error('[PDFViewer] Uncaught error in renderPdfPage:', error);
       renderLockRef.current = false;
-      setIsRendering(false);
+      setRenderError(error instanceof Error ? error : new Error(String(error)));
       setPageChangeInProgress(false);
+      setIsRendering(false);
     }
-  }, [pdf, currentPage, fileId, pageChangeInProgress, setIsRendering, annotationStore, setCurrentAnnotations, documentId, scrollToCenterDocument, setRenderComplete, scale]);
+  }, [
+    pdf, 
+    currentPage, 
+    scale, 
+    canvasRef, 
+    containerRef, 
+    fileId, 
+    documentId, 
+    annotationStore, 
+    pageChangeInProgress, 
+    scrollToCenterDocument
+  ]);
 
   // Add an effect to clear cache when file changes
   useEffect(() => {
@@ -1360,12 +1385,18 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     ctx.fillStyle = "#FFFFFF";
     ctx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
     
-    // Render PDF
+    // Render PDF with improved text quality
     console.log(`[PDFViewer] Rendering PDF content to export canvas (scale: ${scale * qualityScale})`);
+    
+    // Enable high-quality image rendering on the context
+    (ctx as any).imageSmoothingEnabled = true;
+    (ctx as any).imageSmoothingQuality = 'high';
+    
     const renderTask = targetPage.render({
       canvasContext: ctx,
       viewport: viewport,
-      intent: "display"
+      // Use print intent for better text quality in exports
+      intent: "print"
     });
     
     // Wait for PDF rendering to complete
