@@ -105,6 +105,9 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   
+  // Add screenWidth state
+  const [screenWidth, setScreenWidth] = useState(window.innerWidth);
+  
   // Add new state for initial loading
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   
@@ -2367,6 +2370,16 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     }
   }, [currentTool]);
   
+  // Add effect to handle window resize
+  useEffect(() => {
+    const handleResize = () => {
+      setScreenWidth(window.innerWidth);
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+  
   // Make sure we explicitly return a JSX element to satisfy the React.FC type
   return (
     <div 
@@ -2525,7 +2538,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
             className={`pdf-viewer-container mx-auto ${isDragging ? grabCursorClassName : ""}`}
             style={{
               width:  '100%',
-              height: '45vh'  ,
+              height: screenWidth < 1600 ? '40vh' : '45vh',
               position: 'relative',
               maxWidth: '100%',
               marginBottom: '20px',
