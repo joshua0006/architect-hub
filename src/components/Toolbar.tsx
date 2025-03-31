@@ -88,6 +88,8 @@ export const Toolbar = ({ currentFolder }: ToolbarProps) => {
     return pageElement ? parseInt(pageElement.textContent?.split('/')[0]?.trim() || '1') : 1;
   };
 
+  const [screenWidth, setScreenWidth] = useState(window.innerWidth);
+
   // Keep track of the last time we dispatched an event to prevent too many renders
   const lastDispatchTimeRef = useRef<number>(0);
   const dispatchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -131,6 +133,15 @@ export const Toolbar = ({ currentFolder }: ToolbarProps) => {
       }
     };
   }, [currentTool, currentStyle, currentDocumentId]);
+
+  useEffect(() => {
+    const handleResize = () => {
+      setScreenWidth(window.innerWidth);
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   const renderStyleSection = () => (
     <div className="space-y-4 p-2">
@@ -216,7 +227,8 @@ export const Toolbar = ({ currentFolder }: ToolbarProps) => {
 
   return (
     <>
-      <div className="toolbar-fixed bg-white border-r border-gray-200 overflow-y-auto" style={{ flexShrink: 0, minWidth: '16rem' }}>
+      <div className="toolbar-fixed bg-white border-r border-gray-200 overflow-y-auto" 
+           style={{ flexShrink: 0, minWidth: '16rem', height: screenWidth < 1600 ? '63vh' : '71vh' }}>
         {/* Folder information section */}
         {currentFolder && (
           <div className="p-3 border-b border-gray-200">
@@ -247,6 +259,7 @@ export const Toolbar = ({ currentFolder }: ToolbarProps) => {
             />
           ))}
         </ToolbarSection>
+        
         <ToolbarSection title="Shapes">
           {TOOLS.shapes.map((tool) => (
             <ToolButton
@@ -261,18 +274,6 @@ export const Toolbar = ({ currentFolder }: ToolbarProps) => {
         </ToolbarSection>
         <ToolbarSection title="Lines & Arrows">
           {TOOLS.lines.map((tool) => (
-            <ToolButton
-              key={tool.tool}
-              tool={tool.tool}
-              icon={tool.icon}
-              label={tool.label}
-              shortcut={getOptionalShortcut(tool)}
-              currentFolder={currentFolder}
-            />
-          ))}
-        </ToolbarSection>
-        <ToolbarSection title="Text & Notes">
-          {TOOLS.text.map((tool) => (
             <ToolButton
               key={tool.tool}
               tool={tool.tool}

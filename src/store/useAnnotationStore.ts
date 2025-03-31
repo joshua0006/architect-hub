@@ -249,11 +249,11 @@ export const useAnnotationStore = create<AnnotationState>()(
       },
 
       deleteSelectedAnnotation: () => {
-        const { selectedAnnotation, currentDocument } = get();
-        if (!selectedAnnotation || !currentDocument) return;
+        const { selectedAnnotation, currentDocumentId } = get();
+        if (!selectedAnnotation || !currentDocumentId) return;
 
         set((state) => {
-          const document = state.documents[currentDocument];
+          const document = state.documents[currentDocumentId];
           const newAnnotations = document.annotations.filter(
             (a) => a.id !== selectedAnnotation.id
           );
@@ -267,7 +267,7 @@ export const useAnnotationStore = create<AnnotationState>()(
             selectedAnnotation: null,
             documents: {
               ...state.documents,
-              [currentDocument]: {
+              [currentDocumentId]: {
                 annotations: newAnnotations,
                 history: newHistory,
                 currentIndex: document.currentIndex + 1,
@@ -302,11 +302,34 @@ export const useAnnotationStore = create<AnnotationState>()(
       clearSelection: () => set({ selectedAnnotations: [] }),
 
       deleteSelectedAnnotations: () => {
-        const { selectedAnnotations, currentDocument } = get();
-        if (!selectedAnnotations.length || !currentDocument) return;
+        const { selectedAnnotations, currentDocumentId } = get();
+        
+        // Enhanced debugging
+        console.log('[AnnotationStore] deleteSelectedAnnotations called');
+        console.log('[AnnotationStore] selectedAnnotations:', selectedAnnotations);
+        console.log('[AnnotationStore] currentDocumentId:', currentDocumentId);
+        
+        if (!selectedAnnotations.length || !currentDocumentId) {
+          console.log("[AnnotationStore] No annotations to delete or no document selected");
+          return;
+        }
+
+        console.log(`[AnnotationStore] Deleting ${selectedAnnotations.length} annotations from document ${currentDocumentId}`);
+        
+        // Log annotation details
+        selectedAnnotations.forEach((annotation, index) => {
+          console.log(`[AnnotationStore] Annotation ${index + 1} to delete:`, {
+            id: annotation.id,
+            type: annotation.type,
+            pageNumber: annotation.pageNumber
+          });
+        });
 
         set((state) => {
-          const document = state.documents[currentDocument];
+          const document = state.documents[currentDocumentId];
+          
+          console.log(`[AnnotationStore] Before: Document has ${document.annotations.length} annotations`);
+          
           const newAnnotations = document.annotations.filter(
             (a) => !selectedAnnotations.some((selected) => selected.id === a.id)
           );
@@ -316,11 +339,18 @@ export const useAnnotationStore = create<AnnotationState>()(
           );
           newHistory.push(newAnnotations);
 
+          console.log(`[AnnotationStore] After: Filtered to ${newAnnotations.length} annotations`);
+          
+          // List the IDs that were kept
+          if (newAnnotations.length > 0 && newAnnotations.length < 10) {
+            console.log('[AnnotationStore] Remaining annotation IDs:', newAnnotations.map(a => a.id));
+          }
+
           return {
             selectedAnnotations: [],
             documents: {
               ...state.documents,
-              [currentDocument]: {
+              [currentDocumentId]: {
                 annotations: newAnnotations,
                 history: newHistory,
                 currentIndex: document.currentIndex + 1,
@@ -347,8 +377,8 @@ export const useAnnotationStore = create<AnnotationState>()(
       },
 
       pasteAnnotations: (pageNumber: number) => {
-        const { clipboardAnnotations, currentDocument } = get();
-        if (!clipboardAnnotations.length || !currentDocument) return 0;
+        const { clipboardAnnotations, currentDocumentId } = get();
+        if (!clipboardAnnotations.length || !currentDocumentId) return 0;
 
         // Create new copies with unique IDs and updated page number
         const newAnnotations = clipboardAnnotations.map((annotation) => ({
@@ -363,7 +393,7 @@ export const useAnnotationStore = create<AnnotationState>()(
         }));
 
         set((state) => {
-          const document = state.documents[currentDocument];
+          const document = state.documents[currentDocumentId];
           const updatedAnnotations = [
             ...document.annotations,
             ...newAnnotations,
@@ -377,7 +407,7 @@ export const useAnnotationStore = create<AnnotationState>()(
           return {
             documents: {
               ...state.documents,
-              [currentDocument]: {
+              [currentDocumentId]: {
                 annotations: updatedAnnotations,
                 history: newHistory,
                 currentIndex: document.currentIndex + 1,

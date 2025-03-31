@@ -24,7 +24,6 @@ body {
 .toolbar-fixed {
   width: var(--toolbar-width);
   flex-shrink: 0;
-  height: 100%;
   overflow-y: auto;
 }
 
@@ -86,4 +85,46 @@ body {
   background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
+}
+
+/* Cursor styles for annotation tools */
+[data-current-tool="select"] {
+  cursor: default !important;
+}
+
+[data-current-tool="select"] .annotation-canvas-container canvas {
+  cursor: default !important;
+}
+
+[data-current-tool="select"] .annotation-canvas-container canvas:hover {
+  cursor: default !important;
+}
+
+[data-current-tool="select"] .pdf-content-scrollable {
+  cursor: default !important;
+}
+
+/* Custom cursor for drag tool */
+[data-current-tool="drag"] {
+  cursor: grab !important;
+}
+
+[data-current-tool="drag"] .overflow-auto,
+[data-current-tool="drag"] canvas {
+  cursor: grab !important;
+}
+
+/* When dragging is active */
+.is-dragging,
+.is-dragging * {
+  cursor: grabbing !important;
+}
+
+.cursor-grabbing {
+  cursor: grabbing !important;
+}
+
+/* Override any other cursor styles */
+.allow-panning {
+  cursor: grab !important;
 }

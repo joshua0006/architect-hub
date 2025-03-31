@@ -8,6 +8,7 @@ interface TextInputProps {
   scale: number;
   isSticky?: boolean;
   initialText?: string;
+  dimensions?: { width: number; height: number } | null;
 }
 
 export const TextInput: React.FC<TextInputProps> = ({
@@ -17,6 +18,7 @@ export const TextInput: React.FC<TextInputProps> = ({
   scale,
   isSticky = false,
   initialText = "",
+  dimensions = null,
 }) => {
   const [text, setText] = useState(initialText);
   const inputRef = useRef<HTMLTextAreaElement>(null);

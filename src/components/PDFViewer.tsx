@@ -105,6 +105,9 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   
+  // Add screenWidth state
+  const [screenWidth, setScreenWidth] = useState(window.innerWidth);
+  
   // Add new state for initial loading
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   
@@ -157,7 +160,61 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     return page.getViewport({ scale });
   }, [page, scale]);
 
-  // Function to center the document in the view
+  // Add these refs near the top with other refs
+  const lastScrollPositionRef = useRef<{ x: number; y: number } | null>(null);
+  const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Add this function after the other handler functions
+  const handleScroll = useCallback(() => {
+    if (!scrollContainerRef.current) return;
+    
+    // Clear any existing timeout
+    if (scrollTimeoutRef.current) {
+      clearTimeout(scrollTimeoutRef.current);
+    }
+    
+    // Store current scroll position
+    const scrollContainer = scrollContainerRef.current;
+    lastScrollPositionRef.current = {
+      x: scrollContainer.scrollLeft,
+      y: scrollContainer.scrollTop
+    };
+    
+    // Set a timeout to save the scroll position after scrolling stops
+    scrollTimeoutRef.current = setTimeout(() => {
+      if (scrollContainerRef.current) {
+        const finalScrollPosition = {
+          x: scrollContainerRef.current.scrollLeft,
+          y: scrollContainerRef.current.scrollTop
+        };
+        
+        // Store the final scroll position
+        lastScrollPositionRef.current = finalScrollPosition;
+        
+        // Log the saved position
+        console.log('[PDFViewer] Saved scroll position:', finalScrollPosition);
+      }
+    }, 150); // Wait 150ms after scrolling stops before saving
+  }, []);
+
+  // Add this effect to handle scroll events
+  useEffect(() => {
+    const scrollContainer = scrollContainerRef.current;
+    if (!scrollContainer) return;
+    
+    // Add scroll event listener
+    scrollContainer.addEventListener('scroll', handleScroll);
+    
+    // Cleanup
+    return () => {
+      scrollContainer.removeEventListener('scroll', handleScroll);
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current);
+      }
+    };
+  }, [handleScroll]);
+
+  // Update the scrollToCenterDocument function to respect saved scroll position
   const scrollToCenterDocument = useCallback(() => {
     if (!containerRef.current || !page || isDragging) return;
     
@@ -171,7 +228,15 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
       return;
     }
     
-    // Calculate center position
+    // If we have a saved scroll position, use it instead of centering
+    if (lastScrollPositionRef.current) {
+      console.log('[PDFViewer] Restoring saved scroll position:', lastScrollPositionRef.current);
+      scrollContainer.scrollLeft = lastScrollPositionRef.current.x;
+      scrollContainer.scrollTop = lastScrollPositionRef.current.y;
+      return;
+    }
+    
+    // Calculate center position if no saved position exists
     const viewportWidth = scrollContainer.clientWidth;
     const viewportHeight = scrollContainer.clientHeight;
     const contentWidth = viewport.width;
@@ -330,7 +395,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     setCurrentPage(nextPage);
   }, [currentPage, pdf?.numPages, isExporting, pageChangeInProgress, isRendering]);
 
-  // Add this at the top, right after refs
+  // Add these refs near the top with other refs
   let hasLoggedRenderSkip = false;
 
   // Update the renderPdfPage function to implement caching
@@ -366,8 +431,14 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
         return;
       }
 
-      // Generate a cache key based on fileId and scale
-      const cacheKey = `${fileId}_${scale.toFixed(2)}`;
+      // Calculate quality multiplier based on scale
+      // Higher zoom levels use higher quality rendering for better text clarity
+      const qualityMultiplier = scale > 2.5 ? 2.0 : 
+                               scale > 1.5 ? 1.5 : 
+                               scale > 1.0 ? 1.2 : 1.0;
+      
+      // Generate a cache key based on fileId, scale, and quality multiplier
+      const cacheKey = `${fileId}_${scale.toFixed(2)}_${qualityMultiplier.toFixed(1)}`;
       
       // Check if we have this page cached
       if (pageCanvasCache.has(cacheKey)) {
@@ -439,7 +510,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
       setIsRendering(true);
       
       // Log only when starting a new render (not for retries)
-      console.log(`[PDFViewer] Rendering page ${currentPage}`);
+      console.log(`[PDFViewer] Rendering page ${currentPage} with quality multiplier ${qualityMultiplier}`);
 
       // Get the PDF page
       pdf.getPage(currentPage).then(
@@ -458,18 +529,31 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
             
             // For initial rendering, prioritize fitting to width
             // while maintaining aspect ratio
-            const scale = widthScale;
+            const displayScale = scale;
             
-            viewport = page.getViewport({ scale });
+            // Apply quality multiplier to the viewport scale for better text quality
+            // but render at the display scale for proper sizing
+            viewport = page.getViewport({ scale: displayScale * qualityMultiplier });
 
-            // Set canvas dimensions to match viewport exactly
+            // Set canvas dimensions to match the high-quality viewport
             canvas.height = viewport.height;
             canvas.width = viewport.width;
+            
+            // Scale down the display canvas size to match the display scale
+            // This maintains the same visual size while rendering at higher resolution
+            canvas.style.width = `${viewport.width / qualityMultiplier}px`;
+            canvas.style.height = `${viewport.height / qualityMultiplier}px`;
+            
+            // Enable high-quality image rendering on the context
+            (ctx as any).imageSmoothingEnabled = true;
+            (ctx as any).imageSmoothingQuality = 'high';
 
-            // Define render parameters
+            // Define render parameters with enhanced text rendering
             const renderContext = {
               canvasContext: ctx,
               viewport: viewport,
+              // Use print intent for better text quality at high zoom levels
+              intent: scale > 1.5 ? "print" : "display"
             };
 
             // Start the render task
@@ -480,7 +564,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
               () => {
                 // Cache the rendered page
                 const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-                const cacheKey = `${fileId}_${scale.toFixed(2)}`;
                 
                 // Initialize cache maps if needed
                 if (!pageCanvasCache.has(cacheKey)) {
@@ -563,48 +646,55 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
                 setIsRendering(false);
                 setRenderComplete(true);
                 
-                // Center the document after a brief delay to ensure UI is updated
+                // Center the document
                 setTimeout(() => {
                   scrollToCenterDocument();
                 }, 50);
+                
               },
-              (error: Error) => {
-                // Handle render failure
-                console.error(`[PDFViewer] Error rendering page ${currentPage}:`, error);
-                
-                // Reset all state flags on error
+              (error: Error | any) => {
+                console.error('[PDFViewer] Error rendering PDF page:', error);
                 renderLockRef.current = false;
-                setIsRendering(false);
+                setRenderError(error instanceof Error ? error : new Error(String(error)));
                 setPageChangeInProgress(false);
-                
-                // Clear any previous timeout
-                if (renderTimeoutRef.current) {
-                  clearTimeout(renderTimeoutRef.current);
-                  renderTimeoutRef.current = null;
-                }
+                setIsRendering(false);
               }
             );
-          } catch (err) {
-            console.error('[PDFViewer] Error setting up render:', err);
+          } catch (error) {
+            console.error('[PDFViewer] Error during page setup:', error);
             renderLockRef.current = false;
-            setIsRendering(false);
+            setRenderError(error instanceof Error ? error : new Error(String(error)));
             setPageChangeInProgress(false);
+            setIsRendering(false);
           }
         },
         (error) => {
-          console.error(`[PDFViewer] Failed to get page ${currentPage}:`, error);
+          console.error('[PDFViewer] Error getting PDF page:', error);
           renderLockRef.current = false;
-          setIsRendering(false);
+          setRenderError(error instanceof Error ? error : new Error(String(error)));
           setPageChangeInProgress(false);
+          setIsRendering(false);
         }
       );
-    } catch (err) {
-      console.error('[PDFViewer] Exception during render:', err);
+    } catch (error) {
+      console.error('[PDFViewer] Uncaught error in renderPdfPage:', error);
       renderLockRef.current = false;
-      setIsRendering(false);
+      setRenderError(error instanceof Error ? error : new Error(String(error)));
       setPageChangeInProgress(false);
+      setIsRendering(false);
     }
-  }, [pdf, currentPage, fileId, pageChangeInProgress, setIsRendering, annotationStore, setCurrentAnnotations, documentId, scrollToCenterDocument, setRenderComplete, scale]);
+  }, [
+    pdf, 
+    currentPage, 
+    scale, 
+    canvasRef, 
+    containerRef, 
+    fileId, 
+    documentId, 
+    annotationStore, 
+    pageChangeInProgress, 
+    scrollToCenterDocument
+  ]);
 
   // Add an effect to clear cache when file changes
   useEffect(() => {
@@ -1037,7 +1127,8 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     if (!container) return;
 
     const cursorMap: { [key: string]: string } = {
-      select: "default",
+      select: "default", // Always use default cursor for select
+      drag: "grab", // Use grab cursor for drag tool
       hand: "grab",
       freehand: "crosshair",
       line: "crosshair",
@@ -1294,12 +1385,18 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     ctx.fillStyle = "#FFFFFF";
     ctx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
     
-    // Render PDF
+    // Render PDF with improved text quality
     console.log(`[PDFViewer] Rendering PDF content to export canvas (scale: ${scale * qualityScale})`);
+    
+    // Enable high-quality image rendering on the context
+    (ctx as any).imageSmoothingEnabled = true;
+    (ctx as any).imageSmoothingQuality = 'high';
+    
     const renderTask = targetPage.render({
       canvasContext: ctx,
       viewport: viewport,
-      intent: "display"
+      // Use print intent for better text quality in exports
+      intent: "print"
     });
     
     // Wait for PDF rendering to complete
@@ -1963,13 +2060,13 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     if (!scrollContainerRef.current) return;
     
-    // Only enable dragging when using select or hand tool
+    // Only enable dragging when using drag or hand tool (not select anymore)
     // Also check if content is larger than container (requires panning)
     const hasOverflow = page && viewport && 
       (viewport.width > scrollContainerRef.current.clientWidth || 
        viewport.height > scrollContainerRef.current.clientHeight);
        
-    if ((currentTool === 'select' || currentTool === 'hand') && hasOverflow) {
+    if ((currentTool === 'drag' || currentTool === 'hand') && hasOverflow) {
       setIsDragging(true);
       
       // Store initial mouse position and scroll position separately
@@ -2037,7 +2134,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
         if (canvasRef.current) {
           canvasRef.current.classList.add(grabCursorClassName);
         }
-      } else if ((currentTool === 'hand' || currentTool === 'select') && hasOverflow) {
+      } else if ((currentTool === 'hand' || currentTool === 'drag') && hasOverflow) {
         scrollContainer.classList.remove(grabCursorClassName);
         scrollContainer.style.cursor = 'grab';
         if (canvasRef.current) {
@@ -2047,7 +2144,8 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
       } else {
         scrollContainer.classList.remove(grabCursorClassName);
         const cursorMap: { [key: string]: string } = {
-          select: hasOverflow ? "grab" : "default",
+          select: "default", // Always use default cursor for select tool
+          drag: "grab", // Use grab for drag tool
           hand: "grab",
           freehand: "crosshair",
           line: "crosshair",
@@ -2108,7 +2206,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
       }
       
       // Update cursor based on tool and overflow state
-      if ((currentTool === 'hand' || currentTool === 'select') && hasOverflow) {
+      if ((currentTool === 'hand' || currentTool === 'drag') && hasOverflow) {
         // Use grab cursor when hovering over pannable content
         if (containerRef.current) {
           containerRef.current.style.cursor = 'grab';
@@ -2122,7 +2220,8 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
       } else {
         // Reset to appropriate tool cursor
         const cursorMap: { [key: string]: string } = {
-          select: hasOverflow ? "grab" : "default",
+          select: "default", // Always use default cursor for select tool
+          drag: "grab", // Use grab for drag tool
           hand: "grab",
           freehand: "crosshair",
           line: "crosshair",
@@ -2175,10 +2274,18 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
           cursor: ${BLUE_GRAB_CURSOR} 16 16, grab;
         }
         
-        /* Only show blue grab cursor when content is pannable AND using select/hand tool */
-        [data-has-overflow="true"][data-current-tool="select"] .overflow-auto,
+        /* Ensure select tool always uses default cursor regardless of other rules */
+        [data-current-tool="select"] .overflow-auto,
+        [data-current-tool="select"] canvas,
+        [data-current-tool="select"] .pdf-content-scrollable,
+        [data-current-tool="select"] {
+          cursor: default !important;
+        }
+        
+        /* Only show blue grab cursor when content is pannable AND using drag/hand tool */
+        [data-has-overflow="true"][data-current-tool="drag"] .overflow-auto,
         [data-has-overflow="true"][data-current-tool="hand"] .overflow-auto,
-        [data-has-overflow="true"][data-current-tool="select"] .overflow-auto canvas,
+        [data-has-overflow="true"][data-current-tool="drag"] .overflow-auto canvas,
         [data-has-overflow="true"][data-current-tool="hand"] .overflow-auto canvas,
         .allow-panning {
           cursor: ${BLUE_GRAB_CURSOR} 16 16, grab !important;
@@ -2265,8 +2372,8 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
       // Update data attribute for current tool
       containerRef.current.dataset.currentTool = currentTool;
       
-      // Only add cursor classes if using select or hand tool AND content overflows
-      const allowPanning = hasOverflow && (currentTool === 'select' || currentTool === 'hand');
+      // Only add cursor classes if using drag or hand tool AND content overflows
+      const allowPanning = hasOverflow && (currentTool === 'drag' || currentTool === 'hand');
       
       // Set cursor class based on conditions
       if (allowPanning) {
@@ -2287,8 +2394,31 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     };
   }, [page, viewport, currentTool]);
 
+  // Add useEffect to update data-current-tool attribute on the container
+  useEffect(() => {
+    if (containerRef.current) {
+      containerRef.current.setAttribute('data-current-tool', currentTool);
+    }
+  }, [currentTool]);
+  
+  // Add effect to handle window resize
+  useEffect(() => {
+    const handleResize = () => {
+      setScreenWidth(window.innerWidth);
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+  
+  // Make sure we explicitly return a JSX element to satisfy the React.FC type
   return (
-    <div className="relative flex flex-col h-full">
+    <div 
+      className="relative flex flex-col h-full"
+      ref={containerRef}
+      data-current-tool={currentTool}
+      data-cursor-state={isDragging ? "grabbing" : currentTool === "drag" ? "grab" : currentTool}
+    >
       {isShortcutGuideOpen && (
         <KeyboardShortcutGuide
           onClose={() => setIsShortcutGuideOpen(false)}
@@ -2337,6 +2467,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
+          onScroll={handleScroll}
         >
           {/* Initial Loading Animation - before PDF processing has started */}
           {isInitialLoading && !hasStartedLoading && !renderError && (
@@ -2438,7 +2569,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
             className={`pdf-viewer-container mx-auto ${isDragging ? grabCursorClassName : ""}`}
             style={{
               width:  '100%',
-              height: '45vh'  ,
+              height: screenWidth < 1600 ? '40vh' : '45vh',
               position: 'relative',
               maxWidth: '100%',
               marginBottom: '20px',
@@ -2448,7 +2579,8 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
               cursor: isDragging ? 'grabbing' : 
                 (((viewport?.width || 0) > (scrollContainerRef.current?.clientWidth || 0) || 
                 (viewport?.height || 0) > (scrollContainerRef.current?.clientHeight || 0)) && 
-                (currentTool === 'select' || currentTool === 'hand')) ? 'grab' : undefined
+                (currentTool === 'drag' || currentTool === 'hand')) ? 'grab' : 
+                currentTool === 'select' ? 'default' : undefined
             }}
           >
             {page && (
