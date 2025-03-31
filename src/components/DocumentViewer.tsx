@@ -1418,7 +1418,8 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
         }`}
       >
         <div
-          className="flex items-center justify-between p-4 hover:bg-gray-50"
+          className="flex items-center justify-between p-4 hover:bg-gray-50 cursor-pointer"
+          onClick={() => setIsExpanded(!isExpanded)}
         >
           <div className="flex items-center space-x-4">
             {isFullscreen && (
@@ -1688,25 +1689,18 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
         )}
       </div>
 
-      {/* Document Content */}
+      {/* Document Content - Ensure it's scrollable in single file view */}
       <div 
-        className={`${isFullscreen ? 'flex-1' : 'flex-1 bg-gray-100 p-4 overflow-auto'}`}
-        onDragOver={(e) => {
-          // Prevent default to allow drop but don't set isDragging 
-          // when we're in the PDF viewer area or fullscreen
-          e.preventDefault();
-        }}
-        onDrop={(e) => {
-          // Prevent default behavior to avoid browser opening the file
-          e.preventDefault();
-        }}
+        className={`${isFullscreen ? 'flex-1' : 'flex-1 bg-gray-100 p-4'}`}
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={(e) => e.preventDefault()}
       >
         {document.type === "pdf" ? (
           <div className={`flex h-full ${isFullscreen ? 'gap-0' : 'gap-4'}`}>
             <Toolbar currentFolder={enhancedFolderInfo} />
             <div
               className={`relative bg-white ${isFullscreen ? '' : 'rounded-lg shadow-sm p-4'} flex-1 document-content overflow-auto`}
-              style={{ height: "100%" }}
+              style={{ height: isFullscreen ? "100%" : "calc(100vh - 200px)", maxHeight: "100%" }}
               onDragOver={(e) => e.preventDefault()}
               onDrop={(e) => e.preventDefault()}
             >
@@ -1714,7 +1708,8 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
             </div>
           </div>
         ) : isImage(document.name, document.metadata?.contentType) ? (
-          <div className="h-full flex items-center justify-center bg-white rounded-lg shadow-sm p-4 document-content overflow-auto">
+          <div className="h-full flex items-center justify-center bg-white rounded-lg shadow-sm p-4 document-content overflow-auto" 
+               style={{ maxHeight: isFullscreen ? "100%" : "calc(100vh - 200px)" }}>
             <img 
               src={document.url} 
               alt={document.name} 
@@ -1723,7 +1718,8 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
             />
           </div>
         ) : isVideo(document.name, document.metadata?.contentType) ? (
-          <div className="h-full flex items-center justify-center bg-white rounded-lg shadow-sm p-4 document-content overflow-auto">
+          <div className="h-full flex items-center justify-center bg-white rounded-lg shadow-sm p-4 document-content overflow-auto"
+               style={{ maxHeight: isFullscreen ? "100%" : "calc(100vh - 200px)" }}>
             <video 
               src={document.url} 
               controls 
@@ -1734,7 +1730,8 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
             </video>
           </div>
         ) : isAudio(document.name, document.metadata?.contentType) ? (
-          <div className="h-full flex items-center justify-center bg-white rounded-lg shadow-sm p-4 document-content overflow-auto">
+          <div className="h-full flex items-center justify-center bg-white rounded-lg shadow-sm p-4 document-content overflow-auto"
+               style={{ maxHeight: isFullscreen ? "100%" : "calc(100vh - 200px)" }}>
             <div className="flex flex-col items-center">
               <p className="mb-2 text-gray-700">{document.name}</p>
               <audio 
@@ -1748,7 +1745,8 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
             </div>
           </div>
         ) : (
-          <div className="h-full flex items-center justify-center bg-white rounded-lg shadow-sm document-content overflow-auto">
+          <div className="h-full flex items-center justify-center bg-white rounded-lg shadow-sm document-content overflow-auto"
+               style={{ maxHeight: isFullscreen ? "100%" : "calc(100vh - 200px)" }}>
             <div className="text-center">
               <p className="text-gray-500 mb-4">
                 This file type cannot be previewed directly

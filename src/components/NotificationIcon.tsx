@@ -21,8 +21,7 @@ import { useAuth } from '../contexts/AuthContext';
 // Add a custom event for document refreshing
 export const NOTIFICATION_DOCUMENT_UPDATE_EVENT = 'notification-document-update';
 
-// Global flag to ensure only one notification subscription is active
-let GLOBAL_SUBSCRIPTION_ACTIVE = false;
+let activeSubscription = null;
 
 export const NotificationIcon: React.FC = () => {
   const [notifications, setNotifications] = useState<Notification[]>([]);
@@ -32,10 +31,6 @@ export const NotificationIcon: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const notificationRef = useRef<HTMLDivElement>(null);
-  const lastNotificationUpdate = useRef<number>(0);
-  const lastSubscriptionUpdate = useRef<number>(0);
-  const hasActiveSubscription = useRef<boolean>(false);
-  const setupInProgress = useRef<boolean>(false);
   const unsubscribeRef = useRef<(() => void) | null>(null);
   const navigate = useNavigate();
   const { showToast } = useToast();
@@ -70,105 +65,56 @@ export const NotificationIcon: React.FC = () => {
   }, [notifications]);
   
   // Fetch notifications manually - memoized for stability
-  const fetchNotifications = useCallback(async (forceFetch = false, skipLoadingState = false) => {
+  const fetchInitialNotifications = useCallback(async () => {
     if (!user) return;
     
     try {
-      // Increase throttle time from 30s to 2 minutes
-      const now = Date.now();
-      if (!forceFetch && now - lastNotificationUpdate.current < 120000) {
-        console.log('[Notification Bell] Skipping fetch, too soon after last update');
-        return;
-      }
-      
-      if (!skipLoadingState) {
-        setIsLoading(true);
-      }
+      setIsLoading(true);
       setError(null);
-      console.log(`[Notification Bell] Manually fetching notifications for user ${user.id}`);
+      console.log(`[Notification Bell] Fetching initial notifications for user ${user.id}`);
       
-      // Force direct fetch from Firestore instead of relying on cache
       const recentNotifications = await getRecentNotifications(user.id, 20);
-      console.log(`[Notification Bell] Retrieved ${recentNotifications.length} notifications manually`);
+      console.log(`[Notification Bell] Retrieved ${recentNotifications.length} notifications`);
       
       if (recentNotifications.length > 0) {
-        // Update with deduplication
         setNotifications(prev => deduplicateNotifications(recentNotifications));
         const newUnreadCount = recentNotifications.filter(n => !n.read).length;
         setUnreadCount(newUnreadCount);
-        console.log(`[Notification Bell] Updated unread count to ${newUnreadCount}`);
-      } else {
-        console.log('[Notification Bell] No notifications found for this user');
       }
-      
-      lastNotificationUpdate.current = now;
     } catch (error) {
-      console.error('[Notification Bell] Error fetching notifications:', error);
+      console.error('[Notification Bell] Error fetching initial notifications:', error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
       setError(`Failed to load notifications: ${errorMessage}`);
       showToast('Could not load notifications', 'error');
     } finally {
-      if (!skipLoadingState) {
-        setIsLoading(false);
-      }
+      setIsLoading(false);
     }
   }, [user, showToast, deduplicateNotifications]);
   
   // Throttled update function for subscription updates - increased from 30s to 2 minutes
-  const updateNotificationsThrottled = useCallback((newNotifications: Notification[]) => {
-    const now = Date.now();
-    
-    // For file upload notifications, decrease throttle time to make them appear faster
-    const fileUploadNotifications = newNotifications.filter(n => n.iconType === 'file-upload' && !n.read);
-    const hasFileUploads = fileUploadNotifications.length > 0;
-    
-    // Standard throttle time is 2 minutes, but only 10 seconds for file uploads
-    const throttleTime = hasFileUploads ? 10000 : 120000;
-    
-    // Increase throttle time from 30s to 2 minutes for subscription updates
-    if (now - lastSubscriptionUpdate.current < throttleTime) {
-      console.log(`[Notification Bell] Throttling subscription update, too frequent (${throttleTime}ms throttle)`);
-      return;
-    }
-    
+  const updateNotificationsFromFirebase = useCallback((newNotifications: Notification[]) => {
     if (newNotifications.length === 0) return;
     
-    console.log(`[Notification Bell] Received ${newNotifications.length} notifications via subscription`);
+    console.log(`[Notification Bell] Received ${newNotifications.length} notifications via real-time update`);
     
-    // Check if notifications array has actually changed to avoid unnecessary renders
-    const currentIds = newNotifications.map(n => n.id).sort().join(',');
-    const existingIds = notifications.map(n => n.id).sort().join(',');
-    
-    if (currentIds === existingIds) {
-      console.log('[Notification Bell] Skipping update, no actual changes in notifications');
-      return;
-    }
-    
-    // Single state update to reduce renders
     setNotifications(prev => {
       const updated = deduplicateNotifications(newNotifications);
       const newUnreadCount = updated.filter(n => !n.read).length;
       
-      // Only update unread count if it changed
       if (newUnreadCount !== unreadCount) {
-        // Use setTimeout to separate state updates
         setTimeout(() => {
           setUnreadCount(newUnreadCount);
           
-          // Only show toast for new notifications if there are more than before
           if (newUnreadCount > unreadCount) {
-            // Check for file upload notifications specifically
             const fileUploadNotifications = updated.filter(
               n => n.iconType === 'file-upload' && !n.read
             );
             
-            // Check for mention notifications specifically
             const mentionNotifications = updated.filter(
               n => n.iconType === 'comment-mention' && !n.read
             );
             
             if (fileUploadNotifications.length > 0) {
-              // Show a toast for file uploads
               const latestUpload = fileUploadNotifications.sort((a, b) => {
                 const timeA = a.createdAt?.toMillis?.() || new Date(a.createdAtISO || Date.now()).getTime();
                 const timeB = b.createdAt?.toMillis?.() || new Date(b.createdAtISO || Date.now()).getTime();
@@ -192,89 +138,41 @@ export const NotificationIcon: React.FC = () => {
       
       return updated;
     });
-    
-    lastSubscriptionUpdate.current = now;
-    lastNotificationUpdate.current = now;
-  }, [notifications, unreadCount, deduplicateNotifications, showToast]);
+  }, [unreadCount, deduplicateNotifications, showToast]);
   
   // Setup notification subscription only once
-  useEffect(() => {
+  const setupNotificationSubscription = useCallback(() => {
     if (!user) return;
     
-    // Prevent multiple setups for the same user
-    if (setupInProgress.current) {
-      console.log('[Notification Bell] Setup already in progress, skipping');
-      return;
+    // Clean up any existing subscription first
+    if (unsubscribeRef.current) {
+      unsubscribeRef.current();
+      unsubscribeRef.current = null;
     }
     
-    // Only set up subscription if not already active
-    if (hasActiveSubscription.current || GLOBAL_SUBSCRIPTION_ACTIVE) {
-      console.log('[Notification Bell] Subscription already active, skipping setup');
-      return;
-    }
+    // Set up new subscription
+    console.log(`[Notification Bell] Setting up real-time notification subscription for user ${user.id}`);
+    const unsubscribe = subscribeToNotifications(user.id, updateNotificationsFromFirebase);
+    unsubscribeRef.current = unsubscribe;
     
-    // Prevent multiple components from setting up subscriptions
-    GLOBAL_SUBSCRIPTION_ACTIVE = true;
-    setupInProgress.current = true;
-    hasActiveSubscription.current = false;
-    
-    console.log(`[Notification Bell] Setting up notification system for user: ${user.id}`);
-    
-    // Reset notification system first
-    resetNotificationSystem().then(() => {
-      // Fetch initial notifications
-      fetchNotifications(true).then(() => {
-        // Set up subscription only after initial fetch completes
-        if (!hasActiveSubscription.current) {
-          console.log('[Notification Bell] Creating new subscription');
-          
-          // Set up real-time updates with throttled callback
-          const unsubscribe = subscribeToNotifications(user.id, updateNotificationsThrottled);
-          
-          // Store the unsubscribe function
-          unsubscribeRef.current = unsubscribe;
-          hasActiveSubscription.current = true;
-          setupInProgress.current = false;
-        }
-      });
-    });
-    
-    // Clean up function
     return () => {
-      console.log('[Notification Bell] Cleaning up notification subscription');
-      
       if (unsubscribeRef.current) {
-        // Call the unsubscribe function from Firebase
+        console.log('[Notification Bell] Cleaning up notification subscription');
         unsubscribeRef.current();
         unsubscribeRef.current = null;
       }
-      
-      hasActiveSubscription.current = false;
-      GLOBAL_SUBSCRIPTION_ACTIVE = false;
-      setupInProgress.current = false;
     };
-  }, [user, fetchNotifications, updateNotificationsThrottled]);
+  }, [user, updateNotificationsFromFirebase]);
   
-  // Setup a less frequent refresh mechanism - increased from 10 minutes to 30 minutes
   useEffect(() => {
     if (!user) return;
     
-    // Periodic refresh - increased from 10 to 30 minutes
-    const intervalId = setInterval(() => {
-      const now = Date.now();
-      const timeSinceLastUpdate = now - lastNotificationUpdate.current;
-      
-      // Only refresh if no update in the last 30 minutes
-      if (timeSinceLastUpdate > 1800000) {
-        console.log('[Notification Bell] Performing periodic refresh (30-minute interval)');
-        fetchNotifications();
-      }
-    }, 1800000); // Check every 30 minutes
+    // Fetch initial data and set up subscription
+    fetchInitialNotifications();
+    const cleanup = setupNotificationSubscription();
     
-    return () => {
-      clearInterval(intervalId);
-    };
-  }, [user, fetchNotifications]);
+    return cleanup;
+  }, [user, fetchInitialNotifications, setupNotificationSubscription]);
   
   // Close notification panel when clicking outside
   useEffect(() => {
@@ -663,7 +561,7 @@ export const NotificationIcon: React.FC = () => {
         onClick={() => {
           setShowNotifications(!showNotifications);
           if (!showNotifications) {
-            fetchNotifications();
+            fetchInitialNotifications();
           }
         }}
         className="relative p-2 rounded-full transition-colors hover:bg-gray-100"
@@ -700,7 +598,7 @@ export const NotificationIcon: React.FC = () => {
                         setIsLoading(true);
                         await handleMarkAllAsRead();
                         // Refresh list after marking all as read without changing loading state
-                        await fetchNotifications(true, true);
+                        await fetchInitialNotifications();
                       } catch (error) {
                         console.error('Error marking all as read:', error);
                       } finally {
@@ -724,7 +622,7 @@ export const NotificationIcon: React.FC = () => {
                         setIsDeleting(true);
                         await handleDeleteRead();
                         // Refresh list after deleting read notifications
-                        await fetchNotifications(true, true);
+                        await fetchInitialNotifications();
                       } catch (error) {
                         console.error('Error deleting read notifications:', error);
                       } finally {
@@ -759,7 +657,7 @@ export const NotificationIcon: React.FC = () => {
                     <span className="mr-1">⚠️</span> {error}
                   </p>
                   <button 
-                    onClick={() => fetchNotifications(true)}
+                    onClick={() => fetchInitialNotifications()}
                     className="mt-1 text-xs text-red-700 underline"
                   >
                     Try again
@@ -776,7 +674,7 @@ export const NotificationIcon: React.FC = () => {
                 <div className="p-4 text-center text-gray-500">
                   <p>No notifications</p>
                   <button 
-                    onClick={() => fetchNotifications(true)} 
+                    onClick={() => fetchInitialNotifications()} 
                     className="mt-2 text-xs text-blue-500 hover:text-blue-700"
                   >
                     Refresh
@@ -813,7 +711,7 @@ export const NotificationIcon: React.FC = () => {
                             onClick={async (e) => {
                               await handleDeleteNotification(e, notification.id);
                               // Refresh notifications after deleting
-                              await fetchNotifications();
+                              await fetchInitialNotifications();
                             }}
                             className="absolute top-2 right-2 p-1 rounded-full text-gray-400 hover:text-red-600 hover:bg-gray-100 opacity-0 group-hover:opacity-100 transition-opacity"
                             aria-label="Delete notification"
