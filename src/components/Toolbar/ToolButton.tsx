@@ -15,6 +15,7 @@ interface ToolButtonProps {
   currentFolder?: Folder | EnhancedFolder | null;
 }
 
+
 // Track last event time globally to prevent multiple rapid dispatches
 let lastEventTime = 0;
 const EVENT_COOLDOWN = 300; // ms
