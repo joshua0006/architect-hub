@@ -239,6 +239,12 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
     // Prevent default behavior to avoid selections
     e.preventDefault();
     
+    // If drag tool is active, don't do any annotation operations
+    // Let the PDFViewer component handle the panning
+    if (currentTool === "drag") {
+      return;
+    }
+    
     const point = getCanvasPoint(e);
     
     // Handle text and sticky note tools differently
@@ -370,6 +376,12 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
     
     // Update cursor position for tool indicators
     setCursorPosition(point);
+    
+    // If drag tool is active, don't perform annotation operations
+    // Let the PDFViewer handle the panning
+    if (currentTool === "drag") {
+      return;
+    }
     
     // Handle text tool dragging
     if (isTextDragging && textDragStart) {
@@ -509,7 +521,21 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
       const isOverSelected = selectedAnnotations.some((annotation) =>
         isPointInAnnotation(point, annotation)
       );
+      
+      // Set the cursor based on hover state - use move only when over annotations
       canvas.style.cursor = isOverSelected ? "move" : "default";
+      
+      // If not over selected annotations, check if hovering over any annotation
+      if (!isOverSelected) {
+        const hoverAnnotation = documentState.annotations.find(
+          (annotation) =>
+            annotation.pageNumber === pageNumber &&
+            isPointInAnnotation(point, annotation)
+        );
+        
+        // Use move cursor if hovering over any annotation, otherwise default cursor
+        canvas.style.cursor = hoverAnnotation ? "move" : "default";
+      }
     } else if (isDrawing) {
       if (currentTool === "freehand") {
         // Use the dedicated freehand drawing handler
@@ -538,7 +564,7 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
       );
 
       if (hoverSelected) {
-        canvas.style.cursor = "move";
+        canvas.style.cursor = "move"; // Keep move cursor for draggable annotations
         return;
       }
 
@@ -549,7 +575,7 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
           isPointInAnnotation(point, annotation)
       );
 
-      canvas.style.cursor = hoverAnnotation ? "move" : "default";
+      canvas.style.cursor = hoverAnnotation ? "move" : "default"; // Use default cursor when not over any annotation
     }
   };
 
@@ -1919,12 +1945,14 @@ const getCursor = (
   switch (tool) {
     case "select":
       return "default";
+    case "drag":
+      return "grab";
     case "freehand":
       return "crosshair";
     case "text":
       return "text";
     case "stickyNote":
-      return "cell"; // Cell cursor looks like a plus in a box, good for sticky notes
+      return "cell";
     default:
       return "crosshair";
   }

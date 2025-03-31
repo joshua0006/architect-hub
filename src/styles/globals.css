@@ -1,0 +1,13 @@
+/* Add styles for cursors */
+[data-current-tool="select"] {
+  cursor: default !important;
+}
+
+[data-current-tool="drag"] {
+  cursor: grab !important;
+}
+
+[data-current-tool="drag"].is-dragging,
+[data-current-tool="drag"].is-dragging * {
+  cursor: grabbing !important;
+} 

@@ -1037,7 +1037,8 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     if (!container) return;
 
     const cursorMap: { [key: string]: string } = {
-      select: "default",
+      select: "default", // Always use default cursor for select
+      drag: "grab", // Use grab cursor for drag tool
       hand: "grab",
       freehand: "crosshair",
       line: "crosshair",
@@ -1963,13 +1964,13 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     if (!scrollContainerRef.current) return;
     
-    // Only enable dragging when using select or hand tool
+    // Only enable dragging when using drag or hand tool (not select anymore)
     // Also check if content is larger than container (requires panning)
     const hasOverflow = page && viewport && 
       (viewport.width > scrollContainerRef.current.clientWidth || 
        viewport.height > scrollContainerRef.current.clientHeight);
        
-    if ((currentTool === 'select' || currentTool === 'hand') && hasOverflow) {
+    if ((currentTool === 'drag' || currentTool === 'hand') && hasOverflow) {
       setIsDragging(true);
       
       // Store initial mouse position and scroll position separately
@@ -2037,7 +2038,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
         if (canvasRef.current) {
           canvasRef.current.classList.add(grabCursorClassName);
         }
-      } else if ((currentTool === 'hand' || currentTool === 'select') && hasOverflow) {
+      } else if ((currentTool === 'hand' || currentTool === 'drag') && hasOverflow) {
         scrollContainer.classList.remove(grabCursorClassName);
         scrollContainer.style.cursor = 'grab';
         if (canvasRef.current) {
@@ -2047,7 +2048,8 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
       } else {
         scrollContainer.classList.remove(grabCursorClassName);
         const cursorMap: { [key: string]: string } = {
-          select: hasOverflow ? "grab" : "default",
+          select: "default", // Always use default cursor for select tool
+          drag: "grab", // Use grab for drag tool
           hand: "grab",
           freehand: "crosshair",
           line: "crosshair",
@@ -2108,7 +2110,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
       }
       
       // Update cursor based on tool and overflow state
-      if ((currentTool === 'hand' || currentTool === 'select') && hasOverflow) {
+      if ((currentTool === 'hand' || currentTool === 'drag') && hasOverflow) {
         // Use grab cursor when hovering over pannable content
         if (containerRef.current) {
           containerRef.current.style.cursor = 'grab';
@@ -2122,7 +2124,8 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
       } else {
         // Reset to appropriate tool cursor
         const cursorMap: { [key: string]: string } = {
-          select: hasOverflow ? "grab" : "default",
+          select: "default", // Always use default cursor for select tool
+          drag: "grab", // Use grab for drag tool
           hand: "grab",
           freehand: "crosshair",
           line: "crosshair",
@@ -2175,10 +2178,18 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
           cursor: ${BLUE_GRAB_CURSOR} 16 16, grab;
         }
         
-        /* Only show blue grab cursor when content is pannable AND using select/hand tool */
-        [data-has-overflow="true"][data-current-tool="select"] .overflow-auto,
+        /* Ensure select tool always uses default cursor regardless of other rules */
+        [data-current-tool="select"] .overflow-auto,
+        [data-current-tool="select"] canvas,
+        [data-current-tool="select"] .pdf-content-scrollable,
+        [data-current-tool="select"] {
+          cursor: default !important;
+        }
+        
+        /* Only show blue grab cursor when content is pannable AND using drag/hand tool */
+        [data-has-overflow="true"][data-current-tool="drag"] .overflow-auto,
         [data-has-overflow="true"][data-current-tool="hand"] .overflow-auto,
-        [data-has-overflow="true"][data-current-tool="select"] .overflow-auto canvas,
+        [data-has-overflow="true"][data-current-tool="drag"] .overflow-auto canvas,
         [data-has-overflow="true"][data-current-tool="hand"] .overflow-auto canvas,
         .allow-panning {
           cursor: ${BLUE_GRAB_CURSOR} 16 16, grab !important;
@@ -2265,8 +2276,8 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
       // Update data attribute for current tool
       containerRef.current.dataset.currentTool = currentTool;
       
-      // Only add cursor classes if using select or hand tool AND content overflows
-      const allowPanning = hasOverflow && (currentTool === 'select' || currentTool === 'hand');
+      // Only add cursor classes if using drag or hand tool AND content overflows
+      const allowPanning = hasOverflow && (currentTool === 'drag' || currentTool === 'hand');
       
       // Set cursor class based on conditions
       if (allowPanning) {
@@ -2287,8 +2298,21 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     };
   }, [page, viewport, currentTool]);
 
+  // Add useEffect to update data-current-tool attribute on the container
+  useEffect(() => {
+    if (containerRef.current) {
+      containerRef.current.setAttribute('data-current-tool', currentTool);
+    }
+  }, [currentTool]);
+  
+  // Make sure we explicitly return a JSX element to satisfy the React.FC type
   return (
-    <div className="relative flex flex-col h-full">
+    <div 
+      className="relative flex flex-col h-full"
+      ref={containerRef}
+      data-current-tool={currentTool}
+      data-cursor-state={isDragging ? "grabbing" : currentTool === "drag" ? "grab" : currentTool}
+    >
       {isShortcutGuideOpen && (
         <KeyboardShortcutGuide
           onClose={() => setIsShortcutGuideOpen(false)}
@@ -2448,7 +2472,8 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
               cursor: isDragging ? 'grabbing' : 
                 (((viewport?.width || 0) > (scrollContainerRef.current?.clientWidth || 0) || 
                 (viewport?.height || 0) > (scrollContainerRef.current?.clientHeight || 0)) && 
-                (currentTool === 'select' || currentTool === 'hand')) ? 'grab' : undefined
+                (currentTool === 'drag' || currentTool === 'hand')) ? 'grab' : 
+                currentTool === 'select' ? 'default' : undefined
             }}
           >
             {page && (

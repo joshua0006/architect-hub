@@ -78,6 +78,9 @@ export const useKeyboardShortcuts = (
       s: {
         action: () => setCurrentTool("select"),
       },
+      d: {
+        action: () => setCurrentTool("drag"),
+      },
       p: {
         action: () => setCurrentTool("freehand"),
       },

@@ -19,8 +19,10 @@ import {
   CheckCircle2,
   XCircle,
   History,
-  Trash2
+  Trash2,
+  GripHorizontal
 } from "lucide-react";
+import { AnnotationType } from "../types/annotation";
 
 export const COLORS = [
   "#FF0000", // Red
@@ -40,6 +42,7 @@ export const OPACITY_LEVELS = [0.25, 0.5, 0.75, 1];
 export const KEYBOARD_SHORTCUTS = {
   tools: {
     select: "S",
+    drag: "D",
     freehand: "P",
     rectangle: "R",
     circle: "C",
@@ -77,6 +80,12 @@ export const TOOLS = {
       icon: MousePointer,
       label: "Select",
       shortcut: KEYBOARD_SHORTCUTS.tools.select,
+    },
+    {
+      tool: "drag",
+      icon: GripHorizontal,
+      label: "Drag",
+      shortcut: KEYBOARD_SHORTCUTS.tools.drag,
     },
     {
       tool: "freehand",
