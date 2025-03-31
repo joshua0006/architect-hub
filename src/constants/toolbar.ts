@@ -18,7 +18,8 @@ import {
   StickyNote,
   CheckCircle2,
   XCircle,
-  History
+  History,
+  Trash2
 } from "lucide-react";
 
 export const COLORS = [
@@ -89,6 +90,15 @@ export const TOOLS = {
       label: "Highlight",
       shortcut: KEYBOARD_SHORTCUTS.tools.highlight,
     },
+  ],
+  actions: [
+    {
+      tool: "delete" as AnnotationType,
+      icon: Trash2,
+      label: "Delete",
+      shortcut: KEYBOARD_SHORTCUTS.actions.delete,
+      action: true
+    }
   ],
   shapes: [
     {

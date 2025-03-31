@@ -1383,12 +1383,24 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
       
       // Existing key handler code...
       if (e.key === "Delete" || e.key === "Backspace") {
+        console.log('[AnnotationCanvas] Delete/Backspace key pressed');
+        console.log('[AnnotationCanvas] Selected annotations:', selectedAnnotations);
+        
         if (selectedAnnotations.length > 0) {
+          console.log(`[AnnotationCanvas] Deleting ${selectedAnnotations.length} annotations`);
           // Delete all selected annotations one by one
           selectedAnnotations.forEach((annotation) => {
+            console.log(`[AnnotationCanvas] Deleting annotation:`, {
+              id: annotation.id,
+              type: annotation.type,
+              pageNumber: annotation.pageNumber
+            });
             store.deleteAnnotation(documentId, annotation.id);
           });
           setSelectedAnnotations([]);
+          console.log('[AnnotationCanvas] Deletion complete, cleared selection');
+        } else {
+          console.log('[AnnotationCanvas] No annotations selected to delete');
         }
       }
       

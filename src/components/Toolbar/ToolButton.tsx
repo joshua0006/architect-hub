@@ -77,15 +77,23 @@ export const ToolButton: React.FC<ToolButtonProps> = ({
   rightIcon: RightIconComponent,
   currentFolder,
 }) => {
-  const { currentTool, setCurrentTool } = useAnnotationStore();
+  const { currentTool, setCurrentTool, deleteSelectedAnnotations } = useAnnotationStore();
   const { user } = useAuth();
 
-  // TEMPORARY: Debug permission issues
+  // Add debug logs
   useEffect(() => {
-  }, [tool, user, currentFolder]);
+    if (tool === 'delete') {
+      console.log('[ToolButton] Delete tool initialized with props:', {
+        tool,
+        label,
+        shortcut,
+        currentTool: currentTool === tool ? 'active' : 'inactive'
+      });
+    }
+  }, [tool, currentTool]);
 
   const hasFolderWritePermission = (): boolean => {
-    if(tool === 'select') {
+    if(tool === 'select' || tool === 'drag' || tool === 'delete') {
       return true;
     }
     const role = user?.role as UserRole| undefined;
@@ -97,20 +105,33 @@ export const ToolButton: React.FC<ToolButtonProps> = ({
     return writeAccess.write;
   }  
 
+  const handleClick = () => {
+    // Special case for delete tool
+    if (tool === 'delete') {
+      console.log('[ToolButton] Delete tool clicked, calling deleteSelectedAnnotations()');
+      deleteSelectedAnnotations();
+      console.log('[ToolButton] Delete operation completed');
+      // Don't change the current tool
+    } else {
+      setCurrentTool(tool);
+    }
+    
+    // Call any additional onClick handler
+    onClick?.();
+    
+    // Dispatch event to trigger re-rendering of the PDF canvas
+    dispatchToolChangeEvent();
+  };
 
   return (
     <button
-      onClick={() => {
-        setCurrentTool(tool);
-        onClick?.();
-        
-        // Dispatch event to trigger re-rendering of the PDF canvas
-        dispatchToolChangeEvent();
-      }}
+      onClick={handleClick}
       className={`flex items-center gap-2 px-3 py-2 rounded-md w-full transition-colors ${
         currentTool === tool
           ? "bg-blue-50 text-blue-600"
-          : "text-gray-700 hover:bg-gray-50"
+          : tool === "delete" 
+            ? "text-red-600 hover:bg-red-50"  // Special styling for delete button
+            : "text-gray-700 hover:bg-gray-50"
       }`}
       title={shortcut ? `${label} (${shortcut})` : label}
       disabled={!hasFolderWritePermission()}

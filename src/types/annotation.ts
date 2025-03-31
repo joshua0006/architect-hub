@@ -5,6 +5,7 @@ export type Point = {
 
 export type AnnotationType =
   | "select"
+  | "drag"
   | "hand"
   | "freehand"
   | "line"
@@ -26,7 +27,8 @@ export type AnnotationType =
   | "fireExit"
   | "stairs"
   | "elevator"
-  | "toilet";
+  | "toilet"
+  | "delete";
 
 export type StampType = "approved" | "rejected" | "revision";
 
@@ -62,6 +64,7 @@ export interface ToolConfig {
 export const createAnnotation = (type: AnnotationType): Annotation => {
   const defaultStyles: Record<AnnotationType, AnnotationStyle> = {
     select: { color: "#000000", lineWidth: 2, opacity: 1 },
+    drag: { color: "#000000", lineWidth: 2, opacity: 1 },
     hand: { color: "#000000", lineWidth: 2, opacity: 1 },
     freehand: { color: "#000000", lineWidth: 2, opacity: 1 },
     line: { color: "#000000", lineWidth: 2, opacity: 1 },
@@ -83,7 +86,8 @@ export const createAnnotation = (type: AnnotationType): Annotation => {
     fireExit: { color: "#FF0000", lineWidth: 2, opacity: 1 },
     stairs: { color: "#000000", lineWidth: 2, opacity: 1 },
     elevator: { color: "#0000FF", lineWidth: 2, opacity: 1 },
-    toilet: { color: "#00FF00", lineWidth: 2, opacity: 1 }
+    toilet: { color: "#00FF00", lineWidth: 2, opacity: 1 },
+    delete: { color: "#FF0000", lineWidth: 2, opacity: 1 }
   };
 
   return {
