@@ -77,7 +77,7 @@ export const ToolButton: React.FC<ToolButtonProps> = ({
   rightIcon: RightIconComponent,
   currentFolder,
 }) => {
-  const { currentTool, setCurrentTool, deleteSelectedAnnotations } = useAnnotationStore();
+  const { currentTool, setCurrentTool } = useAnnotationStore();
   const { user } = useAuth();
 
   // Add debug logs
@@ -93,7 +93,7 @@ export const ToolButton: React.FC<ToolButtonProps> = ({
   }, [tool, currentTool]);
 
   const hasFolderWritePermission = (): boolean => {
-    if(tool === 'select' || tool === 'drag' || tool === 'delete') {
+    if(tool === 'select' || tool === 'drag') {
       return true;
     }
     const role = user?.role as UserRole| undefined;
@@ -106,15 +106,7 @@ export const ToolButton: React.FC<ToolButtonProps> = ({
   }  
 
   const handleClick = () => {
-    // Special case for delete tool
-    if (tool === 'delete') {
-      console.log('[ToolButton] Delete tool clicked, calling deleteSelectedAnnotations()');
-      deleteSelectedAnnotations();
-      console.log('[ToolButton] Delete operation completed');
-      // Don't change the current tool
-    } else {
-      setCurrentTool(tool);
-    }
+    setCurrentTool(tool);
     
     // Call any additional onClick handler
     onClick?.();
@@ -129,9 +121,7 @@ export const ToolButton: React.FC<ToolButtonProps> = ({
       className={`flex items-center gap-2 px-3 py-2 rounded-md w-full transition-colors ${
         currentTool === tool
           ? "bg-blue-50 text-blue-600"
-          : tool === "delete" 
-            ? "text-red-600 hover:bg-red-50"  // Special styling for delete button
-            : "text-gray-700 hover:bg-gray-50"
+          : "text-gray-700 hover:bg-gray-50"
       }`}
       title={shortcut ? `${label} (${shortcut})` : label}
       disabled={!hasFolderWritePermission()}

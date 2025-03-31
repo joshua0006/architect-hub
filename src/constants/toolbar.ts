@@ -100,15 +100,6 @@ export const TOOLS = {
       shortcut: KEYBOARD_SHORTCUTS.tools.highlight,
     },
   ],
-  actions: [
-    {
-      tool: "delete" as AnnotationType,
-      icon: Trash2,
-      label: "Delete",
-      shortcut: KEYBOARD_SHORTCUTS.actions.delete,
-      action: true
-    }
-  ],
   shapes: [
     {
       tool: "rectangle",

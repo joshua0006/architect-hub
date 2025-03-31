@@ -82,12 +82,6 @@ export const Toolbar = ({ currentFolder }: ToolbarProps) => {
   // State for folder info dropdown
   const [showFolderInfo, setShowFolderInfo] = useState(false);
   
-  // Log available tools for debugging
-  useEffect(() => {
-    console.log('[Toolbar] TOOLS.actions:', TOOLS.actions);
-    console.log('[Toolbar] TOOLS.actions[0] tool type:', TOOLS.actions[0].tool);
-  }, []);
-  
   // Get current page number from the DOM if available
   const getCurrentPageNumber = (): number => {
     const pageElement = document.querySelector('.page-number-display');
@@ -243,19 +237,6 @@ export const Toolbar = ({ currentFolder }: ToolbarProps) => {
         
         <ToolbarSection title="Basic Tools" defaultExpanded>
           {TOOLS.basic.map((tool) => (
-            <ToolButton
-              key={tool.tool}
-              tool={tool.tool}
-              icon={tool.icon}
-              label={tool.label}
-              shortcut={getOptionalShortcut(tool)}
-              currentFolder={currentFolder}
-            />
-          ))}
-        </ToolbarSection>
-        
-        <ToolbarSection title="Actions">
-          {TOOLS.actions.map((tool) => (
             <ToolButton
               key={tool.tool}
               tool={tool.tool}
