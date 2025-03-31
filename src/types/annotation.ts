@@ -32,14 +32,21 @@ export type AnnotationType =
 
 export type StampType = "approved" | "rejected" | "revision";
 
-export type AnnotationStyle = {
+export interface AnnotationStyle {
   color: string;
   lineWidth: number;
   opacity: number;
   text?: string;
   stampType?: StampType;
   circleDiameterMode?: boolean;
-};
+  textOptions?: {
+    fontSize?: number;
+    fontFamily?: string;
+    bold?: boolean;
+    italic?: boolean;
+    text?: string;
+  };
+}
 
 export interface Annotation {
   id: string;
