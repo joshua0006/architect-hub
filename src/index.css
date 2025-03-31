@@ -24,7 +24,6 @@ body {
 .toolbar-fixed {
   width: var(--toolbar-width);
   flex-shrink: 0;
-  height: 100%;
   overflow-y: auto;
 }
 
