@@ -530,11 +530,33 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
             // Set canvas dimensions to match viewport exactly
             canvas.height = viewport.height;
             canvas.width = viewport.width;
+            
+            // Apply high-quality rendering settings for text
+            ctx.imageSmoothingEnabled = true;
+            ctx.imageSmoothingQuality = 'high';
+            // Use subpixel rendering for sharper text
+            if (devicePixelRatio > 1) {
+              const scaleFactor = devicePixelRatio;
+              canvas.width = viewport.width * scaleFactor;
+              canvas.height = viewport.height * scaleFactor;
+              canvas.style.width = `${viewport.width}px`;
+              canvas.style.height = `${viewport.height}px`;
+              ctx.scale(scaleFactor, scaleFactor);
+            }
 
-            // Define render parameters
+            // Define render parameters with improved text rendering settings
             const renderContext = {
               canvasContext: ctx,
               viewport: viewport,
+              // Enable high-quality text rendering
+              renderInteractiveForms: true,
+              enableWebGL: true,
+              // Add text content rendering options
+              includeTextContent: true,
+              textContentOptions: {
+                disableCombineTextItems: false,
+                enableWordBreaking: false
+              }
             };
 
             // Start the render task
