@@ -7,6 +7,7 @@ interface KeyboardShortcutGuideProps {
   onClose: () => void;
 }
 
+
 interface ShortcutSection {
   title: string;
   shortcuts: { label: string; shortcut: string }[];
