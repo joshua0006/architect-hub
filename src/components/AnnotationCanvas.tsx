@@ -96,10 +96,7 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
   const [isCircleCenterMode, setIsCircleCenterMode] = useState<boolean>(false);
   const [moveOffset, setMoveOffset] = useState<Point | null>(null);
   const [isShiftPressed, setIsShiftPressed] = useState(false);
-  const [textDragStart, setTextDragStart] = useState<Point | null>(null);
-  const [textDragEnd, setTextDragEnd] = useState<Point | null>(null);
-  const [isTextDragging, setIsTextDragging] = useState(false);
-  const [textDimensions, setTextDimensions] = useState<{ width: number; height: number } | null>(null);
+  // Removed text dragging state variables
   const [cursorPosition, setCursorPosition] = useState<Point | null>(null);
   const [scrollPosition, setScrollPosition] = useState({ left: 0, top: 0 });
   const lastScrollPosition = useRef({ left: 0, top: 0 });
@@ -281,12 +278,45 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
     
     const point = getCanvasPoint(e);
     
-    // Handle text and sticky note tools differently
+    // Handle text and sticky note tools: Create annotation immediately on click
     if (currentTool === "text" || currentTool === "stickyNote") {
-      setTextDragStart(point);
-      setTextDragEnd(point); // Initialize with same point
-      setIsTextDragging(true); // Start dragging
-      return;
+      const isSticky = currentTool === "stickyNote";
+      const defaultText = "Type here...";
+      // Center the default box around the click point slightly
+      const defaultWidth = isSticky ? 200 : 120;
+      const defaultHeight = isSticky ? 150 : 40;
+      const initialPos = {
+          x: point.x - defaultWidth / (2 * scale), // Adjust x to center
+          y: point.y - defaultHeight / (2 * scale) // Adjust y to center
+      };
+
+      const newAnnotation: Annotation = {
+        id: Date.now().toString(),
+        type: currentTool as AnnotationType,
+        points: [initialPos], // Use adjusted position
+        text: defaultText,
+        style: {
+          ...currentStyle,
+          text: defaultText, // Ensure text is in style
+          textOptions: currentStyle.textOptions || { fontSize: 14, fontFamily: 'Arial' },
+          ...(isSticky && { color: '#000000', backgroundColor: '#FFD700' }) // Style for sticky
+        },
+        pageNumber,
+        timestamp: Date.now(),
+        userId: "current-user", // Replace with actual user ID
+        version: 1,
+        width: defaultWidth,
+        height: defaultHeight,
+      };
+
+      store.addAnnotation(documentId, newAnnotation);
+      setEditingAnnotation(newAnnotation);
+      setTextInputPosition(initialPos); // Use adjusted position for input
+      setIsEditingText(true);
+      setStickyNoteScale(isSticky ? 1 : 0); // For TextInput styling
+      store.setCurrentTool("select"); // Switch back to select tool
+      dispatchAnnotationChangeEvent("textCreate", true);
+      return; // Stop further processing
     }
     
     if (currentTool === "select") {
@@ -471,7 +501,8 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
     });
 
     // Draw tool cursor indicators when tool is selected but not yet drawing
-    if (cursorPosition && !isDrawing && !isTextDragging && 
+    // Removed isTextDragging check from cursor indicator condition
+    if (cursorPosition && !isDrawing &&
         (currentTool === "text" || currentTool === "stickyNote")) {
       ctx.save();
       
@@ -634,94 +665,7 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
       ctx.restore();
     }
     
-    // Draw text dragging preview
-    if (isTextDragging && textDragStart && textDragEnd) {
-      ctx.save();
-      const isSticky = currentTool === "stickyNote";
-      
-      // Calculate rectangle dimensions - use consistent naming with the rest of the code
-      const left = Math.min(textDragStart.x, textDragEnd.x);
-      const top = Math.min(textDragStart.y, textDragEnd.y);
-      const width = Math.abs(textDragEnd.x - textDragStart.x);
-      const height = Math.abs(textDragEnd.y - textDragStart.y);
-      
-      // Scale coordinates for rendering
-      const x = left * scale;
-      const y = top * scale;
-      const w = width * scale;
-      const h = height * scale;
-      
-      if (isSticky) {
-        // Show sticky note preview with fixed design
-        ctx.fillStyle = '#FFD700'; // Match actual sticky note color
-        ctx.globalAlpha = 0.6;
-        
-        // Draw rectangle
-        ctx.fillRect(x, y, w, h);
-        
-        // Draw folded corner
-        const cornerSize = Math.min(20 * scale, w/5, h/5); // Responsive corner size
-        ctx.beginPath();
-        ctx.moveTo(x + w - cornerSize, y);
-        ctx.lineTo(x + w, y + cornerSize);
-        ctx.lineTo(x + w, y);
-        ctx.closePath();
-        ctx.fillStyle = 'rgba(0,0,0,0.1)';
-        ctx.fill();
-        
-        // Add placeholder text lines to visualize content area
-        ctx.fillStyle = "rgba(0,0,0,0.5)";
-        const padding = 10 * scale; // Match padding in actual sticky note
-        const lineHeight = 16 * scale;
-        
-        // Draw sample lines with exact same padding as real sticky note
-        if (w > padding*2 && h > padding*2) {
-          for (let i = 0; i < Math.min(5, Math.floor((h - padding*2) / lineHeight)); i++) {
-            const lineWidth = Math.min(w - padding*2, (150 - i*20) * scale);
-            ctx.fillRect(x + padding, y + padding + (i*lineHeight), lineWidth, 2*scale);
-          }
-        }
-        
-        // Draw border to better show boundaries
-        ctx.strokeStyle = 'rgba(0,0,0,0.3)';
-        ctx.lineWidth = 1;
-        ctx.setLineDash([]);
-        ctx.strokeRect(x, y, w, h);
-      } else {
-        // Show text area preview
-        ctx.fillStyle = 'rgba(255,255,255,0.7)'; // Semi-transparent background
-        ctx.fillRect(x, y, w, h);
-        
-        // Draw border
-        ctx.strokeStyle = currentStyle.color;
-        ctx.lineWidth = 1;
-        ctx.setLineDash([3, 3]);
-        ctx.strokeRect(x, y, w, h);
-        
-        // Draw placeholder text with proper position and padding
-        const padding = 8 * scale; // Match text annotation padding
-        ctx.fillStyle = currentStyle.color;
-        ctx.font = '14px Arial';
-        
-        // Only draw placeholder text if enough space is available
-        if (w > padding*3 && h > padding*3) {
-          // Draw "Text" label
-          ctx.fillText('Text', x + padding, y + padding + 14*scale);
-          
-          // Draw placeholder lines with same padding as in text annotation
-          const fontSize = 14 * scale;
-          const lineHeight = fontSize * 1.2;
-          const lineY = y + padding + lineHeight;
-          
-          for (let i = 0; i < Math.min(3, Math.floor((h - padding*2 - lineHeight) / lineHeight)); i++) {
-            const lineWidth = Math.min(w - padding*2, (90 - i*15) * scale);
-            ctx.fillRect(x + padding, lineY + (i*lineHeight), lineWidth, 1*scale);
-          }
-        }
-      }
-      
-      ctx.restore();
-    }
+    // Removed text dragging preview logic
 
     // Draw selection box if active
     if (selectionBox) {
@@ -909,12 +853,7 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
       return;
     }
     
-    // Handle text tool dragging
-    if (isTextDragging && textDragStart) {
-      setTextDragEnd(point);
-      render();
-      return;
-    }
+    // Removed text dragging logic from mouse move
 
     // Handle auto-scrolling during object movement
     if (moveOffset && selectedAnnotations.length > 0) {
@@ -1160,27 +1099,7 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
       dispatchAnnotationChangeEvent("userDrawing", true);
     }
 
-    // Handle text tool completion
-    if (isTextDragging && textDragStart && textDragEnd) {
-      const isSticky = currentTool === "stickyNote";
-      setIsTextDragging(false);
-      setTextDragStart(null);
-      setTextDragEnd(null);
-
-      // Calculate dimensions for text input
-      const left = Math.min(textDragStart.x, textDragEnd.x);
-      const top = Math.min(textDragStart.y, textDragEnd.y);
-      const width = Math.abs(textDragEnd.x - textDragStart.x);
-      const height = Math.abs(textDragEnd.y - textDragStart.y);
-
-      // Only show text input if dragged area is large enough
-      const MIN_SIZE = 20 / scale;
-      if (width > MIN_SIZE && height > MIN_SIZE) {
-        setTextInputPosition({ x: left, y: top });
-        setTextDimensions({ width, height });
-        setIsEditingText(true);
-      }
-    }
+    // Removed text dragging completion logic
 
     // Reset all movement and drawing states
     setMoveOffset(null);
@@ -1193,7 +1112,7 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
 
     // Force render to ensure clean state
     render();
-  }, [isDrawing, currentPoints, currentTool, currentStyle, pageNumber, documentId, store, scale, isTextDragging, textDragStart, textDragEnd, dispatchAnnotationChangeEvent, render]);
+  }, [isDrawing, currentPoints, currentTool, currentStyle, pageNumber, documentId, store, scale, dispatchAnnotationChangeEvent, render]); // Removed text dragging dependencies
 
   const handleMouseLeave = () => {
     if (isDrawing && currentTool === "freehand" && currentPoints.length >= 2) {
@@ -1287,7 +1206,7 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
     
     setTextInputPosition(null);
     setEditingAnnotation(null);
-    setTextDimensions(null);
+    // Removed setTextDimensions call again
     dispatchAnnotationChangeEvent("textComplete");
   };
 
@@ -2026,7 +1945,7 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
               : currentTool === "stickyNote"
           }
           initialText={editingAnnotation?.style.text}
-          dimensions={textDimensions}
+          // Removed dimensions prop again as it's now part of the annotation object
         />
       )}
       {contextMenu && (
