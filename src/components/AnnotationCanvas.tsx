@@ -85,6 +85,8 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
   );
   const [activeHandle, setActiveHandle] = useState<ResizeHandle>(null);
   const lastPointRef = useRef<Point | null>(null);
+  const textInputRef = useRef<HTMLTextAreaElement>(null); // Ref for the TextInput component
+  // Removed duplicate textInputRef declaration
   const [isEditingText, setIsEditingText] = useState<boolean>(false);
   const [textInputPosition, setTextInputPosition] = useState<Point | null>(null);
   const [editingAnnotation, setEditingAnnotation] = useState<Annotation | null>(null);
@@ -114,6 +116,20 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
   const MIN_SCROLL_SPEED = 2; // Minimum scroll speed
   const ACCELERATION = 0.2; // Reduced acceleration for smoother ramping
   const DECELERATION = 0.92; // Smooth deceleration factor
+
+  // Effect to focus the text input when editing starts
+  useEffect(() => {
+    if (isEditingText && textInputRef.current) {
+      // Use a short timeout to ensure the element is fully rendered and focusable
+      setTimeout(() => {
+        textInputRef.current?.focus();
+        // Select text only if it's the default placeholder
+        if (editingAnnotation?.text === "Text" || editingAnnotation?.text === "Type here...") {
+             textInputRef.current?.select();
+        }
+      }, 50); // Small delay might still be needed
+    }
+  }, [isEditingText, editingAnnotation]); // Depend on editing state and the annotation being edited
 
   const dispatchAnnotationChangeEvent = useCallback(
     (source: string, forceRender: boolean = false) => {
@@ -1940,17 +1956,16 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
       />
       {isEditingText && textInputPosition && (
         <TextInput
+          ref={textInputRef} // Pass the ref here
           position={textInputPosition}
           onComplete={handleTextComplete}
           onCancel={handleTextCancel}
           scale={scale}
-          isSticky={
-            editingAnnotation
-              ? editingAnnotation.type === "stickyNote"
-              : currentTool === "stickyNote"
-          }
-          initialText={editingAnnotation?.style.text}
-          // Removed dimensions prop again as it's now part of the annotation object
+          isSticky={editingAnnotation?.type === "stickyNote"} // Use editingAnnotation directly
+          initialText={editingAnnotation?.text} // Use .text directly
+          initialWidth={editingAnnotation?.width} // Pass initial size
+          initialHeight={editingAnnotation?.height} // Pass initial size
+          textOptions={editingAnnotation?.style.textOptions} // Pass text options
         />
       )}
       {contextMenu && (
