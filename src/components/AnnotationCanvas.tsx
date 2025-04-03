@@ -281,7 +281,7 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
     // Handle text and sticky note tools: Create annotation immediately on click
     if (currentTool === "text" || currentTool === "stickyNote") {
       const isSticky = currentTool === "stickyNote";
-      const defaultText = "Type here...";
+      const defaultText = "Text"; // Changed default text
       // Center the default box around the click point slightly
       const defaultWidth = isSticky ? 200 : 120;
       const defaultHeight = isSticky ? 150 : 40;
@@ -370,8 +370,12 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
         setMoveOffset(point);
         return;
       }
-      
-      // If not clicking on any annotation, start a selection box
+
+      // If clicking empty space
+      if (!e.shiftKey) { // Clear selection only if Shift is not pressed
+        store.clearSelection();
+      }
+      // Start a selection box
       setSelectionBox({ start: point, end: point });
       return;
     } else {
