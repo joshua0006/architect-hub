@@ -494,8 +494,9 @@ export const drawHighlight = (
   // Save context state
   ctx.save();
 
-  // Set highlight specific styles - using a higher opacity for better visibility
-  ctx.globalAlpha = style.opacity || 0.3; // Use style opacity or default to 0.3
+  // Set highlight specific styles - cap opacity at 0.7
+  const cappedOpacity = Math.min(style.opacity || 0.3, 0.7);
+  ctx.globalAlpha = cappedOpacity;
   ctx.fillStyle = style.color || "#FFFF00"; // Use style color or default to yellow
   ctx.strokeStyle = style.color || "#FFFF00"; // Add a stroke in the same color
   ctx.lineWidth = 1 * scale; // Thin border for definition

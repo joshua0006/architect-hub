@@ -38,11 +38,11 @@ const getOptionalShortcut = (tool: any): string | undefined => {
 };
 
 // Helper function to dispatch annotation change event
-const dispatchAnnotationChangeEvent = (pageNumber: number = 1) => {
+const dispatchAnnotationChangeEvent = (pageNumber: number = 1, source: string = 'toolbar') => {
   // Create the event
   const event = new CustomEvent('annotationChanged', {
     bubbles: true,
-    detail: { pageNumber, source: 'toolbar' }
+    detail: { pageNumber, source }
   });
   
   // First try to dispatch to the PDF container
@@ -52,19 +52,23 @@ const dispatchAnnotationChangeEvent = (pageNumber: number = 1) => {
     console.log('[Toolbar] Dispatched annotationChanged event to PDF container');
   }
   
-  // Also try to dispatch directly to annotation canvas
-  const annotationCanvas = document.querySelector('.annotation-canvas-container canvas') as HTMLCanvasElement;
-  if (annotationCanvas) {
-    annotationCanvas.dataset.forceRender = 'true';
-    annotationCanvas.dispatchEvent(event);
-    console.log('[Toolbar] Set forceRender flag on annotation canvas');
-  }
-  
-  // Set the tool change indicator
-  const toolChangeIndicator = document.getElementById('tool-change-indicator') as HTMLDivElement;
-  if (toolChangeIndicator) {
-    toolChangeIndicator.dataset.toolChanged = 'true';
-    console.log('[Toolbar] Set toolChanged flag on indicator');
+  // When using select tool for movement, avoid setting forceRender on the canvas
+  // This prevents excessive rerenders during drag operations
+  if (source !== 'movement') {
+    // Also try to dispatch directly to annotation canvas
+    const annotationCanvas = document.querySelector('.annotation-canvas-container canvas') as HTMLCanvasElement;
+    if (annotationCanvas) {
+      annotationCanvas.dataset.forceRender = 'true';
+      annotationCanvas.dispatchEvent(event);
+      console.log('[Toolbar] Set forceRender flag on annotation canvas');
+    }
+    
+    // Set the tool change indicator
+    const toolChangeIndicator = document.getElementById('tool-change-indicator') as HTMLDivElement;
+    if (toolChangeIndicator) {
+      toolChangeIndicator.dataset.toolChanged = 'true';
+      console.log('[Toolbar] Set toolChanged flag on indicator');
+    }
   }
 };
 
@@ -101,21 +105,31 @@ export const Toolbar = ({ currentFolder }: ToolbarProps) => {
       clearTimeout(dispatchTimeoutRef.current);
     }
     
-    // Don't dispatch more than once every 300ms
+    // Use different timing based on the current tool
+    // Longer debounce for select tool to reduce renders during movement
+    const debounceTime = currentTool === 'select' ? 500 : 300;
+    
+    // Don't dispatch more than once every debounceTime
     const now = Date.now();
     const timeSinceLastDispatch = now - lastDispatchTimeRef.current;
     
-    if (timeSinceLastDispatch < 300) {
+    // Check if we're using select tool and in a movement operation
+    const isMovementOperation = currentTool === 'select' && 
+      document.querySelector('.annotation-canvas-container')?.classList.contains('dragging');
+    
+    // If we're in a movement operation, use throttling instead of dispatching immediately
+    if (timeSinceLastDispatch < debounceTime) {
       // Schedule a dispatch after the debounce period
       dispatchTimeoutRef.current = setTimeout(() => {
         const currentPage = getCurrentPageNumber();
-        dispatchAnnotationChangeEvent(currentPage);
+        // Pass movement source if relevant
+        dispatchAnnotationChangeEvent(currentPage, isMovementOperation ? 'movement' : 'toolbar');
         lastDispatchTimeRef.current = Date.now();
-      }, 300 - timeSinceLastDispatch);
-    } else {
-      // Dispatch immediately
+      }, debounceTime - timeSinceLastDispatch);
+    } else if (!isMovementOperation) {
+      // Only dispatch immediately if not in a movement operation
       const currentPage = getCurrentPageNumber();
-      dispatchAnnotationChangeEvent(currentPage);
+      dispatchAnnotationChangeEvent(currentPage, 'toolbar');
       lastDispatchTimeRef.current = now;
     }
   };
@@ -133,6 +147,31 @@ export const Toolbar = ({ currentFolder }: ToolbarProps) => {
       }
     };
   }, [currentTool, currentStyle, currentDocumentId]);
+
+  // Add an event listener for annotation movement events from PDFViewer
+  useEffect(() => {
+    const handleAnnotationMovement = (e: Event) => {
+      // Use a different reference for movement operations
+      // This avoids conflicting with the normal tool change events
+      const customEvent = e as CustomEvent;
+      if (customEvent.detail?.type === 'movement') {
+        // For movement events, we use a higher threshold throttling
+        // to dramatically reduce renders during drag operations
+        const now = Date.now();
+        if (now - lastDispatchTimeRef.current > 300) {
+          lastDispatchTimeRef.current = now;
+          const currentPage = getCurrentPageNumber();
+          dispatchAnnotationChangeEvent(currentPage, 'movement');
+        }
+      }
+    };
+
+    document.addEventListener('annotationMovement', handleAnnotationMovement);
+    
+    return () => {
+      document.removeEventListener('annotationMovement', handleAnnotationMovement);
+    };
+  }, []);
 
   useEffect(() => {
     const handleResize = () => {

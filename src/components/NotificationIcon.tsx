@@ -77,7 +77,6 @@ export const NotificationIcon: React.FC = () => {
       // Increase throttle time from 30s to 2 minutes
       const now = Date.now();
       if (!forceFetch && now - lastNotificationUpdate.current < 120000) {
-        console.log('[Notification Bell] Skipping fetch, too soon after last update');
         return;
       }
       
@@ -85,20 +84,15 @@ export const NotificationIcon: React.FC = () => {
         setIsLoading(true);
       }
       setError(null);
-      console.log(`[Notification Bell] Manually fetching notifications for user ${user.id}`);
       
       // Force direct fetch from Firestore instead of relying on cache
       const recentNotifications = await getRecentNotifications(user.id, 20);
-      console.log(`[Notification Bell] Retrieved ${recentNotifications.length} notifications manually`);
       
       if (recentNotifications.length > 0) {
         // Update with deduplication
         setNotifications(prev => deduplicateNotifications(recentNotifications));
         const newUnreadCount = recentNotifications.filter(n => !n.read).length;
         setUnreadCount(newUnreadCount);
-        console.log(`[Notification Bell] Updated unread count to ${newUnreadCount}`);
-      } else {
-        console.log('[Notification Bell] No notifications found for this user');
       }
       
       lastNotificationUpdate.current = now;
@@ -127,20 +121,16 @@ export const NotificationIcon: React.FC = () => {
     
     // Increase throttle time from 30s to 2 minutes for subscription updates
     if (now - lastSubscriptionUpdate.current < throttleTime) {
-      console.log(`[Notification Bell] Throttling subscription update, too frequent (${throttleTime}ms throttle)`);
       return;
     }
     
     if (newNotifications.length === 0) return;
-    
-    console.log(`[Notification Bell] Received ${newNotifications.length} notifications via subscription`);
     
     // Check if notifications array has actually changed to avoid unnecessary renders
     const currentIds = newNotifications.map(n => n.id).sort().join(',');
     const existingIds = notifications.map(n => n.id).sort().join(',');
     
     if (currentIds === existingIds) {
-      console.log('[Notification Bell] Skipping update, no actual changes in notifications');
       return;
     }
     
@@ -203,13 +193,11 @@ export const NotificationIcon: React.FC = () => {
     
     // Prevent multiple setups for the same user
     if (setupInProgress.current) {
-      console.log('[Notification Bell] Setup already in progress, skipping');
       return;
     }
     
     // Only set up subscription if not already active
     if (hasActiveSubscription.current || GLOBAL_SUBSCRIPTION_ACTIVE) {
-      console.log('[Notification Bell] Subscription already active, skipping setup');
       return;
     }
     
@@ -218,16 +206,12 @@ export const NotificationIcon: React.FC = () => {
     setupInProgress.current = true;
     hasActiveSubscription.current = false;
     
-    console.log(`[Notification Bell] Setting up notification system for user: ${user.id}`);
-    
     // Reset notification system first
     resetNotificationSystem().then(() => {
       // Fetch initial notifications
       fetchNotifications(true).then(() => {
         // Set up subscription only after initial fetch completes
         if (!hasActiveSubscription.current) {
-          console.log('[Notification Bell] Creating new subscription');
-          
           // Set up real-time updates with throttled callback
           const unsubscribe = subscribeToNotifications(user.id, updateNotificationsThrottled);
           
@@ -241,8 +225,6 @@ export const NotificationIcon: React.FC = () => {
     
     // Clean up function
     return () => {
-      console.log('[Notification Bell] Cleaning up notification subscription');
-      
       if (unsubscribeRef.current) {
         // Call the unsubscribe function from Firebase
         unsubscribeRef.current();
@@ -266,7 +248,6 @@ export const NotificationIcon: React.FC = () => {
       
       // Only refresh if no update in the last 30 minutes
       if (timeSinceLastUpdate > 1800000) {
-        console.log('[Notification Bell] Performing periodic refresh (30-minute interval)');
         fetchNotifications();
       }
     }, 1800000); // Check every 30 minutes
@@ -293,8 +274,6 @@ export const NotificationIcon: React.FC = () => {
     if (!user) return;
     
     try {
-      console.log('Notification clicked:', notification);
-      
       // Verify this notification belongs to the current user
       if (notification.userId !== user.id) {
         console.error('Attempting to access notification that does not belong to current user');
@@ -321,8 +300,6 @@ export const NotificationIcon: React.FC = () => {
       
       // Navigate to link if provided
       if (notification.link) {
-        console.log('Navigating to link:', notification.link);
-        
         // Check if this is a task notification
         const isTaskNotification = notification.iconType === 'task-assignment';
         
@@ -413,7 +390,6 @@ export const NotificationIcon: React.FC = () => {
         // Handle special case for file upload notifications
         if (notification.iconType === 'file-upload' && !fileId) {
           // For file upload notifications, the fileId might be in a different field
-          console.log('Processing file upload notification');
           if (notification.metadata?.fileId) {
             fileId = notification.metadata.fileId;
           }
@@ -423,11 +399,6 @@ export const NotificationIcon: React.FC = () => {
         const currentPath = window.location.pathname;
         const isInDocuments = currentPath.startsWith('/documents');
         const isInDifferentProject = true; // Always force project navigation for consistency
-        
-        console.log('Current location:', {
-          currentPath,
-          isInDocuments
-        });
         
         // Create comprehensive navigation state
         interface NavigationState {
@@ -486,11 +457,8 @@ export const NotificationIcon: React.FC = () => {
         // Update navigation state with the correct target link
         navigationState.targetLink = targetLink;
         
-        console.log('Navigation state with updated link:', navigationState);
-        
         // Dispatch a custom event to trigger document refresh
         if (fileId || folderId) {
-          console.log('Dispatching document update event');
           const eventDetail = {
             fileId,
             folderId,
@@ -511,11 +479,9 @@ export const NotificationIcon: React.FC = () => {
         
         // First navigate to documents to ensure we're in the documents section
         if (!isInDocuments) {
-          console.log('Navigating to documents section first with direct path');
           navigate(targetLink, { state: navigationState, replace: true });
         } else {
           // If we need project switching, always navigate directly to the target
-          console.log('Already in documents, navigating directly to target:', targetLink);
           navigate(targetLink, { state: navigationState, replace: true });
         }
       }

@@ -412,7 +412,72 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
 
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
+    
+    // Check if we're currently in a movement operation to optimize rendering
+    const isMovementOperation = moveOffset && 
+      selectedAnnotations.length > 0 && 
+      document.querySelector('.annotation-canvas-container')?.classList.contains('dragging');
+    
+    // During movement operations, only perform minimal rendering of selected annotations
+    // to significantly reduce rendering overhead
+    if (isMovementOperation) {
+      // Clear only the areas affected by the moved annotations
+      // First create a list of rects that need clearing (with padding)
+      const padding = 10; // Extra pixels to clear around each annotation
+      const clearRects = selectedAnnotations.map(annotation => {
+        const bounds = getShapeBounds(annotation.points);
+        return {
+          x: (bounds.left * scale) - padding,
+          y: (bounds.top * scale) - padding,
+          width: ((bounds.right - bounds.left) * scale) + (padding * 2),
+          height: ((bounds.bottom - bounds.top) * scale) + (padding * 2)
+        };
+      });
+      
+      // Clear each rectangle
+      clearRects.forEach(rect => {
+        ctx.clearRect(rect.x, rect.y, rect.width, rect.height);
+      });
+      
+      // Only redraw the selected annotations being moved
+      selectedAnnotations.forEach(annotation => {
+        // Draw the annotation
+        if (annotation.type === "text") {
+          drawTextAnnotation(ctx, annotation, scale);
+        } else if (annotation.type === "stickyNote") {
+          drawStickyNoteAnnotation(ctx, annotation, scale);
+        } else {
+          drawAnnotation(ctx, annotation, scale);
+        }
+        
+        // Add selection indicator
+        if (annotation.type === "text" || annotation.type === "stickyNote") {
+          drawTextSelectionOutline(ctx, annotation, scale, selectedAnnotations.length > 1);
+        } else {
+          drawSelectionOutline(
+            ctx,
+            annotation,
+            scale,
+            selectedAnnotations.length > 1
+          );
+        }
+        
+        // Only draw resize handles if single selection
+        if (selectedAnnotations.length === 1 && 
+            annotation.type !== "text" && annotation.type !== "stickyNote") {
+          drawResizeHandles(
+            ctx,
+            annotation,
+            scale,
+            annotation.type === "highlight"
+          );
+        }
+      });
+      
+      return; // Skip full rendering during movement
+    }
 
+    // Regular full rendering for non-movement operations
     // Clear the canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -606,7 +671,9 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
       } else if (currentTool === "highlight") {
         // For highlight tool, use special rendering with different opacity
         const originalAlpha = ctx.globalAlpha;
-        ctx.globalAlpha = 0.3; // Highlights are semi-transparent
+        // Cap highlight opacity at 0.7 for consistency with final annotation
+        const highlightOpacity = Math.min(0.7, currentStyle.opacity);
+        ctx.globalAlpha = highlightOpacity;
         ctx.lineWidth = 12 * scale; // Highlights are thicker
         
         // Draw the highlight as a rectangle to match the final shape
@@ -1020,6 +1087,24 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
 
         setSelectedAnnotations(updatedAnnotations);
         setMoveOffset(point);
+        
+        // Dispatch special movement event to reduce rerendering
+        // This event will be caught by the Toolbar component
+        document.dispatchEvent(new CustomEvent('annotationMovement', {
+          bubbles: true,
+          detail: {
+            type: 'movement',
+            pageNumber: pageNumber,
+            count: updatedAnnotations.length
+          }
+        }));
+        
+        // Set dragging class on the container to help with detection
+        const container = document.querySelector('.annotation-canvas-container');
+        if (container && !container.classList.contains('dragging')) {
+          container.classList.add('dragging');
+        }
+        
         return;
       }
 
@@ -1146,7 +1231,9 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
         id: Date.now().toString(),
         type: currentTool as AnnotationType,
         points: currentPoints,
-        style: currentStyle,
+        style: currentTool === "highlight" 
+          ? { ...currentStyle, opacity: Math.min(0.7, currentStyle.opacity) }
+          : currentStyle,
         pageNumber,
         timestamp: Date.now(),
         userId: "current-user",
@@ -1193,6 +1280,12 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
 
     // Force render to ensure clean state
     render();
+
+    // Remove dragging class when mouse is released
+    const container = document.querySelector('.annotation-canvas-container');
+    if (container && container.classList.contains('dragging')) {
+      container.classList.remove('dragging');
+    }
   }, [isDrawing, currentPoints, currentTool, currentStyle, pageNumber, documentId, store, scale, isTextDragging, textDragStart, textDragEnd, dispatchAnnotationChangeEvent, render]);
 
   const handleMouseLeave = () => {
@@ -1986,6 +2079,17 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
       if (scrollAnimationFrameRef.current) {
         cancelAnimationFrame(scrollAnimationFrameRef.current);
         scrollAnimationFrameRef.current = null;
+      }
+    };
+  }, []);
+
+  // Add cleanup effect to ensure dragging class is removed on unmount
+  useEffect(() => {
+    return () => {
+      // Remove dragging class when component unmounts
+      const container = document.querySelector('.annotation-canvas-container');
+      if (container && container.classList.contains('dragging')) {
+        container.classList.remove('dragging');
       }
     };
   }, []);
