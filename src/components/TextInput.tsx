@@ -1,5 +1,5 @@
-import React, { useEffect, useRef, useState } from "react";
-import { Point } from "../types/annotation";
+import React, { useEffect, useRef, useState, MouseEvent } from "react"; // Added MouseEvent
+import { Point, AnnotationStyle } from "../types/annotation"; // Added AnnotationStyle
 
 interface TextInputProps {
   position: Point;
@@ -8,7 +8,10 @@ interface TextInputProps {
   scale: number;
   isSticky?: boolean;
   initialText?: string;
-  dimensions?: { width: number; height: number } | null;
+  // dimensions prop is no longer needed here
+  initialWidth?: number; // Added for TextInput sizing
+  initialHeight?: number; // Added for TextInput sizing
+  textOptions?: AnnotationStyle['textOptions']; // Added for font styling
 }
 
 export const TextInput: React.FC<TextInputProps> = ({
@@ -18,7 +21,8 @@ export const TextInput: React.FC<TextInputProps> = ({
   scale,
   isSticky = false,
   initialText = "",
-  dimensions = null,
+  // Removed dimensions prop
+  textOptions, // Destructure textOptions here
 }) => {
   const [text, setText] = useState(initialText);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -46,6 +50,28 @@ export const TextInput: React.FC<TextInputProps> = ({
     adjustTextareaSize();
   }, [text]);
 
+  // Effect to handle clicks outside the component
+  useEffect(() => {
+    const handleClickOutside = (event: globalThis.MouseEvent) => {
+      if (wrapperRef.current && !wrapperRef.current.contains(event.target as Node)) {
+        // Clicked outside the text input wrapper
+        if (text.trim()) {
+          onComplete(text); // Complete with current text
+        } else {
+          onCancel(); // Cancel if text is empty
+        }
+      }
+    };
+
+    // Add listener when component mounts
+    document.addEventListener("mousedown", handleClickOutside);
+
+    // Cleanup listener when component unmounts
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [onComplete, onCancel, text, wrapperRef]); // Dependencies
+
   // Event handlers
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -53,24 +79,14 @@ export const TextInput: React.FC<TextInputProps> = ({
       if (text.trim()) {
         onComplete(text);
       } else {
-        onCancel();
+        onCancel(); // Still cancel if Enter is pressed with no text
       }
     } else if (e.key === "Escape") {
       onCancel();
     }
   };
 
-  const handleBlur = (e: React.FocusEvent) => {
-    // Check if the related target is within the wrapper
-    // This prevents closing when clicking within the component
-    if (wrapperRef.current && !wrapperRef.current.contains(e.relatedTarget as Node)) {
-      if (text.trim()) {
-        onComplete(text);
-      } else {
-        onCancel();
-      }
-    }
-  };
+  // Removed handleBlur as click outside is handled by the effect
 
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setText(e.target.value);
@@ -105,7 +121,7 @@ export const TextInput: React.FC<TextInputProps> = ({
           value={text}
           onChange={handleChange}
           onKeyDown={handleKeyDown}
-          onBlur={handleBlur}
+          // onBlur={handleBlur} // Removed onBlur handler
           className={`
             w-full min-h-[20px] p-2
             outline-none resize-none rounded
@@ -116,10 +132,12 @@ export const TextInput: React.FC<TextInputProps> = ({
                 : "bg-white bg-opacity-70 focus:bg-opacity-90 border border-blue-300"
             }
           `}
-          style={{
-            fontSize: `${14}px`,
-            lineHeight: `${20}px`,
-            fontFamily: "Arial",
+          style={{ // Apply dynamic font styles
+            fontSize: `${textOptions?.fontSize || 14}px`,
+            lineHeight: `${(textOptions?.fontSize || 14) * 1.2}px`, // Adjust line height based on font size
+            fontFamily: textOptions?.fontFamily || "Arial",
+            fontWeight: textOptions?.bold ? 'bold' : 'normal',
+            fontStyle: textOptions?.italic ? 'italic' : 'normal',
             boxShadow: isSticky ? "none" : "0 0 0 2px rgba(59, 130, 246, 0.3)",
           }}
           placeholder={isSticky ? "Add note..." : "Add text..."}

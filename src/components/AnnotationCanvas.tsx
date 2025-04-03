@@ -1211,6 +1211,7 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
     setTextInputPosition(null);
     setEditingAnnotation(null);
     // Removed setTextDimensions call again
+    store.clearSelection(); // Deselect annotation after completion
     dispatchAnnotationChangeEvent("textComplete");
   };
 
