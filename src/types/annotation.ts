@@ -59,6 +59,8 @@ export interface Annotation {
   userId: string;
   selected?: boolean;
   version?: number;
+  width?: number;
+  height?: number;
 }
 
 export interface ToolConfig {
