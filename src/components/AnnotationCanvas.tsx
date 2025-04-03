@@ -85,6 +85,8 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
   );
   const [activeHandle, setActiveHandle] = useState<ResizeHandle>(null);
   const lastPointRef = useRef<Point | null>(null);
+  const textInputRef = useRef<HTMLTextAreaElement>(null); // Ref for the TextInput component
+  // Removed duplicate textInputRef declaration
   const [isEditingText, setIsEditingText] = useState<boolean>(false);
   const [textInputPosition, setTextInputPosition] = useState<Point | null>(null);
   const [editingAnnotation, setEditingAnnotation] = useState<Annotation | null>(null);
@@ -96,10 +98,7 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
   const [isCircleCenterMode, setIsCircleCenterMode] = useState<boolean>(false);
   const [moveOffset, setMoveOffset] = useState<Point | null>(null);
   const [isShiftPressed, setIsShiftPressed] = useState(false);
-  const [textDragStart, setTextDragStart] = useState<Point | null>(null);
-  const [textDragEnd, setTextDragEnd] = useState<Point | null>(null);
-  const [isTextDragging, setIsTextDragging] = useState(false);
-  const [textDimensions, setTextDimensions] = useState<{ width: number; height: number } | null>(null);
+  // Removed text dragging state variables
   const [cursorPosition, setCursorPosition] = useState<Point | null>(null);
   const [scrollPosition, setScrollPosition] = useState({ left: 0, top: 0 });
   const lastScrollPosition = useRef({ left: 0, top: 0 });
@@ -117,6 +116,20 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
   const MIN_SCROLL_SPEED = 2; // Minimum scroll speed
   const ACCELERATION = 0.2; // Reduced acceleration for smoother ramping
   const DECELERATION = 0.92; // Smooth deceleration factor
+
+  // Effect to focus the text input when editing starts
+  useEffect(() => {
+    if (isEditingText && textInputRef.current) {
+      // Use a short timeout to ensure the element is fully rendered and focusable
+      setTimeout(() => {
+        textInputRef.current?.focus();
+        // Select text only if it's the default placeholder
+        if (editingAnnotation?.text === "Text" || editingAnnotation?.text === "Type here...") {
+             textInputRef.current?.select();
+        }
+      }, 50); // Small delay might still be needed
+    }
+  }, [isEditingText, editingAnnotation]); // Depend on editing state and the annotation being edited
 
   const dispatchAnnotationChangeEvent = useCallback(
     (source: string, forceRender: boolean = false) => {
@@ -281,12 +294,45 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
     
     const point = getCanvasPoint(e);
     
-    // Handle text and sticky note tools differently
+    // Handle text and sticky note tools: Create annotation immediately on click
     if (currentTool === "text" || currentTool === "stickyNote") {
-      setTextDragStart(point);
-      setTextDragEnd(point); // Initialize with same point
-      setIsTextDragging(true); // Start dragging
-      return;
+      const isSticky = currentTool === "stickyNote";
+      const defaultText = "Text"; // Changed default text
+      // Center the default box around the click point slightly
+      const defaultWidth = isSticky ? 200 : 120;
+      const defaultHeight = isSticky ? 150 : 40;
+      const initialPos = {
+          x: point.x - defaultWidth / (2 * scale), // Adjust x to center
+          y: point.y - defaultHeight / (2 * scale) // Adjust y to center
+      };
+
+      const newAnnotation: Annotation = {
+        id: Date.now().toString(),
+        type: currentTool as AnnotationType,
+        points: [initialPos], // Use adjusted position
+        text: defaultText,
+        style: {
+          ...currentStyle,
+          text: defaultText, // Ensure text is in style
+          textOptions: currentStyle.textOptions || { fontSize: 14, fontFamily: 'Arial' },
+          ...(isSticky && { color: '#000000', backgroundColor: '#FFD700' }) // Style for sticky
+        },
+        pageNumber,
+        timestamp: Date.now(),
+        userId: "current-user", // Replace with actual user ID
+        version: 1,
+        width: defaultWidth,
+        height: defaultHeight,
+      };
+
+      store.addAnnotation(documentId, newAnnotation);
+      setEditingAnnotation(newAnnotation);
+      setTextInputPosition(initialPos); // Use adjusted position for input
+      setIsEditingText(true);
+      setStickyNoteScale(isSticky ? 1 : 0); // For TextInput styling
+      store.setCurrentTool("select"); // Switch back to select tool
+      dispatchAnnotationChangeEvent("textCreate", true);
+      return; // Stop further processing
     }
     
     if (currentTool === "select") {
@@ -340,8 +386,12 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
         setMoveOffset(point);
         return;
       }
-      
-      // If not clicking on any annotation, start a selection box
+
+      // If clicking empty space
+      if (!e.shiftKey) { // Clear selection only if Shift is not pressed
+        store.clearSelection();
+      }
+      // Start a selection box
       setSelectionBox({ start: point, end: point });
       return;
     } else {
@@ -412,72 +462,7 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
 
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    
-    // Check if we're currently in a movement operation to optimize rendering
-    const isMovementOperation = moveOffset && 
-      selectedAnnotations.length > 0 && 
-      document.querySelector('.annotation-canvas-container')?.classList.contains('dragging');
-    
-    // During movement operations, only perform minimal rendering of selected annotations
-    // to significantly reduce rendering overhead
-    if (isMovementOperation) {
-      // Clear only the areas affected by the moved annotations
-      // First create a list of rects that need clearing (with padding)
-      const padding = 10; // Extra pixels to clear around each annotation
-      const clearRects = selectedAnnotations.map(annotation => {
-        const bounds = getShapeBounds(annotation.points);
-        return {
-          x: (bounds.left * scale) - padding,
-          y: (bounds.top * scale) - padding,
-          width: ((bounds.right - bounds.left) * scale) + (padding * 2),
-          height: ((bounds.bottom - bounds.top) * scale) + (padding * 2)
-        };
-      });
-      
-      // Clear each rectangle
-      clearRects.forEach(rect => {
-        ctx.clearRect(rect.x, rect.y, rect.width, rect.height);
-      });
-      
-      // Only redraw the selected annotations being moved
-      selectedAnnotations.forEach(annotation => {
-        // Draw the annotation
-        if (annotation.type === "text") {
-          drawTextAnnotation(ctx, annotation, scale);
-        } else if (annotation.type === "stickyNote") {
-          drawStickyNoteAnnotation(ctx, annotation, scale);
-        } else {
-          drawAnnotation(ctx, annotation, scale);
-        }
-        
-        // Add selection indicator
-        if (annotation.type === "text" || annotation.type === "stickyNote") {
-          drawTextSelectionOutline(ctx, annotation, scale, selectedAnnotations.length > 1);
-        } else {
-          drawSelectionOutline(
-            ctx,
-            annotation,
-            scale,
-            selectedAnnotations.length > 1
-          );
-        }
-        
-        // Only draw resize handles if single selection
-        if (selectedAnnotations.length === 1 && 
-            annotation.type !== "text" && annotation.type !== "stickyNote") {
-          drawResizeHandles(
-            ctx,
-            annotation,
-            scale,
-            annotation.type === "highlight"
-          );
-        }
-      });
-      
-      return; // Skip full rendering during movement
-    }
 
-    // Regular full rendering for non-movement operations
     // Clear the canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -536,7 +521,8 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
     });
 
     // Draw tool cursor indicators when tool is selected but not yet drawing
-    if (cursorPosition && !isDrawing && !isTextDragging && 
+    // Removed isTextDragging check from cursor indicator condition
+    if (cursorPosition && !isDrawing &&
         (currentTool === "text" || currentTool === "stickyNote")) {
       ctx.save();
       
@@ -671,9 +657,7 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
       } else if (currentTool === "highlight") {
         // For highlight tool, use special rendering with different opacity
         const originalAlpha = ctx.globalAlpha;
-        // Cap highlight opacity at 0.7 for consistency with final annotation
-        const highlightOpacity = Math.min(0.7, currentStyle.opacity);
-        ctx.globalAlpha = highlightOpacity;
+        ctx.globalAlpha = 0.3; // Highlights are semi-transparent
         ctx.lineWidth = 12 * scale; // Highlights are thicker
         
         // Draw the highlight as a rectangle to match the final shape
@@ -701,94 +685,7 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
       ctx.restore();
     }
     
-    // Draw text dragging preview
-    if (isTextDragging && textDragStart && textDragEnd) {
-      ctx.save();
-      const isSticky = currentTool === "stickyNote";
-      
-      // Calculate rectangle dimensions - use consistent naming with the rest of the code
-      const left = Math.min(textDragStart.x, textDragEnd.x);
-      const top = Math.min(textDragStart.y, textDragEnd.y);
-      const width = Math.abs(textDragEnd.x - textDragStart.x);
-      const height = Math.abs(textDragEnd.y - textDragStart.y);
-      
-      // Scale coordinates for rendering
-      const x = left * scale;
-      const y = top * scale;
-      const w = width * scale;
-      const h = height * scale;
-      
-      if (isSticky) {
-        // Show sticky note preview with fixed design
-        ctx.fillStyle = '#FFD700'; // Match actual sticky note color
-        ctx.globalAlpha = 0.6;
-        
-        // Draw rectangle
-        ctx.fillRect(x, y, w, h);
-        
-        // Draw folded corner
-        const cornerSize = Math.min(20 * scale, w/5, h/5); // Responsive corner size
-        ctx.beginPath();
-        ctx.moveTo(x + w - cornerSize, y);
-        ctx.lineTo(x + w, y + cornerSize);
-        ctx.lineTo(x + w, y);
-        ctx.closePath();
-        ctx.fillStyle = 'rgba(0,0,0,0.1)';
-        ctx.fill();
-        
-        // Add placeholder text lines to visualize content area
-        ctx.fillStyle = "rgba(0,0,0,0.5)";
-        const padding = 10 * scale; // Match padding in actual sticky note
-        const lineHeight = 16 * scale;
-        
-        // Draw sample lines with exact same padding as real sticky note
-        if (w > padding*2 && h > padding*2) {
-          for (let i = 0; i < Math.min(5, Math.floor((h - padding*2) / lineHeight)); i++) {
-            const lineWidth = Math.min(w - padding*2, (150 - i*20) * scale);
-            ctx.fillRect(x + padding, y + padding + (i*lineHeight), lineWidth, 2*scale);
-          }
-        }
-        
-        // Draw border to better show boundaries
-        ctx.strokeStyle = 'rgba(0,0,0,0.3)';
-        ctx.lineWidth = 1;
-        ctx.setLineDash([]);
-        ctx.strokeRect(x, y, w, h);
-      } else {
-        // Show text area preview
-        ctx.fillStyle = 'rgba(255,255,255,0.7)'; // Semi-transparent background
-        ctx.fillRect(x, y, w, h);
-        
-        // Draw border
-        ctx.strokeStyle = currentStyle.color;
-        ctx.lineWidth = 1;
-        ctx.setLineDash([3, 3]);
-        ctx.strokeRect(x, y, w, h);
-        
-        // Draw placeholder text with proper position and padding
-        const padding = 8 * scale; // Match text annotation padding
-        ctx.fillStyle = currentStyle.color;
-        ctx.font = '14px Arial';
-        
-        // Only draw placeholder text if enough space is available
-        if (w > padding*3 && h > padding*3) {
-          // Draw "Text" label
-          ctx.fillText('Text', x + padding, y + padding + 14*scale);
-          
-          // Draw placeholder lines with same padding as in text annotation
-          const fontSize = 14 * scale;
-          const lineHeight = fontSize * 1.2;
-          const lineY = y + padding + lineHeight;
-          
-          for (let i = 0; i < Math.min(3, Math.floor((h - padding*2 - lineHeight) / lineHeight)); i++) {
-            const lineWidth = Math.min(w - padding*2, (90 - i*15) * scale);
-            ctx.fillRect(x + padding, lineY + (i*lineHeight), lineWidth, 1*scale);
-          }
-        }
-      }
-      
-      ctx.restore();
-    }
+    // Removed text dragging preview logic
 
     // Draw selection box if active
     if (selectionBox) {
@@ -976,12 +873,7 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
       return;
     }
     
-    // Handle text tool dragging
-    if (isTextDragging && textDragStart) {
-      setTextDragEnd(point);
-      render();
-      return;
-    }
+    // Removed text dragging logic from mouse move
 
     // Handle auto-scrolling during object movement
     if (moveOffset && selectedAnnotations.length > 0) {
@@ -1087,24 +979,6 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
 
         setSelectedAnnotations(updatedAnnotations);
         setMoveOffset(point);
-        
-        // Dispatch special movement event to reduce rerendering
-        // This event will be caught by the Toolbar component
-        document.dispatchEvent(new CustomEvent('annotationMovement', {
-          bubbles: true,
-          detail: {
-            type: 'movement',
-            pageNumber: pageNumber,
-            count: updatedAnnotations.length
-          }
-        }));
-        
-        // Set dragging class on the container to help with detection
-        const container = document.querySelector('.annotation-canvas-container');
-        if (container && !container.classList.contains('dragging')) {
-          container.classList.add('dragging');
-        }
-        
         return;
       }
 
@@ -1231,9 +1105,7 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
         id: Date.now().toString(),
         type: currentTool as AnnotationType,
         points: currentPoints,
-        style: currentTool === "highlight" 
-          ? { ...currentStyle, opacity: Math.min(0.7, currentStyle.opacity) }
-          : currentStyle,
+        style: currentStyle,
         pageNumber,
         timestamp: Date.now(),
         userId: "current-user",
@@ -1247,27 +1119,7 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
       dispatchAnnotationChangeEvent("userDrawing", true);
     }
 
-    // Handle text tool completion
-    if (isTextDragging && textDragStart && textDragEnd) {
-      const isSticky = currentTool === "stickyNote";
-      setIsTextDragging(false);
-      setTextDragStart(null);
-      setTextDragEnd(null);
-
-      // Calculate dimensions for text input
-      const left = Math.min(textDragStart.x, textDragEnd.x);
-      const top = Math.min(textDragStart.y, textDragEnd.y);
-      const width = Math.abs(textDragEnd.x - textDragStart.x);
-      const height = Math.abs(textDragEnd.y - textDragStart.y);
-
-      // Only show text input if dragged area is large enough
-      const MIN_SIZE = 20 / scale;
-      if (width > MIN_SIZE && height > MIN_SIZE) {
-        setTextInputPosition({ x: left, y: top });
-        setTextDimensions({ width, height });
-        setIsEditingText(true);
-      }
-    }
+    // Removed text dragging completion logic
 
     // Reset all movement and drawing states
     setMoveOffset(null);
@@ -1280,13 +1132,7 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
 
     // Force render to ensure clean state
     render();
-
-    // Remove dragging class when mouse is released
-    const container = document.querySelector('.annotation-canvas-container');
-    if (container && container.classList.contains('dragging')) {
-      container.classList.remove('dragging');
-    }
-  }, [isDrawing, currentPoints, currentTool, currentStyle, pageNumber, documentId, store, scale, isTextDragging, textDragStart, textDragEnd, dispatchAnnotationChangeEvent, render]);
+  }, [isDrawing, currentPoints, currentTool, currentStyle, pageNumber, documentId, store, scale, dispatchAnnotationChangeEvent, render]); // Removed text dragging dependencies
 
   const handleMouseLeave = () => {
     if (isDrawing && currentTool === "freehand" && currentPoints.length >= 2) {
@@ -1380,7 +1226,8 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
     
     setTextInputPosition(null);
     setEditingAnnotation(null);
-    setTextDimensions(null);
+    // Removed setTextDimensions call again
+    store.clearSelection(); // Deselect annotation after completion
     dispatchAnnotationChangeEvent("textComplete");
   };
 
@@ -2083,17 +1930,6 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
     };
   }, []);
 
-  // Add cleanup effect to ensure dragging class is removed on unmount
-  useEffect(() => {
-    return () => {
-      // Remove dragging class when component unmounts
-      const container = document.querySelector('.annotation-canvas-container');
-      if (container && container.classList.contains('dragging')) {
-        container.classList.remove('dragging');
-      }
-    };
-  }, []);
-
   return (
     <>
       <canvas
@@ -2120,17 +1956,16 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
       />
       {isEditingText && textInputPosition && (
         <TextInput
+          ref={textInputRef} // Pass the ref here
           position={textInputPosition}
           onComplete={handleTextComplete}
           onCancel={handleTextCancel}
           scale={scale}
-          isSticky={
-            editingAnnotation
-              ? editingAnnotation.type === "stickyNote"
-              : currentTool === "stickyNote"
-          }
-          initialText={editingAnnotation?.style.text}
-          dimensions={textDimensions}
+          isSticky={editingAnnotation?.type === "stickyNote"} // Use editingAnnotation directly
+          initialText={editingAnnotation?.text} // Use .text directly
+          initialWidth={editingAnnotation?.width} // Pass initial size
+          initialHeight={editingAnnotation?.height} // Pass initial size
+          textOptions={editingAnnotation?.style.textOptions} // Pass text options
         />
       )}
       {contextMenu && (

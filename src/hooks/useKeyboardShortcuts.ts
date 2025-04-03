@@ -120,9 +120,9 @@ export const useKeyboardShortcuts = (
           action: () => setCurrentTool("arrow"),
         },
       ],
-      t: {
-        action: () => setCurrentTool("text"),
-      },
+      // t: {
+      //   action: () => setCurrentTool("text"),
+      // },
       h: {
         action: () => setCurrentTool("highlight"),
       },

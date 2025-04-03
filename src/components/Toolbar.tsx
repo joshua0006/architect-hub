@@ -323,6 +323,18 @@ export const Toolbar = ({ currentFolder }: ToolbarProps) => {
             />
           ))}
         </ToolbarSection>
+        <ToolbarSection title="Text">
+          {TOOLS.text.map((tool) => (
+            <ToolButton
+              key={tool.tool}
+              tool={tool.tool}
+              icon={tool.icon}
+              label={tool.label}
+              shortcut={getOptionalShortcut(tool)}
+              currentFolder={currentFolder}
+            />
+          ))}
+        </ToolbarSection>
         <ToolbarSection title="Style">{renderStyleSection()}</ToolbarSection>
         <div className="mt-auto border-t border-gray-200 p-2 space-y-2">
           <button
