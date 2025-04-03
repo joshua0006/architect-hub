@@ -24,6 +24,7 @@ import {
   Maximize,
   Minimize,
   List,
+  FileDown,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth } from "../contexts/AuthContext";
@@ -44,6 +45,9 @@ import {
 import { db } from "../lib/firebase";
 import { storage } from "../lib/firebase";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import { PDFDocument } from "pdf-lib";
+import JSZip from "jszip";
+import { saveAs } from "file-saver";
 import { PDFViewer } from "./PDFViewer";
 import { Toolbar } from "./Toolbar";
 import { Button } from "./ui/button";
@@ -66,6 +70,14 @@ import CommentText from './CommentText';
 import EnhancedCommentInput from './EnhancedCommentInput';
 import { DocumentVersion, DocumentComment } from "../types";
 import { NOTIFICATION_DOCUMENT_UPDATE_EVENT } from './NotificationIcon';
+import { Annotation } from '../types/annotation';
+import { drawAnnotation } from '../utils/drawingUtils';
+import * as pdfjs from 'pdfjs-dist';
+
+// Set the workerSrc for pdf.js - add this after other imports
+if (typeof window !== 'undefined' && !pdfjs.GlobalWorkerOptions.workerSrc) {
+  pdfjs.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
+}
 
 interface Document {
   id: string;
@@ -347,10 +359,12 @@ const VersionHistoryModal = ({
   versions,
   currentVersion,
   onClose,
+  onDownload,
 }: {
   versions: DocumentVersion[];
   currentVersion: number;
   onClose: () => void;
+  onDownload: (url: string, filename: string) => void;
 }) => {
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
@@ -393,16 +407,17 @@ const VersionHistoryModal = ({
                   </div>
                 </div>
                 {version.accessible ? (
-                  <a
-                    href={version.url}
-                    download
-                    target="_blank"
-                    rel="noopener noreferrer"
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const filename = version.metadata.originalFilename || `version_${version.version}.pdf`;
+                      onDownload(version.url, filename);
+                    }}
                     className="ml-4 px-3 py-1.5 text-sm text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-md transition-colors flex items-center space-x-1"
                   >
                     <Download className="w-4 h-4" />
                     <span>Download</span>
-                  </a>
+                  </button>
                 ) : (
                   <div className="ml-4 px-3 py-1.5 text-sm text-gray-500 flex items-center space-x-1">
                     <AlertCircle className="w-4 h-4" />
@@ -468,6 +483,10 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
   const unsubscribeRef = useRef<(() => void) | null>(null);
   const [showAllVersions, setShowAllVersions] = useState(false);
   const MAX_VISIBLE_VERSIONS = 3;
+  const [isProcessingDownload, setIsProcessingDownload] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
+  const [progressMessage, setProgressMessage] = useState('Initializing processing...');
   
   // Add CSS for highlight animation in JSX
   const highlightStyles = `
@@ -521,6 +540,9 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
       parentFolder: currentFolder.parentId ? folders.find(f => f.id === currentFolder.parentId) : null
     };
   }, [currentFolder, folderPath, folders]);
+
+  // Add state to track document updates
+  const [documentUpdateKey, setDocumentUpdateKey] = useState(Date.now());
 
   useEffect(() => {
     if (!document.id) return;
@@ -602,6 +624,18 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
       console.log(`Received notification update event for document ${documentId}, comment ${commentId}, file ${fileId}`);
       console.log(`Notification type: ${notificationType}, fileName: ${fileName}`);
       
+      // Check if we need to refresh the current document view (even for same document)
+      const needsRefresh = fileId === document.id || documentId === document.id;
+      
+      // If we have a refresh function, call it to make sure we have latest content
+      if (needsRefresh && onRefresh) {
+        console.log('Refreshing document content from notification event');
+        onRefresh();
+        
+        // Force PDFViewer to remount by updating its key
+        setDocumentUpdateKey(Date.now());
+      }
+      
       // Only process if this is the same document we're viewing
       if (documentId && document.id === documentId) {
         // Handle comment notifications
@@ -667,7 +701,7 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
         handleNotificationUpdate as EventListener
       );
     };
-  }, [document.id, document.name]);
+  }, [document.id, document.name, onRefresh]);
 
   // Add a useEffect to handle the navigation coming from notifications
   useEffect(() => {
@@ -1387,8 +1421,326 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
     setCurrentDocName(document.name);
   }, [document.name]);
 
+  // Add PDF optimization and download function
+  const handleOptimizedDownload = async (url: string, filename: string) => {
+    try {
+      setIsProcessingDownload(true);
+      setDownloadProgress(0);
+      setProgressMessage('Initializing processing...');
+
+      // Fetch PDF
+      setDownloadProgress(10);
+      setProgressMessage('Fetching PDF document...');
+      const response = await fetch(url);
+      if (!response.ok) throw new Error('Failed to fetch PDF');
+      const pdfBlob = await response.blob();
+      const arrayBuffer = await pdfBlob.arrayBuffer();
+      
+      // Load PDF
+      setDownloadProgress(20);
+      setProgressMessage('Processing PDF document...');
+      const sourcePdfDoc = await PDFDocument.load(arrayBuffer);
+      const pages = sourcePdfDoc.getPages();
+      setTotalPages(pages.length);
+      
+      // Create a new optimized PDF document
+      const optimizedPdf = await PDFDocument.create();
+      const progressIncrement = 70 / pages.length; // Allocate 70% of progress for page processing
+      
+      // Process each page
+      for (let i = 0; i < pages.length; i++) {
+        const pageNumber = i + 1;
+        setProgressMessage(`Processing page ${pageNumber} of ${pages.length}...`);
+        
+        // Copy the page to the new document
+        const [copiedPage] = await optimizedPdf.copyPages(sourcePdfDoc, [i]);
+        optimizedPdf.addPage(copiedPage);
+        
+        // Update progress
+        setDownloadProgress(prev => Math.min(prev + progressIncrement, 90));
+      }
+      
+      // Set document metadata
+      optimizedPdf.setTitle(`Optimized: ${filename}`);
+      optimizedPdf.setCreator('Architect Hub PDF Viewer');
+      optimizedPdf.setProducer('Architect Hub');
+      
+      // Save the optimized PDF with best compression settings
+      setDownloadProgress(90);
+      setProgressMessage('Finalizing document...');
+      const optimizedBytes = await optimizedPdf.save({
+        useObjectStreams: true,
+        addDefaultPage: false,
+        objectsPerTick: 100
+      });
+      
+      // Create a blob and download
+      const outputFilename = `${filename.replace(/\.pdf$/i, '')}_optimized.pdf`;
+      const blob = new Blob([optimizedBytes], { type: 'application/pdf' });
+      saveAs(blob, outputFilename);
+      
+      // Finalize
+      setDownloadProgress(100);
+      setTimeout(() => {
+        setIsProcessingDownload(false);
+        setDownloadProgress(0);
+        setTotalPages(0);
+      }, 1000);
+    } catch (error) {
+      console.error('Error processing PDF:', error);
+      setIsProcessingDownload(false);
+      setDownloadProgress(0);
+      setTotalPages(0);
+      alert('Failed to process PDF. Please try again.');
+    }
+  };
+
+  // Add a new function for compressed download
+  const handleCompressedDownload = async (url: string, filename: string, annotations?: Annotation[], pageFilter?: number): Promise<void> => {
+    try {
+      setIsProcessingDownload(true);
+      setDownloadProgress(0);
+      setProgressMessage('Initializing processing...');
+      
+      // Fetch PDF
+      setDownloadProgress(10);
+      setProgressMessage('Fetching PDF document...');
+      const response = await fetch(url);
+      if (!response.ok) throw new Error('Failed to fetch PDF');
+      const pdfBlob = await response.blob();
+      const arrayBuffer = await pdfBlob.arrayBuffer();
+      
+      // Load PDF with PDF-lib for better compression
+      setDownloadProgress(20);
+      setProgressMessage('Processing PDF document...');
+      const sourcePdfDoc = await PDFDocument.load(arrayBuffer);
+      const pages = sourcePdfDoc.getPages();
+      
+      // If we're filtering to a specific page, adjust the total pages
+      let pagesToProcess: number[] = [];
+      if (pageFilter !== undefined && pageFilter > 0 && pageFilter <= pages.length) {
+        // Only process the specified page (0-indexed in the array, but 1-indexed in the UI)
+        pagesToProcess = [pageFilter - 1];
+        setTotalPages(1);
+        setProgressMessage(`Processing page ${pageFilter}...`);
+      } else {
+        // Process all pages
+        pagesToProcess = Array.from({ length: pages.length }, (_, i) => i);
+        setTotalPages(pages.length);
+      }
+      
+      // Check if we have annotations to include
+      const hasAnnotations = annotations && annotations.length > 0;
+      
+      if (hasAnnotations) {
+        console.log(`Processing ${annotations!.length} annotations for PDF download`);
+        setDownloadProgress(25);
+        setProgressMessage(`Including ${annotations!.length} annotations across document pages...`);
+      }
+      
+      // Create a new PDF document that will contain all pages
+      const mergedPdfDoc = await PDFDocument.create();
+      const progressIncrement = 70 / pagesToProcess.length; // Allocate 70% of progress for page processing
+      
+      // Process selected pages
+      for (let i = 0; i < pagesToProcess.length; i++) {
+        const pageIndex = pagesToProcess[i];
+        const pageNumber = pageIndex + 1; // 1-indexed page number 
+        setProgressMessage(`Processing page ${pageNumber}${hasAnnotations ? ' with annotations' : ''}...`);
+        
+        // Get annotations for this page
+        const pageAnnotations = hasAnnotations 
+          ? annotations!.filter(a => a.pageNumber === pageNumber)
+          : [];
+        
+        // Copy the page from source document
+        const [copiedPage] = await mergedPdfDoc.copyPages(sourcePdfDoc, [pageIndex]);
+        const page = mergedPdfDoc.addPage(copiedPage);
+        const { width, height } = page.getSize();
+        
+        // If we have annotations for this page, render them onto the page
+        if (pageAnnotations.length > 0) {
+          console.log(`Including ${pageAnnotations.length} annotations on page ${pageNumber}`);
+          
+          try {
+            // Create a canvas for annotations
+            const canvas = window.document.createElement('canvas');
+            const ctx = canvas.getContext('2d', { alpha: true });
+            
+            // Create high-resolution canvas for annotations
+            const scaleFactor = 2.0;
+            canvas.width = width * scaleFactor;
+            canvas.height = height * scaleFactor;
+            
+            if (!ctx) {
+              throw new Error("Failed to get canvas context");
+            }
+            
+            // Set high-quality rendering
+            ctx.imageSmoothingEnabled = true;
+            ctx.imageSmoothingQuality = 'high';
+            
+            // Scale the context to match our higher resolution
+            ctx.scale(scaleFactor, scaleFactor);
+            
+            // Make the canvas transparent to only show annotations
+            ctx.clearRect(0, 0, width, height);
+            
+            // Get page rotation information from the source page
+            const pageRotation = copiedPage.getRotation().angle;
+            console.log(`Page ${pageNumber} rotation: ${pageRotation} degrees`);
+            
+            // If the page is rotated, apply appropriate transformation to the canvas
+            if (pageRotation !== 0) {
+              // Save the canvas state before transformations
+              ctx.save();
+              
+              // Get the center of the page
+              const centerX = width / 2;
+              const centerY = height / 2;
+              
+              // Translate to center, rotate to match page orientation, then translate back
+              ctx.translate(centerX, centerY);
+              ctx.rotate((-pageRotation * Math.PI) / 180); // Use negative rotation to counter the page rotation
+              
+              // For 90 or 270 degree rotations, we need different translations due to dimension swapping
+              if (pageRotation === 90 || pageRotation === 270) {
+                ctx.translate(-centerY, -centerX);
+              } else {
+                ctx.translate(-centerX, -centerY);
+              }
+            }
+            
+            // Draw annotations on the canvas
+            pageAnnotations.forEach(annotation => {
+              try {
+                // Save context state
+                ctx.save();
+                
+                // Calculate line width based on annotation type
+                let lineWidthMultiplier = 1.25;
+                
+                // Adjust line width based on annotation type
+                if (annotation.type === 'highlight') {
+                  ctx.globalCompositeOperation = 'multiply';
+                  ctx.globalAlpha = 0.5;
+                  lineWidthMultiplier = 1.5;
+                } else if (annotation.type === 'arrow' || annotation.type === 'line') {
+                  lineWidthMultiplier = 1.75;
+                  ctx.lineCap = 'round';
+                  ctx.lineJoin = 'round';
+                } else if (annotation.type === 'rectangle' || annotation.type === 'circle') {
+                  lineWidthMultiplier = 1.5;
+                } else if (annotation.type === 'text' || annotation.type === 'stickyNote') {
+                  const fontSize = 14;
+                  ctx.font = `${fontSize}px Arial, sans-serif`;
+                  ctx.textBaseline = 'top';
+                  
+                  if (annotation.style?.color) {
+                    ctx.fillStyle = annotation.style.color;
+                  } else {
+                    ctx.fillStyle = '#000000';
+                  }
+                  
+                  ctx.globalAlpha = 1.0;
+                }
+                
+                // Apply enhanced stroke settings
+                ctx.lineWidth = ((annotation as any).strokeWidth || 1) * lineWidthMultiplier;
+                ctx.lineJoin = 'round';
+                ctx.lineCap = 'round';
+                ctx.miterLimit = 2;
+                
+                // Apply annotation style
+                if (annotation.style) {
+                  if (annotation.style.color) {
+                    ctx.strokeStyle = annotation.style.color;
+                    ctx.fillStyle = annotation.style.color;
+                  }
+                  
+                  if (annotation.style.opacity !== undefined && annotation.type !== 'highlight') {
+                    ctx.globalAlpha = annotation.style.opacity;
+                  }
+                }
+                
+                // Draw the annotation
+                drawAnnotation(ctx, annotation, 1.0);
+                
+                // Restore context state
+                ctx.restore();
+              } catch (err) {
+                console.error(`Error drawing annotation on page ${pageNumber}:`, err);
+              }
+            });
+            
+            // If we applied page rotation, restore the canvas state
+            if (pageRotation !== 0) {
+              ctx.restore();
+            }
+            
+            // Convert annotations to an image and embed in PDF
+            const annotationsImage = canvas.toDataURL('image/png', 1.0);
+            const annotationLayer = await mergedPdfDoc.embedPng(annotationsImage);
+            
+            // Draw annotations on top of the page
+            page.drawImage(annotationLayer, {
+              x: 0,
+              y: 0,
+              width: width,
+              height: height,
+            });
+            
+            console.log(`Successfully added annotations to page ${pageNumber}`);
+          } catch (renderError) {
+            console.error(`Error rendering annotations for page ${pageNumber}:`, renderError);
+            // Continue with the page without annotations if rendering fails
+          }
+        }
+        
+        // Update progress
+        setDownloadProgress(prev => Math.min(prev + progressIncrement, 90));
+      }
+      
+      // Save the merged PDF
+      setDownloadProgress(90);
+      setProgressMessage('Finalizing PDF document...');
+      const mergedPdfBytes = await mergedPdfDoc.save();
+      
+      // Create a blob and download
+      // Ensure output filename always has .pdf extension
+      let outputFilename = '';
+      if (pageFilter !== undefined) {
+        // Use the filename directly as it's already formatted correctly from PDFViewer
+        outputFilename = filename.toLowerCase().endsWith('.pdf') ? filename : `${filename}.pdf`;
+      } else {
+        // For full document downloads, add appropriate suffix
+        const baseFilename = filename.replace(/\.pdf$/i, '');
+        outputFilename = hasAnnotations 
+          ? `${baseFilename}_with_annotations.pdf`
+          : `${baseFilename}_compiled.pdf`;
+      }
+      
+      const blob = new Blob([mergedPdfBytes], { type: 'application/pdf' });
+      saveAs(blob, outputFilename);
+      
+      // Finalize
+      setDownloadProgress(100);
+      setTimeout(() => {
+        setIsProcessingDownload(false);
+        setDownloadProgress(0);
+        setTotalPages(0);
+      }, 1000);
+    } catch (error) {
+      console.error('Error processing PDF:', error);
+      setIsProcessingDownload(false);
+      setDownloadProgress(0);
+      setTotalPages(0);
+      alert('Failed to process PDF. Please try again.');
+    }
+  };
+
   return (
-    <div className={`flex flex-col ${isFullscreen ? 'fixed inset-0 z-50 bg-white' : 'h-full'}`}>
+    <div className={`flex flex-col ${isFullscreen ? 'fixed inset-0 z-50 bg-white' : 'h-full overflow-auto'}`}>
       {/* Add style tag for highlight animation */}
       <style>{highlightStyles}</style>
       
@@ -1411,6 +1763,29 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
         </div>
       )}
       
+      {/* Processing download overlay */}
+      {isProcessingDownload && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
+          <div className="bg-white p-6 rounded-lg shadow-xl max-w-sm w-full">
+            <div className="flex flex-col items-center">
+              <FileDown className="w-12 h-12 text-blue-500 mb-4" />
+              <h3 className="text-lg font-medium mb-3">
+                {downloadProgress < 90 ? 'Processing Pages...' : 'Packaging ZIP...'}
+              </h3>
+              <div className="w-full bg-gray-200 rounded-full h-2.5">
+                <div 
+                  className="bg-blue-600 h-2.5 rounded-full transition-all duration-300 ease-in-out" 
+                  style={{width: `${downloadProgress}%`}}
+                ></div>
+              </div>
+              <p className="mt-2 text-sm text-gray-500">
+                {progressMessage}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+      
       {/* Document Header */}
       <div
         className={`bg-white border-b border-gray-200 transition-all ${
@@ -1418,7 +1793,8 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
         }`}
       >
         <div
-          className="flex items-center justify-between p-4 hover:bg-gray-50"
+          className="flex items-center justify-between p-4 hover:bg-gray-50 cursor-pointer"
+          onClick={() => setIsExpanded(!isExpanded)}
         >
           <div className="flex items-center space-x-4">
             {isFullscreen && (
@@ -1464,15 +1840,15 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
             <span className="px-2 py-1 text-xs font-medium uppercase rounded-full bg-gray-100 text-gray-800">
               {document.type}
             </span>
-            <a
-              href={document.url}
-              download
-              target="_blank"
-              rel="noopener noreferrer"
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                handleOptimizedDownload(document.url, document.name);
+              }}
               className="p-2 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100"
             >
               <Download className="w-5 h-5" />
-            </a>
+            </button>
             {document.type === "pdf" && (
               <button 
                 onClick={toggleFullscreen} 
@@ -1554,16 +1930,18 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
                             </div>
                           </div>
                           {version.accessible ? (
-                            <a
-                              href={version.url}
-                              download
-                              target="_blank"
-                              rel="noopener noreferrer"
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                e.preventDefault();
+                                const filename = version.metadata?.originalFilename || `version_${version.version}.pdf`;
+                                handleOptimizedDownload(version.url, filename);
+                              }}
                               className="ml-4 px-3 py-1.5 text-sm text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-md transition-colors flex items-center space-x-1"
                             >
                               <Download className="w-4 h-4" />
                               <span>Download</span>
-                            </a>
+                            </button>
                           ) : (
                             <div className="ml-4 px-3 py-1.5 text-sm text-gray-500 flex items-center space-x-1">
                               <AlertCircle className="w-4 h-4" />
@@ -1588,6 +1966,7 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
                 versions={versions}
                 currentVersion={currentVersion}
                 onClose={() => setShowAllVersions(false)}
+                onDownload={handleOptimizedDownload}
               />
             )}
 
@@ -1688,33 +2067,33 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
         )}
       </div>
 
-      {/* Document Content */}
+      {/* Document Content - Ensure it's scrollable in single file view */}
       <div 
         className={`${isFullscreen ? 'flex-1' : 'flex-1 bg-gray-100 p-4'}`}
-        onDragOver={(e) => {
-          // Prevent default to allow drop but don't set isDragging 
-          // when we're in the PDF viewer area or fullscreen
-          e.preventDefault();
-        }}
-        onDrop={(e) => {
-          // Prevent default behavior to avoid browser opening the file
-          e.preventDefault();
-        }}
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={(e) => e.preventDefault()}
       >
         {document.type === "pdf" ? (
           <div className={`flex h-full ${isFullscreen ? 'gap-0' : 'gap-4'}`}>
             <Toolbar currentFolder={enhancedFolderInfo} />
             <div
-              className={`relative bg-white ${isFullscreen ? '' : 'rounded-lg shadow-sm p-4'} flex-1 document-content`}
-              style={{ height: "100%" }}
+              className={`relative bg-white ${isFullscreen ? '' : 'rounded-lg shadow-sm p-4'} flex-1 document-content overflow-auto`}
+              style={{ height: isFullscreen ? "100%" : "calc(100vh - 200px)", maxHeight: "100%" }}
               onDragOver={(e) => e.preventDefault()}
               onDrop={(e) => e.preventDefault()}
             >
-              <PDFViewer file={document.url} documentId={document.id} />
+              <PDFViewer 
+                key={`${document.id}-${document.url}-${documentUpdateKey}`}
+                file={document.url}
+                documentId={document.id}
+                documentName={currentDocName || document.name}
+                onDownloadCompressed={handleCompressedDownload} 
+              />
             </div>
           </div>
         ) : isImage(document.name, document.metadata?.contentType) ? (
-          <div className="h-full flex items-center justify-center bg-white rounded-lg shadow-sm p-4 document-content">
+          <div className="h-full flex items-center justify-center bg-white rounded-lg shadow-sm p-4 document-content overflow-auto" 
+               style={{ maxHeight: isFullscreen ? "100%" : "calc(100vh - 200px)" }}>
             <img 
               src={document.url} 
               alt={document.name} 
@@ -1723,7 +2102,8 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
             />
           </div>
         ) : isVideo(document.name, document.metadata?.contentType) ? (
-          <div className="h-full flex items-center justify-center bg-white rounded-lg shadow-sm p-4 document-content">
+          <div className="h-full flex items-center justify-center bg-white rounded-lg shadow-sm p-4 document-content overflow-auto"
+               style={{ maxHeight: isFullscreen ? "100%" : "calc(100vh - 200px)" }}>
             <video 
               src={document.url} 
               controls 
@@ -1734,7 +2114,8 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
             </video>
           </div>
         ) : isAudio(document.name, document.metadata?.contentType) ? (
-          <div className="h-full flex items-center justify-center bg-white rounded-lg shadow-sm p-4 document-content">
+          <div className="h-full flex items-center justify-center bg-white rounded-lg shadow-sm p-4 document-content overflow-auto"
+               style={{ maxHeight: isFullscreen ? "100%" : "calc(100vh - 200px)" }}>
             <div className="flex flex-col items-center">
               <p className="mb-2 text-gray-700">{document.name}</p>
               <audio 
@@ -1748,18 +2129,18 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
             </div>
           </div>
         ) : (
-          <div className="h-full flex items-center justify-center bg-white rounded-lg shadow-sm document-content">
+          <div className="h-full flex items-center justify-center bg-white rounded-lg shadow-sm document-content overflow-auto"
+               style={{ maxHeight: isFullscreen ? "100%" : "calc(100vh - 200px)" }}>
             <div className="text-center">
               <p className="text-gray-500 mb-4">
                 This file type cannot be previewed directly
               </p>
-              <a
-                href={document.url}
-                download
+              <button
+                onClick={() => handleOptimizedDownload(document.url, document.name)}
                 className="px-4 py-2 text-sm text-white bg-blue-500 rounded-md hover:bg-blue-600 transition-colors"
               >
                 Download File
-              </a>
+              </button>
             </div>
           </div>
         )}
