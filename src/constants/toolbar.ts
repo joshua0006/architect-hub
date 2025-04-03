@@ -138,7 +138,7 @@ export const TOOLS = {
       label: "Text",
       shortcut: KEYBOARD_SHORTCUTS.tools.text,
     },
-    { tool: "stickyNote", icon: StickyNote, label: "Sticky Note" },
+    // { tool: "stickyNote", icon: StickyNote, label: "Sticky Note" },
   ],
   stamps: [
     {
