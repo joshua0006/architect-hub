@@ -978,7 +978,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     // Update the scale
     setScale(cappedScale);
     // Trigger debounced render after scale update
-    debouncedRenderPdfPage();
 
     // Disable automatic fit to width for future page changes
     disableFitToWidthRef.current = true;
@@ -1025,7 +1024,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     // Update the scale
     setScale(cappedScale);
     // Trigger debounced render after scale update
-    debouncedRenderPdfPage();
 
     // Disable automatic fit to width for future page changes
     disableFitToWidthRef.current = true;
