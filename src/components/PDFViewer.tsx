@@ -23,7 +23,7 @@ import { KeyboardShortcutGuide } from "./KeyboardShortcutGuide";
 import { useKeyboardShortcutGuide } from "../hooks/useKeyboardShortcutGuide";
 import { jsPDF } from "jspdf";
 import * as pdfjs from "pdfjs-dist";
-
+import { debounce } from "../utils/debounce";
 interface PDFViewerProps {
   file: File | string;
   documentId: string;
@@ -305,15 +305,15 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     
     console.log('[PDFViewer] Navigating to previous page:', prevPage);
     
-    // Cancel any current render
-    if (renderTaskRef.current) {
+    // Cancel any current render task robustly
+    if (renderTaskRef.current && typeof renderTaskRef.current.cancel === 'function') {
       try {
         renderTaskRef.current.cancel();
-      } catch (error) {
-        console.error('[PDFViewer] Error cancelling render task:', error);
+      } catch (e) {
+        console.error('[PDFViewer] Error cancelling render task in handlePrevPage:', e);
       }
-      renderTaskRef.current = null;
     }
+    renderTaskRef.current = null; // Ensure ref is cleared
     
     // Track when we started this navigation attempt
     renderAttemptTimestampRef.current = Date.now();
@@ -371,15 +371,15 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     
     console.log('[PDFViewer] Navigating to next page:', nextPage);
     
-    // Cancel any current render
-    if (renderTaskRef.current) {
+    // Cancel any current render task robustly
+    if (renderTaskRef.current && typeof renderTaskRef.current.cancel === 'function') {
       try {
         renderTaskRef.current.cancel();
-      } catch (error) {
-        console.error('[PDFViewer] Error cancelling render task:', error);
+      } catch (e) {
+        console.error('[PDFViewer] Error cancelling render task in handleNextPage:', e);
       }
-      renderTaskRef.current = null;
     }
+    renderTaskRef.current = null; // Ensure ref is cleared
     
     // Track when we started this navigation attempt
     renderAttemptTimestampRef.current = Date.now();
@@ -431,77 +431,20 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
         return;
       }
 
-      // Calculate quality multiplier based on scale
-      // Higher zoom levels use higher quality rendering for better text clarity
-      const qualityMultiplier = scale > 2.5 ? 2.0 : 
-                               scale > 1.5 ? 1.5 : 
-                               scale > 1.0 ? 1.2 : 1.0;
-      
-      // Generate a cache key based on fileId, scale, and quality multiplier
-      const cacheKey = `${fileId}_${scale.toFixed(2)}_${qualityMultiplier.toFixed(1)}`;
-      
-      // Check if we have this page cached
-      if (pageCanvasCache.has(cacheKey)) {
-        const pageCache = pageCanvasCache.get(cacheKey)!;
-        if (pageCache.has(currentPage)) {
-          console.log(`[PDFViewer] Using cached page ${currentPage}`);
-          
-          // Draw the cached image data
-          ctx.putImageData(pageCache.get(currentPage)!, 0, 0);
-          
-          // Update timestamp to mark this page as recently used
-          const timestampMap = pageCacheTimestamps.get(cacheKey) || new Map<number, number>();
-          timestampMap.set(currentPage, Date.now());
-          pageCacheTimestamps.set(cacheKey, timestampMap);
-          
-          // Mark this page as rendered
-          if (!hasRenderedOnceRef.current[currentPage]) {
-            hasRenderedOnceRef.current[currentPage] = true;
-          }
-          renderedPagesRef.current.add(currentPage);
-          cachedPagesRef.current.add(currentPage);
-          
-          // Update states to reflect completion
-          setPageChangeInProgress(false);
-          setIsRendering(false);
-          setRenderComplete(true);
-          
-          // Dispatch annotation rendering event
-          let annotations: any[] = [];
-          try {
-            if (documentId && currentPage) {
-              annotations = annotationStore.documents[documentId]?.annotations?.filter(
-                (a: any) => a.pageNumber === currentPage
-              ) || [];
-            }
-          } catch (err) {
-            console.warn('[PDFViewer] Error accessing annotations:', err);
-          }
-          
-          setCurrentAnnotations(annotations);
-          document.dispatchEvent(
-            new CustomEvent('renderAnnotations', {
-              detail: { 
-                pageNumber: currentPage,
-                annotations 
-              },
-            })
-          );
-          
-          // Center the document after a brief delay
-          setTimeout(() => {
-            scrollToCenterDocument();
-          }, 50);
-          
-          return;
+      // Re-introduce quality multiplier
+      const qualityMultiplier = scale > 2.5 ? 2.5 : // Increased multiplier
+                               scale > 1.5 ? 2.0 : // Increased multiplier
+                               scale > 1.0 ? 1.5 : 1.0; // Increased multiplier
+
+      // Cancel any in-progress render tasks robustly
+      if (renderTaskRef.current && typeof renderTaskRef.current.cancel === 'function') {
+        try {
+          renderTaskRef.current.cancel();
+        } catch (e) {
+          console.error('[PDFViewer] Error cancelling render task in renderPdfPage:', e);
         }
       }
-
-      // Cancel any in-progress render tasks
-      if (renderTaskRef.current) {
-        renderTaskRef.current.cancel();
-        renderTaskRef.current = null;
-      }
+      renderTaskRef.current = null; // Ensure ref is cleared
 
       // Set render lock to prevent overlapping renders
       renderLockRef.current = true;
@@ -510,7 +453,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
       setIsRendering(true);
       
       // Log only when starting a new render (not for retries)
-      console.log(`[PDFViewer] Rendering page ${currentPage} with quality multiplier ${qualityMultiplier}`);
+      console.log(`[PDFViewer] Rendering page ${currentPage} at scale ${scale.toFixed(2)} with quality ${qualityMultiplier}`);
 
       // Get the PDF page
       pdf.getPage(currentPage).then(
@@ -531,29 +474,39 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
             // while maintaining aspect ratio
             const displayScale = scale;
             
-            // Apply quality multiplier to the viewport scale for better text quality
-            // but render at the display scale for proper sizing
+            // Calculate viewport considering quality multiplier
             viewport = page.getViewport({ scale: displayScale * qualityMultiplier });
 
-            // Set canvas dimensions to match the high-quality viewport
-            canvas.height = viewport.height;
-            canvas.width = viewport.width;
+            // Get device pixel ratio for high-res displays
+            const devicePixelRatio = window.devicePixelRatio || 1; // Use actual device pixel ratio
+
+            // Set canvas buffer size considering device pixel ratio
+            canvas.width = viewport.width * devicePixelRatio;
+            canvas.height = viewport.height * devicePixelRatio;
             
-            // Scale down the display canvas size to match the display scale
-            // This maintains the same visual size while rendering at higher resolution
+            // Set canvas display size (CSS pixels) dividing by qualityMultiplier
             canvas.style.width = `${viewport.width / qualityMultiplier}px`;
             canvas.style.height = `${viewport.height / qualityMultiplier}px`;
             
             // Enable high-quality image rendering on the context
-            (ctx as any).imageSmoothingEnabled = true;
-            (ctx as any).imageSmoothingQuality = 'high';
+            (ctx as any).imageSmoothingEnabled = true; // Re-enable smoothing
+            (ctx as any).imageSmoothingQuality = 'high'; // Set quality to high
+
+            // Explicitly clear the canvas *before* scaling the context
+            // Use the canvas buffer dimensions (already includes devicePixelRatio)
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Scale the context to account for device pixel ratio
+            ctx.scale(devicePixelRatio, devicePixelRatio);
+            // Removed textRendering attempt
 
             // Define render parameters with enhanced text rendering
             const renderContext = {
               canvasContext: ctx,
               viewport: viewport,
               // Use print intent for better text quality at high zoom levels
-              intent: scale > 1.5 ? "print" : "display"
+              intent: scale > 1.0 ? "print" : "display" // Lower threshold for print intent
+              // Removed enableWebGL: true
             };
 
             // Start the render task
@@ -562,46 +515,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
             // Handle successful render
             renderTaskRef.current.promise.then(
               () => {
-                // Cache the rendered page
-                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-                
-                // Initialize cache maps if needed
-                if (!pageCanvasCache.has(cacheKey)) {
-                  pageCanvasCache.set(cacheKey, new Map<number, ImageData>());
-                  pageCacheTimestamps.set(cacheKey, new Map<number, number>());
-                }
-                
-                const pageCache = pageCanvasCache.get(cacheKey)!;
-                const timestampMap = pageCacheTimestamps.get(cacheKey)!;
-                
-                // Add the page to cache
-                pageCache.set(currentPage, imageData);
-                timestampMap.set(currentPage, Date.now());
-                
-                // Prune cache if it's getting too large
-                if (pageCache.size > MAX_CACHED_PAGES) {
-                  // Find the oldest page
-                  let oldestPage = currentPage;
-                  let oldestTime = Date.now();
-                  
-                  timestampMap.forEach((timestamp, page) => {
-                    if (timestamp < oldestTime) {
-                      oldestTime = timestamp;
-                      oldestPage = page;
-                    }
-                  });
-                  
-                  // Remove the oldest page from cache
-                  if (oldestPage !== currentPage) {
-                    pageCache.delete(oldestPage);
-                    timestampMap.delete(oldestPage);
-                    console.log(`[PDFViewer] Removed page ${oldestPage} from cache to free up space`);
-                  }
-                }
-                
-                // Mark this page as cached
-                cachedPagesRef.current.add(currentPage);
-                
+                // Removed caching logic associated with qualityMultiplier
                 // Reset render lock
                 renderLockRef.current = false;
                 
@@ -684,15 +598,16 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
       setIsRendering(false);
     }
   }, [
-    pdf, 
-    currentPage, 
-    scale, 
-    canvasRef, 
-    containerRef, 
-    fileId, 
-    documentId, 
-    annotationStore, 
-    pageChangeInProgress, 
+    // Dependencies removed: currentPage, scale (read directly from state/refs inside)
+    pdf,
+    // currentPage,
+    // scale,
+    canvasRef,
+    containerRef,
+    fileId,
+    documentId,
+    annotationStore,
+    pageChangeInProgress,
     scrollToCenterDocument
   ]);
 
@@ -764,63 +679,28 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
   }, [currentPage, pdf, fileId, pageChangeInProgress, renderPdfPage]);
 
   // Update the useEffect for rendering the PDF page
+  // Debounced render function
+  const debouncedRenderPdfPage = useCallback(
+    debounce(() => {
+      // Call the main render function. It will access the latest state/refs.
+      renderPdfPage();
+    }, 75),
+    [renderPdfPage] // Re-create debounce if renderPdfPage changes
+  );
+
+  // Effect to handle the very first render when the page object becomes available
   useEffect(() => {
-    // Skip if there's no valid page to render or necessary components
-    if (!page || !canvasRef.current || !fileId || !pdf) {
-      return;
+    // Only run if we have a page and the initial render hasn't completed yet
+    if (page && !initialRenderCompletedRef.current && pdf && !pageChangeInProgress && !isRendering) {
+      console.log(`[PDFViewer] Triggering initial render for page ${currentPage}`);
+      renderPdfPage(); // Call the non-debounced render for immediate display
+      initialRenderCompletedRef.current = true; // Mark initial render as complete
     }
-    
-    // If we were navigating to this page, the dedicated page change effect will handle it
-    if (pageChangeInProgress) {
-      return;
-    }
-    
-    // Don't render if there's an active render
-    if (isRendering || renderLockRef.current) {
-      console.log("[PDFViewer] Skipping render - already in progress");
-      return;
-    }
-    
-    // Check for annotation-only updates from AnnotationCanvas
-    const annotationCanvas = document.querySelector('.annotation-canvas-container canvas') as HTMLCanvasElement;
-    const isAnnotationUpdate = annotationCanvas?.dataset?.forceRender === 'true';
-    
-    // Only skip rendering if this isn't an annotation update and the page has already been rendered
-    if (!isAnnotationUpdate && 
-        hasRenderedOnceRef.current[currentPage] && 
-        (renderedPagesRef.current.has(currentPage) || 
-          alreadyRenderedFiles.get(fileId)?.has(currentPage))) {
-      
-      // Ensure state is set correctly
-      setRenderComplete(true);
-      setIsRendering(false);
-      
-      // Make sure the page is centered
-      setTimeout(() => {
-        scrollToCenterDocument();
-      }, 100);
-      
-      return;
-    }
-    
-    // Start the rendering process
-    setIsRendering(true);
-    
-    // Log rendering reason
-    if (isAnnotationUpdate) {
-      console.log(`[PDFViewer] Rendering page ${currentPage} for annotation update`);
-    } else {
-      console.log(`[PDFViewer] Rendering page ${currentPage} (initial or forced render)`);
-    }
-    
-    // Initialize file tracking if needed
-    if (!alreadyRenderedFiles.has(fileId)) {
-      alreadyRenderedFiles.set(fileId, new Set());
-    }
-    
-    // Render the PDF page
-    renderPdfPage();
-  }, [page, canvasRef, renderPdfPage, isRendering, pageChangeInProgress, fileId, pdf, currentPage, scrollToCenterDocument]);
+  }, [page, pdf, currentPage, renderPdfPage, pageChangeInProgress, isRendering]); // Depend on page, pdf, and render function
+
+  // Effect to trigger rendering when dependencies change
+  // Removed useEffect hook that triggered debounced render based on page/scale changes.
+  // Debounced render is now triggered directly from zoom handlers.
 
   // Mark viewer as ready when the PDF is loaded
   useEffect(() => {
@@ -868,7 +748,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     console.log(`[PDFViewer] New dimensions: ${newWidth.toFixed(0)}x${newHeight.toFixed(0)}`);
     
     // Update the scale
-    setScale(newScale);
+    setScale(newScale); // Use direct setter
     
     // Scroll to center after a brief delay to ensure rendering is complete
     setTimeout(() => {
@@ -906,6 +786,8 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     
     // Update the scale
     setScale(cappedScale);
+    // Trigger debounced render after scale update
+    debouncedRenderPdfPage();
     
     // Disable automatic fit to width for future page changes
     disableFitToWidthRef.current = true;
@@ -951,6 +833,8 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     
     // Update the scale
     setScale(cappedScale);
+    // Trigger debounced render after scale update
+    debouncedRenderPdfPage();
     
     // Disable automatic fit to width for future page changes
     disableFitToWidthRef.current = true;
@@ -1083,7 +967,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
         }
         
         // Update the scale
-        setScale(newScale);
+        setScale(newScale); // Use direct setter
         
         // Disable automatic fit to width
         disableFitToWidthRef.current = true;
@@ -2034,26 +1918,9 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
   useEffect(() => {
     if (!page || !viewport || !isViewerReady) return;
     
-    // Dispatch an event to notify annotation canvas about scale change
-    document.dispatchEvent(new CustomEvent('annotationChanged', {
-      detail: {
-        pageNumber: currentPage,
-        source: 'scaleChange',
-        forceRender: true,
-        scale: scale
-      }
-    }));
-    
-    // Re-render PDF content after scale change
-    if (!pageChangeInProgress) {
-      // Force a fresh render if scale changed and we're not already changing pages
-      hasRenderedOnceRef.current[currentPage] = false;
-      renderedPagesRef.current.delete(currentPage);
-      
-      setTimeout(() => {
-        renderPdfPage();
-      }, 0);
-    }
+    // Event dispatch and forced re-render logic removed.
+    // AnnotationCanvas now relies on the 'scale' prop for updates.
+    // PDF rendering is handled by the main renderPdfPage logic triggered by scale changes.
   }, [scale, page, viewport, isViewerReady, currentPage, pageChangeInProgress, renderPdfPage]);
 
   // Add event handlers for dragging
