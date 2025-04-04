@@ -18,18 +18,15 @@ import {
 import { drawAnnotation } from "../utils/drawingUtils";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import { useToast } from "../contexts/ToastContext";
+import { ChevronLeft, ChevronRight, Download, AlertTriangle, RefreshCw } from "lucide-react";
 import { KeyboardShortcutGuide } from "./KeyboardShortcutGuide";
 import { useKeyboardShortcutGuide } from "../hooks/useKeyboardShortcutGuide";
 import { jsPDF } from "jspdf";
 import * as pdfjs from "pdfjs-dist";
-import { PDFDocument } from "pdf-lib";
-import { saveAs } from "file-saver";
 
 interface PDFViewerProps {
   file: File | string;
   documentId: string;
-  documentName?: string; // Add this parameter to use for downloaded file names
-  onDownloadCompressed?: (url: string, filename: string, annotations?: Annotation[], pageFilter?: number) => Promise<void>;
 }
 
 // Add these outside the component to persist between renders and track loads
@@ -75,7 +72,7 @@ async function isTextBasedPDF(pdfDocument: any) {
   }
 }
 
-export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId, documentName, onDownloadCompressed }) => {
+export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
   // Define cursor styles for grabbing with cross-browser support
   const grabCursorClassName = "cursor-grabbing";
   
@@ -243,31 +240,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId, document
     // Calculate center position if no saved position exists
     const viewportWidth = scrollContainer.clientWidth;
     const viewportHeight = scrollContainer.clientHeight;
-    
-    // Make sure we have an accurate viewport size
-    if (!viewport) {
-      // If no viewport, try to create one with current scale
-      try {
-        const tempViewport = page.getViewport({ scale });
-        const contentWidth = tempViewport.width;
-        const contentHeight = tempViewport.height;
-        
-        // Calculate scroll positions
-        const scrollLeft = Math.max(0, (contentWidth - viewportWidth) / 2);
-        const scrollTop = Math.max(0, (contentHeight - viewportHeight) / 2);
-        
-        // Scroll to center
-        scrollContainer.scrollLeft = scrollLeft;
-        scrollContainer.scrollTop = scrollTop;
-        
-        console.log(`[PDFViewer] Centered document using temp viewport: scrollLeft=${scrollLeft}, scrollTop=${scrollTop}`);
-      } catch (err) {
-        console.error('[PDFViewer] Error centering document:', err);
-      }
-      return;
-    }
-    
-    // Use the existing viewport if available
     const contentWidth = viewport.width;
     const contentHeight = viewport.height;
     
@@ -280,7 +252,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId, document
     scrollContainer.scrollTop = scrollTop;
     
     console.log(`[PDFViewer] Centered document: scrollLeft=${scrollLeft}, scrollTop=${scrollTop}`);
-  }, [page, viewport, isDragging, scale]);
+  }, [page, viewport, isDragging]);
 
   // Helper function to get annotations for a specific page
   const getAnnotationsForPage = useCallback((documentId: string, pageNumber: number) => {
@@ -1066,19 +1038,9 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId, document
     if (!page || !containerRef.current) return;
     
     const container = containerRef.current;
-    
-    // Use the scroll container instead of the outer container for more accurate width
-    const scrollContainer = container.querySelector('.overflow-auto') as HTMLElement;
-    if (!scrollContainer) {
-      console.warn('[PDFViewer] Could not find scroll container, falling back to container width');
-    }
-    
-    // Get the viewable area width from the scroll container if available
-    const viewportWidth = scrollContainer ? scrollContainer.clientWidth : container.clientWidth;
-    
     // Account for padding (16px total for p-2 or 32px for p-4)
     const padding = 32; 
-    const availableWidth = viewportWidth - padding;
+    const availableWidth = container.clientWidth - padding;
     
     // Get the intrinsic dimensions of the PDF page
     const viewport = page.getViewport({ scale: 1 });
@@ -1092,56 +1054,25 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId, document
     const newHeight = viewport.height * newScale;
     
     // Log the dimensions and scaling for debugging
-    console.log(`[PDFViewer] Viewable width: ${viewportWidth}px (scrollContainer: ${!!scrollContainer})`);
     console.log(`[PDFViewer] Original PDF dimensions: ${viewport.width}x${viewport.height}`);
     console.log(`[PDFViewer] Aspect ratio: ${aspectRatio.toFixed(3)}`);
-    console.log(`[PDFViewer] Available width for scaling: ${availableWidth}px`);
+    console.log(`[PDFViewer] Container width: ${availableWidth}`);
     console.log(`[PDFViewer] New scale: ${newScale.toFixed(3)}`);
     console.log(`[PDFViewer] New dimensions: ${newWidth.toFixed(0)}x${newHeight.toFixed(0)}`);
-    
-    // Force clear ALL rendering caches before changing scale
-    hasRenderedOnceRef.current = {};
-    renderedPagesRef.current.clear();
-    cachedPagesRef.current.clear();
-    pageCanvasCache.clear();
-    pageCacheTimestamps.clear();
-    
-    // Clear any existing render task
-    if (renderTaskRef.current) {
-      renderTaskRef.current.cancel();
-      renderTaskRef.current = null;
-    }
-    
-    // Reset render lock to ensure rendering can proceed
-    renderLockRef.current = false;
-    
-    // Clear last scroll position to ensure proper centering
-    lastScrollPositionRef.current = null;
     
     // Update the scale
     setScale(newScale);
     
-    // Trigger a fresh render after setting the scale
+    // Scroll to center after a brief delay to ensure rendering is complete
     setTimeout(() => {
-      setIsRendering(true);
-      setRenderComplete(false);
-      
-      // Force a new render
-      if (typeof renderPdfPage === 'function') {
-        renderPdfPage();
-      }
-      
-      // Then center the document after rendering completes
-      setTimeout(() => {
-        scrollToCenterDocument();
-      }, 200);
-    }, 50);
+      scrollToCenterDocument();
+    }, 100);
     
     // Enable automatic fit for future page changes
     disableFitToWidthRef.current = false;
     
     console.log(`[PDFViewer] Fit to width: scale=${newScale}`);
-  }, [page, scrollToCenterDocument, renderPdfPage]);
+  }, [page, scrollToCenterDocument]);
 
   // Define zoom functions
   const handleZoomIn = useCallback(() => {
@@ -1237,163 +1168,60 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId, document
   const handleResetZoom = useCallback(() => {
     if (!page || !containerRef.current) return;
     
-    // Force clear ALL rendering caches before changing scale
-    hasRenderedOnceRef.current = {};
-    renderedPagesRef.current.clear();
-    cachedPagesRef.current.clear();
-    pageCanvasCache.clear();
-    pageCacheTimestamps.clear();
-    
-    // Clear any existing render task
-    if (renderTaskRef.current) {
-      renderTaskRef.current.cancel();
-      renderTaskRef.current = null;
-    }
-    
-    // Reset render lock to ensure rendering can proceed
-    renderLockRef.current = false;
-    
-    // Clear last scroll position to ensure proper centering
-    lastScrollPositionRef.current = null;
-    
     // Reset to 100%
     setScale(1.0);
-    
-    // Reset rendering state
-    setIsRendering(true);
-    setRenderComplete(false);
     
     // Disable automatic fit to width for future page changes
     disableFitToWidthRef.current = true;
     
-    // Trigger a fresh render and center the document
+    // Center the document after resetting zoom
     setTimeout(() => {
-      // Force a new render
-      if (typeof renderPdfPage === 'function') {
-        renderPdfPage();
-      }
-      
-      // Center the document after rendering completes
-      setTimeout(() => {
-        scrollToCenterDocument();
-      }, 200);
-    }, 50);
+      scrollToCenterDocument();
+    }, 100);
     
     console.log(`[PDFViewer] Reset zoom: scale=1.0`);
-  }, [page, scrollToCenterDocument, renderPdfPage]);
+  }, [page, scrollToCenterDocument]);
 
   // Setup container dimensions
   useEffect(() => {
     if (!containerRef.current) return;
     
-    // Track previous dimensions to prevent unnecessary rerenders
-    let prevWidth = 0;
-    let prevHeight = 0;
-    
     const updateContainerSize = () => {
       const container = containerRef.current;
       if (!container) return;
       
-      // Get the scroll container for more accurate width
-      const scrollContainer = container.querySelector('.overflow-auto') as HTMLElement;
+      const { width, height } = container.getBoundingClientRect();
+      setContainerWidth(width);
+      setContainerHeight(height);
       
-      // Use a small timeout to ensure DOM is fully updated
-      setTimeout(() => {
-        // Get dimensions from the actual visible area if available
-        const width = scrollContainer ? scrollContainer.clientWidth : container.clientWidth;
-        const height = scrollContainer ? scrollContainer.clientHeight : container.clientHeight;
-        
-        // Skip if the dimensions haven't changed significantly or are zero
-        if ((Math.abs(width - prevWidth) < 5 && Math.abs(height - prevHeight) < 5) || 
-            width <= 0 || height <= 0) {
-          return;
-        }
-        
-        // If width changed significantly, we care more about that for fit-to-width
-        const widthChangedSignificantly = Math.abs(width - prevWidth) > 20;
-        
-        // Update previous dimensions
-        prevWidth = width;
-        prevHeight = height;
-        
-        // Update state
-        setContainerWidth(width);
-        setContainerHeight(height);
-        
-        // Reapply fit-to-width when container dimensions change
-        // and we have a page loaded
-        if (page && !disableFitToWidthRef.current) {
-          console.log(`[PDFViewer] Container dimensions changed: ${width}x${height}, reapplying fit width`);
-          
-          // Add a small delay to ensure measurements are accurate
-          setTimeout(() => {
-            // Clear rendering status to force a fresh render
-            hasRenderedOnceRef.current = {};
-            renderedPagesRef.current.clear();
-            
-            // Clear any existing render task
-            if (renderTaskRef.current) {
-              renderTaskRef.current.cancel();
-              renderTaskRef.current = null;
-            }
-            
-            // Reset render lock to ensure rendering can proceed
-            renderLockRef.current = false;
-            
-            // For significant width changes, recalculate fit-to-width
-            if (widthChangedSignificantly) {
-              // Apply fit to width
-              handleFitToWidth();
-            } else {
-              // Just rerender with current scale
-              renderPdfPage();
-              
-              // Ensure the document is centered properly
-              setTimeout(() => {
-                scrollToCenterDocument();
-              }, 150);
-            }
-          }, 200);
-        }
-      }, 0);
+      // Reapply fit-to-width when container dimensions change
+      // and we have a page loaded
+      if (page && !disableFitToWidthRef.current) {
+        // Add a small delay to ensure measurements are accurate
+        setTimeout(() => {
+          handleFitToWidth();
+        }, 100);
+      }
     };
     
     // Initial size
     updateContainerSize();
     
     // Update on resize
-    const resizeObserver = new ResizeObserver((entries) => {
-      // Use requestAnimationFrame for smoother handling
-      window.requestAnimationFrame(() => {
-        updateContainerSize();
-      });
-    });
-    
+    const resizeObserver = new ResizeObserver(updateContainerSize);
     resizeObserver.observe(containerRef.current);
     
     // Also handle window resize events for more reliable updates
-    const handleWindowResize = () => {
-      // Use debounce technique to avoid too many updates
-      if (window.requestAnimationFrame) {
-        window.requestAnimationFrame(() => {
-          updateContainerSize();
-        });
-      } else {
-        // Fallback for browsers without requestAnimationFrame
-        setTimeout(updateContainerSize, 50);
-      }
-    };
-    
-    window.addEventListener('resize', handleWindowResize);
+    window.addEventListener('resize', updateContainerSize);
     
     return () => {
       if (containerRef.current) {
         resizeObserver.unobserve(containerRef.current);
       }
       resizeObserver.disconnect();
-      window.removeEventListener('resize', handleWindowResize);
+      window.removeEventListener('resize', updateContainerSize);
     };
-  }, [page, handleFitToWidth, renderPdfPage, scrollToCenterDocument]);
+  }, [page, handleFitToWidth]);
 
   // Handle zooming with mouse wheel + Ctrl key
   useEffect(() => {
@@ -1575,8 +1403,8 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId, document
     }
   }, [page, canvasRef, viewport, scale, currentPage, document, documentId, showToast]);
   
-  // Create a single optimized download function with quality preservation
-  const downloadOptimizedPDF = useCallback(async (highQuality = false) => {
+  // Add a new function to download just the current page without annotations
+  const downloadCurrentPage = useCallback(async () => {
     if (!pdf || !page || !viewport) {
       showToast("Cannot download - PDF not fully loaded", "error");
       return;
@@ -1591,7 +1419,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId, document
         a => a.pageNumber === currentPage
       ) || [];
       
-      console.log(`[PDFViewer] Downloading page ${currentPage} with ${pageAnnotations.length} annotations (high quality: ${highQuality})`);
+      console.log(`[PDFViewer] Downloading page ${currentPage} with ${pageAnnotations.length} annotations`);
       
       // Create a new PDF document with just the current page
       const pdfDoc = new jsPDF({
@@ -1602,45 +1430,22 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId, document
       
       // Create a temporary canvas for rendering
       const canvas = document.createElement("canvas");
-      
-      // For high quality rendering, use a scale factor to improve line rendering
-      const qualityScaleFactor = highQuality ? 1.5 : 1.0;
-      
-      // Set canvas dimensions with some size limits for very large pages
-      const MAX_DIMENSION = highQuality ? 3000 : 2000;
-      const scaleRatio = Math.min(1 * qualityScaleFactor, MAX_DIMENSION / Math.max(viewport.width, viewport.height));
-      
-      canvas.width = Math.floor(viewport.width * scaleRatio);
-      canvas.height = Math.floor(viewport.height * scaleRatio);
-      
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
       const ctx = canvas.getContext("2d", { alpha: true });
       
       if (!ctx) {
         throw new Error("Failed to get canvas context");
       }
       
-      // Enable high-quality image rendering
-      (ctx as any).imageSmoothingEnabled = true;
-      (ctx as any).imageSmoothingQuality = 'high';
-      
-      // For line preservation, draw with crisp edges
-      ctx.lineJoin = 'round';
-      ctx.lineCap = 'round';
-      
       // Set white background
       ctx.fillStyle = "#FFFFFF";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       
-      // If we needed to scale, adjust the context transform
-      if (scaleRatio !== 1.0) {
-        ctx.scale(scaleRatio, scaleRatio);
-      }
-      
-      // Render the current page to the canvas with high quality settings
+      // Render the current page to the canvas
       const renderTask = page.render({
         canvasContext: ctx,
-        viewport: page.getViewport({ scale: scale }),
-        intent: "display" // Use "print" for higher quality but possible slower rendering
+        viewport: page.getViewport({ scale })
       });
       
       await renderTask.promise;
@@ -1649,15 +1454,10 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId, document
       if (pageAnnotations.length > 0) {
         console.log(`[PDFViewer] Drawing ${pageAnnotations.length} annotations on download canvas`);
         
-        // Use a slightly thicker line width for annotations to ensure they remain visible
-        const lineWidthMultiplier = highQuality ? 1.0 : 1.2;
-        
         // Draw regular annotations first
         const regularAnnotations = pageAnnotations.filter(a => a.type !== 'highlight');
         regularAnnotations.forEach(annotation => {
           try {
-            // Set line width before drawing
-            ctx.lineWidth = ((annotation as any).strokeWidth || 1) * lineWidthMultiplier;
             drawAnnotation(ctx, annotation, scale);
           } catch (err) {
             console.error("Error drawing annotation during download:", err);
@@ -1682,439 +1482,17 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId, document
         }
       }
       
-      // Convert to data URL with format based on content type and quality settings
-      const processImage = async () => {
-        try {
-          // Use PNG format for high quality to preserve line thickness
-          // or JPEG with high quality setting for regular quality
-          const imageFormat = highQuality ? 'image/png' : 'image/jpeg';
-          const imageQuality = highQuality ? undefined : 0.92;  // PNG doesn't use quality, JPEG uses 0.92 (higher quality)
-          
-          // Create data URL with appropriate format
-          const dataUrl = canvas.toDataURL(imageFormat, imageQuality);
-          
-          // For very large images, convert directly to Blob to avoid string length issues
-          if (canvas.width * canvas.height > 4000000) { // 4 million pixels threshold
-            // Convert data URL to Blob using chunking
-            const byteString = atob(dataUrl.split(',')[1]);
-            const mimeType = dataUrl.split(',')[0].split(':')[1].split(';')[0];
-            
-            // Use chunking for large files
-            const chunkSize = 1024 * 1024; // 1MB chunks
-            const chunks = Math.ceil(byteString.length / chunkSize);
-            const byteArrays = new Array(chunks);
-            
-            for (let i = 0; i < chunks; i++) {
-              const offset = i * chunkSize;
-              const length = Math.min(byteString.length - offset, chunkSize);
-              
-              const byteNumbers = new Array(length);
-              for (let j = 0; j < length; j++) {
-                byteNumbers[j] = byteString.charCodeAt(offset + j);
-              }
-              
-              byteArrays[i] = new Uint8Array(byteNumbers);
-            }
-            
-            // Create blob and convert to data URL
-            const blob = new Blob(byteArrays, { type: mimeType });
-            
-            // Use FileReader to convert Blob to data URL
-            return new Promise<string>((resolve, reject) => {
-              const reader = new FileReader();
-              reader.onload = () => resolve(reader.result as string);
-              reader.onerror = reject;
-              reader.readAsDataURL(blob);
-            });
-          }
-          
-          // For smaller images, return the data URL directly
-          return dataUrl;
-        } catch (error) {
-          console.error('[PDFViewer] Error processing image:', error);
-          throw error;
-        }
-      };
+      // Add the annotated page to the PDF
+      const imgData = canvas.toDataURL("image/jpeg", 0.95);
+      pdfDoc.addImage(imgData, "JPEG", 0, 0, viewport.width, viewport.height);
       
-      // Get the processed image data
-      const imgData = await processImage();
-      
-      // Add the image to the PDF - preserve dimensions
-      pdfDoc.addImage(imgData, highQuality ? 'PNG' : 'JPEG', 0, 0, viewport.width, viewport.height);
-      
-      // Save the PDF with an optimized name
-      const qualitySuffix = highQuality ? '-hq' : '-optimized';
-      const fileName = `page-${currentPage}${documentId ? `-${documentId}` : ''}${qualitySuffix}.pdf`;
+      // Save the PDF with a name including the page number
+      const fileName = `page-${currentPage}${documentId ? `-${documentId}` : ''}-with-annotations.pdf`;
       pdfDoc.save(fileName);
       
-      showToast(`Page ${currentPage} downloaded with ${highQuality ? 'high' : 'optimized'} quality`, "success");
+      showToast(`Page ${currentPage} with annotations downloaded successfully`, "success");
     } catch (error) {
-      console.error("Download error:", error);
-      showToast(`Download failed: ${error instanceof Error ? error.message : 'Unknown error'}`, "error");
-    } finally {
-      setIsExporting(false);
-    }
-  }, [pdf, page, viewport, scale, currentPage, document, documentId, showToast]);
-  
-  // Add a function to download in high quality
-  const downloadHighQualityPDF = useCallback(async () => {
-    if (!pdf) {
-      showToast("Cannot download - PDF not fully loaded", "error");
-      return;
-    }
-    
-    try {
-      setIsExporting(true);
-      showToast("Preparing full PDF download in high quality...", "success");
-      
-      // Get all annotations for the document from store
-      const currentDoc = document ? useAnnotationStore.getState().documents[documentId] : null;
-      const allAnnotations = currentDoc?.annotations || [];
-      
-      console.log(`[PDFViewer] Downloading entire document with ${allAnnotations.length} annotations in high quality`);
-      
-      // Create a new PDF document to hold all pages
-      const firstPage = await pdf.getPage(1);
-      const firstViewport = firstPage.getViewport({ scale: 1.0 });
-      
-      const pdfDoc = new jsPDF({
-        orientation: firstViewport.width > firstViewport.height ? "landscape" : "portrait",
-        unit: "pt",
-        format: [firstViewport.width, firstViewport.height]
-      });
-      
-      // For the first page we don't need to add a new page
-      let isFirstPage = true;
-      
-      // Process each page of the PDF
-      for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
-        // Show progress in toast
-        showToast(`Processing page ${pageNum} of ${pdf.numPages}...`, "success");
-        
-        // Get the page
-        const pageObj = await pdf.getPage(pageNum);
-        const viewport = pageObj.getViewport({ scale: 1.0 });
-        
-        // Add a new page for all pages after the first
-        if (!isFirstPage) {
-          pdfDoc.addPage([viewport.width, viewport.height]);
-        } else {
-          isFirstPage = false;
-        }
-        
-        // Get annotations for the current page
-        const pageAnnotations = allAnnotations.filter(a => a.pageNumber === pageNum);
-        
-        // Create a temporary canvas for rendering
-        const canvas = document.createElement("canvas");
-        
-        // For high quality rendering, use a higher scale factor
-        const qualityScaleFactor = 1.5;
-        
-        // Set canvas dimensions with reasonable limits for very large pages
-        const MAX_DIMENSION = 3000;
-        const scaleRatio = Math.min(qualityScaleFactor, MAX_DIMENSION / Math.max(viewport.width, viewport.height));
-        
-        canvas.width = Math.floor(viewport.width * scaleRatio);
-        canvas.height = Math.floor(viewport.height * scaleRatio);
-        
-        const ctx = canvas.getContext("2d", { alpha: true });
-        
-        if (!ctx) {
-          throw new Error("Failed to get canvas context");
-        }
-        
-        // Enable high-quality image rendering
-        (ctx as any).imageSmoothingEnabled = true;
-        (ctx as any).imageSmoothingQuality = 'high';
-        
-        // For line preservation, draw with crisp edges
-        ctx.lineJoin = 'round';
-        ctx.lineCap = 'round';
-        
-        // Set white background
-        ctx.fillStyle = "#FFFFFF";
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        
-        // If we needed to scale, adjust the context transform
-        if (scaleRatio !== 1.0) {
-          ctx.scale(scaleRatio, scaleRatio);
-        }
-        
-        // Render the page to the canvas with high quality settings
-        const renderTask = pageObj.render({
-          canvasContext: ctx,
-          viewport: viewport,
-          intent: "print" // Use "print" for highest quality
-        });
-        
-        await renderTask.promise;
-        
-        // Draw annotations on top if there are any
-        if (pageAnnotations.length > 0) {
-          console.log(`[PDFViewer] Drawing ${pageAnnotations.length} annotations for page ${pageNum}`);
-          
-          // Use standard line width for annotations
-          const lineWidthMultiplier = 1.0;
-          
-          // Draw regular annotations first
-          const regularAnnotations = pageAnnotations.filter(a => a.type !== 'highlight');
-          regularAnnotations.forEach(annotation => {
-            try {
-              // Set line width before drawing
-              ctx.lineWidth = ((annotation as any).strokeWidth || 1) * lineWidthMultiplier;
-              drawAnnotation(ctx, annotation, 1.0); // Use base scale since we've already scaled the canvas
-            } catch (err) {
-              console.error(`Error drawing annotation on page ${pageNum} during download:`, err);
-            }
-          });
-          
-          // Draw highlights with multiply blend mode
-          const highlightAnnotations = pageAnnotations.filter(a => a.type === 'highlight');
-          if (highlightAnnotations.length > 0) {
-            ctx.save();
-            ctx.globalCompositeOperation = 'multiply';
-            
-            highlightAnnotations.forEach(annotation => {
-              try {
-                drawAnnotation(ctx, annotation, 1.0); // Use base scale
-              } catch (err) {
-                console.error(`Error drawing highlight on page ${pageNum} during download:`, err);
-              }
-            });
-            
-            ctx.restore();
-          }
-        }
-        
-        // Convert to data URL with high quality format
-        let imgData;
-        try {
-          // Use PNG format for high quality to preserve line thickness
-          const dataUrl = canvas.toDataURL('image/png');
-          
-          // For very large images, use chunking to avoid string length issues
-          if (canvas.width * canvas.height > 4000000) {
-            const byteString = atob(dataUrl.split(',')[1]);
-            const mimeType = dataUrl.split(',')[0].split(':')[1].split(';')[0];
-            
-            // Use chunking for large files
-            const chunkSize = 1024 * 1024; // 1MB chunks
-            const chunks = Math.ceil(byteString.length / chunkSize);
-            const byteArrays = new Array(chunks);
-            
-            for (let i = 0; i < chunks; i++) {
-              const offset = i * chunkSize;
-              const length = Math.min(byteString.length - offset, chunkSize);
-              
-              const byteNumbers = new Array(length);
-              for (let j = 0; j < length; j++) {
-                byteNumbers[j] = byteString.charCodeAt(offset + j);
-              }
-              
-              byteArrays[i] = new Uint8Array(byteNumbers);
-            }
-            
-            // Create blob and convert to data URL
-            const blob = new Blob(byteArrays, { type: mimeType });
-            
-            // Use FileReader to convert Blob to data URL
-            imgData = await new Promise<string>((resolve, reject) => {
-              const reader = new FileReader();
-              reader.onload = () => resolve(reader.result as string);
-              reader.onerror = reject;
-              reader.readAsDataURL(blob);
-            });
-          } else {
-            imgData = dataUrl;
-          }
-          
-          // Add the image to the PDF at the current page
-          pdfDoc.addImage(imgData, 'PNG', 0, 0, viewport.width, viewport.height);
-          
-        } catch (error) {
-          console.error(`[PDFViewer] Error processing image for page ${pageNum}:`, error);
-          throw error;
-        }
-      }
-      
-      // Save the complete PDF with all pages
-      const fileName = `full-document${documentId ? `-${documentId}` : ''}-high-quality.pdf`;
-      pdfDoc.save(fileName);
-      
-      showToast(`Complete PDF downloaded with high quality (${pdf.numPages} pages)`, "success");
-    } catch (error) {
-      console.error("Full PDF download error:", error);
-      showToast(`Download failed: ${error instanceof Error ? error.message : 'Unknown error'}`, "error");
-    } finally {
-      setIsExporting(false);
-    }
-  }, [pdf, document, documentId, showToast]);
-  
-  // Add a function to download in premium (print) quality
-  const downloadPremiumQualityPDF = useCallback(async () => {
-    if (!pdf || !page || !viewport) {
-      showToast("Cannot download - PDF not fully loaded", "error");
-      return;
-    }
-    
-    try {
-      setIsExporting(true);
-      
-      // Get annotations for the current page from store
-      const currentDoc = document ? useAnnotationStore.getState().documents[documentId] : null;
-      const pageAnnotations = currentDoc?.annotations?.filter(
-        a => a.pageNumber === currentPage
-      ) || [];
-      
-      console.log(`[PDFViewer] Downloading page ${currentPage} in premium quality with ${pageAnnotations.length} annotations`);
-      
-      // Create a new PDF document with just the current page
-      const pdfDoc = new jsPDF({
-        orientation: viewport.width > viewport.height ? "landscape" : "portrait",
-        unit: "pt",
-        format: [viewport.width, viewport.height]
-      });
-      
-      // Create a temporary canvas for rendering with premium quality
-      const canvas = document.createElement("canvas");
-      
-      // For premium quality, use the highest possible scale factor
-      const qualityScaleFactor = 2.0; // Highest scale factor that's still reasonable
-      
-      // Set canvas dimensions - don't limit the maximum size for premium quality
-      const scaleRatio = qualityScaleFactor;
-      
-      canvas.width = Math.floor(viewport.width * scaleRatio);
-      canvas.height = Math.floor(viewport.height * scaleRatio);
-      
-      const ctx = canvas.getContext("2d", { alpha: true });
-      
-      if (!ctx) {
-        throw new Error("Failed to get canvas context");
-      }
-      
-      // Use settings optimized for highest quality and line preservation
-      (ctx as any).imageSmoothingEnabled = true;
-      (ctx as any).imageSmoothingQuality = 'high';
-      
-      // Use round joins and line caps for smoother vector rendering
-      ctx.lineJoin = 'round';
-      ctx.lineCap = 'round';
-      ctx.miterLimit = 2;
-      
-      // Set white background
-      ctx.fillStyle = "#FFFFFF";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      
-      // Apply scaling for high resolution
-      ctx.scale(scaleRatio, scaleRatio);
-      
-      // Render the current page with "print" intent for maximum quality
-      const renderTask = page.render({
-        canvasContext: ctx,
-        viewport: page.getViewport({ scale: scale }),
-        intent: "print" // Use print intent for the highest quality
-      });
-      
-      await renderTask.promise;
-      
-      // Draw annotations with precise line rendering
-      if (pageAnnotations.length > 0) {
-        console.log(`[PDFViewer] Drawing ${pageAnnotations.length} annotations with premium quality`);
-        
-        // For premium quality, preserve exact line widths
-        const lineWidthMultiplier = 1.0;
-        
-        // Draw regular annotations first
-        const regularAnnotations = pageAnnotations.filter(a => a.type !== 'highlight');
-        regularAnnotations.forEach(annotation => {
-          try {
-            // Set line width before drawing
-            ctx.lineWidth = ((annotation as any).strokeWidth || 1) * lineWidthMultiplier;
-            drawAnnotation(ctx, annotation, scale);
-          } catch (err) {
-            console.error("Error drawing annotation during premium download:", err);
-          }
-        });
-        
-        // Draw highlights with multiply blend mode
-        const highlightAnnotations = pageAnnotations.filter(a => a.type === 'highlight');
-        if (highlightAnnotations.length > 0) {
-          ctx.save();
-          ctx.globalCompositeOperation = 'multiply';
-          
-          highlightAnnotations.forEach(annotation => {
-            try {
-              drawAnnotation(ctx, annotation, scale);
-            } catch (err) {
-              console.error("Error drawing highlight during premium download:", err);
-            }
-          });
-          
-          ctx.restore();
-        }
-      }
-      
-      // Process image with maximum quality settings
-      const processImage = async () => {
-        try {
-          // Always use PNG for premium quality as it's lossless
-          const pngDataUrl = canvas.toDataURL('image/png', 1.0);
-          
-          // For large images, use chunking to avoid string length errors
-          if (canvas.width * canvas.height > 4000000) {
-            const byteString = atob(pngDataUrl.split(',')[1]);
-            const mimeType = pngDataUrl.split(',')[0].split(':')[1].split(';')[0];
-            
-            // Use larger chunks for premium quality
-            const chunkSize = 2 * 1024 * 1024; // 2MB chunks
-            const chunks = Math.ceil(byteString.length / chunkSize);
-            const byteArrays = new Array(chunks);
-            
-            for (let i = 0; i < chunks; i++) {
-              const offset = i * chunkSize;
-              const length = Math.min(byteString.length - offset, chunkSize);
-              
-              const byteNumbers = new Array(length);
-              for (let j = 0; j < length; j++) {
-                byteNumbers[j] = byteString.charCodeAt(offset + j);
-              }
-              
-              byteArrays[i] = new Uint8Array(byteNumbers);
-            }
-            
-            // Create blob and convert to data URL
-            const blob = new Blob(byteArrays, { type: mimeType });
-            
-            return new Promise<string>((resolve, reject) => {
-              const reader = new FileReader();
-              reader.onload = () => resolve(reader.result as string);
-              reader.onerror = reject;
-              reader.readAsDataURL(blob);
-            });
-          }
-          
-          return pngDataUrl;
-        } catch (error) {
-          console.error('[PDFViewer] Error processing premium quality image:', error);
-          throw error;
-        }
-      };
-      
-      // Get the processed image data
-      const imgData = await processImage();
-      
-      // Add the image to the PDF with exact dimensions
-      pdfDoc.addImage(imgData, 'PNG', 0, 0, viewport.width, viewport.height);
-      
-      // Save the PDF with a premium quality indicator
-      const fileName = `page-${currentPage}${documentId ? `-${documentId}` : ''}-premium.pdf`;
-      pdfDoc.save(fileName);
-      
-      showToast(`Page ${currentPage} downloaded in premium quality for print`, "success");
-    } catch (error) {
-      console.error("Premium download error:", error);
+      console.error("Download page error:", error);
       showToast(`Download failed: ${error instanceof Error ? error.message : 'Unknown error'}`, "error");
     } finally {
       setIsExporting(false);
@@ -2180,70 +1558,16 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId, document
     if (page && containerRef.current && !disableFitToWidthRef.current) {
       // Wait a moment for the page to be fully rendered
       setTimeout(() => {
-        console.log("[PDFViewer] Auto-applying fit to width for page", currentPage);
-        
-        // Clear rendering status to force a complete rerender
-        hasRenderedOnceRef.current[currentPage] = false;
-        renderedPagesRef.current.delete(currentPage);
-        
-        // Clear any in-progress render
-        if (renderTaskRef.current) {
-          renderTaskRef.current.cancel();
-          renderTaskRef.current = null;
-        }
-        
-        // Reset render lock
-        renderLockRef.current = false;
-        
-        // Get the viewport to check if the page dimensions are different
-        const viewport = page.getViewport({ scale: 1 });
-        
-        // Recalculate fit width if dimensions are significantly different
-        // This handles cases where pages have different sizes in the same document
-        const container = containerRef.current;
-        if (!container) {
-          return; // Safety check
-        }
-        
-        const scrollContainer = container.querySelector('.overflow-auto') as HTMLElement;
-        const viewportWidth = scrollContainer ? scrollContainer.clientWidth : container.clientWidth;
-        const padding = 32; // Increased padding for more reliable fit
-        const availableWidth = viewportWidth - padding;
-        const newScale = availableWidth / viewport.width;
-        
-        // If scale is different by more than 5%, or we're on first page, recalculate
-        const scaleDifference = Math.abs(newScale - scale) / scale;
-        if (isNaN(scaleDifference) || scaleDifference > 0.05 || currentPage === 1) {
-          console.log(`[PDFViewer] Page ${currentPage} has different dimensions, recalculating fit width`);
-          
-          // Force clear cached pages
-          if (pageCanvasCache.size > 0) {
-            pageCanvasCache.clear();
-            pageCacheTimestamps.clear();
-          }
-          
-          // Apply the fit to width
-          handleFitToWidth();
-        } else {
-          // Just rerender with current scale but don't change the scale
-          setIsRendering(true);
-          setRenderComplete(false);
-          renderPdfPage();
-          
-          // After a delay, ensure the document is centered
-          setTimeout(() => {
-            scrollToCenterDocument();
-          }, 200);
-        }
-      }, 250); // Increased timeout for more reliable measurements
+        handleFitToWidth();
+      }, 200);
     }
-  }, [page, handleFitToWidth, currentPage, scrollToCenterDocument, scale, renderPdfPage]);
+  }, [page, handleFitToWidth]);
 
   // Function to generate a canvas with PDF content and annotations
-  const createAnnotatedCanvas = useCallback(async (targetPage: PDFPageProxy, annotations: Annotation[], qualityScale: number = 1.0, pageScale: number = scale) => {
+  const createAnnotatedCanvas = useCallback(async (targetPage: PDFPageProxy, annotations: Annotation[], qualityScale: number = 1.0) => {
     // Create a new canvas for exporting
     const exportCanvas = document.createElement("canvas");
-    const viewport = targetPage.getViewport({ scale: pageScale * qualityScale });
+    const viewport = targetPage.getViewport({ scale: scale * qualityScale });
     exportCanvas.width = viewport.width;
     exportCanvas.height = viewport.height;
     
@@ -2254,70 +1578,31 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId, document
     ctx.fillStyle = "#FFFFFF";
     ctx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
     
-    // Configure canvas for high-quality rendering
-    console.log(`[PDFViewer] Rendering PDF content to export canvas (scale: ${pageScale * qualityScale}, dimensions: ${viewport.width}x${viewport.height})`);
+    // Render PDF with improved text quality
+    console.log(`[PDFViewer] Rendering PDF content to export canvas (scale: ${scale * qualityScale})`);
     
     // Enable high-quality image rendering on the context
     (ctx as any).imageSmoothingEnabled = true;
     (ctx as any).imageSmoothingQuality = 'high';
     
-    // Use round joins and caps for smoother vector rendering
-    ctx.lineJoin = 'round';
-    ctx.lineCap = 'round';
-    ctx.miterLimit = 2;
-    
-    // Determine the rendering intent based on quality scale
-    const renderIntent = qualityScale >= 2.0 ? "print" : "display";
-    
     const renderTask = targetPage.render({
       canvasContext: ctx,
       viewport: viewport,
-      intent: renderIntent, // Use print intent for better text quality with high-quality exports
-      annotationMode: 0 // Enable annotation layer for better text quality
+      // Use print intent for better text quality in exports
+      intent: "print"
     });
     
     // Wait for PDF rendering to complete
     await renderTask.promise;
     
-    // Now draw annotations on top with scale adjustment
+    // Now draw annotations on top
     console.log(`[PDFViewer] Drawing ${annotations.length} annotations on export canvas`);
-    
-    // Calculate adjusted line width multiplier based on quality scale
-    // For higher scales, we need thinner relative lines to maintain visual consistency
-    const lineWidthMultiplier = qualityScale >= 2.0 ? (1.0 / (qualityScale * 0.5)) : 1.0;
-    
-    // Check if we need to adjust annotation scaling
-    // Annotations are stored at scale 1.0, but we're rendering at pageScale * qualityScale
-    const annotationScaleFactor = pageScale * qualityScale;
     
     // First draw non-highlight annotations
     const regularAnnotations = annotations.filter(a => a.type !== 'highlight');
     regularAnnotations.forEach(annotation => {
       try {
-        // Set line width based on quality scale
-        if (ctx && annotation.style && typeof annotation.style.lineWidth === 'number') {
-          ctx.lineWidth = annotation.style.lineWidth * lineWidthMultiplier;
-        }
-        
-        // Draw the annotation with the appropriate scale
-        // Clone the annotation if we need to adjust scale
-        if (annotationScaleFactor !== 1.0) {
-          // Create a temporary copy of the annotation with adjusted positions
-          const scaledAnnotation = { ...annotation };
-          
-          // Scale points if they exist
-          if (scaledAnnotation.points && Array.isArray(scaledAnnotation.points)) {
-            scaledAnnotation.points = scaledAnnotation.points.map(point => ({
-              x: point.x,
-              y: point.y
-            }));
-          }
-          
-          drawAnnotation(ctx, scaledAnnotation, annotationScaleFactor);
-        } else {
-          // Use original annotation without scaling
-          drawAnnotation(ctx, annotation, annotationScaleFactor);
-        }
+        drawAnnotation(ctx, annotation, scale * qualityScale);
       } catch (err) {
         console.error("Error drawing annotation during export:", err);
       }
@@ -2331,24 +1616,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId, document
       
       highlightAnnotations.forEach(annotation => {
         try {
-          // Draw the annotation with the appropriate scale, using same scaling as above
-          if (annotationScaleFactor !== 1.0) {
-            // Create a temporary copy of the annotation with adjusted positions
-            const scaledAnnotation = { ...annotation };
-            
-            // Scale points if they exist
-            if (scaledAnnotation.points && Array.isArray(scaledAnnotation.points)) {
-              scaledAnnotation.points = scaledAnnotation.points.map(point => ({
-                x: point.x,
-                y: point.y
-              }));
-            }
-            
-            drawAnnotation(ctx, scaledAnnotation, annotationScaleFactor);
-          } else {
-            // Use original annotation without scaling
-            drawAnnotation(ctx, annotation, annotationScaleFactor);
-          }
+          drawAnnotation(ctx, annotation, scale * qualityScale);
         } catch (err) {
           console.error("Error drawing highlight during export:", err);
         }
@@ -2360,209 +1628,9 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId, document
     return { canvas: exportCanvas, viewport };
   }, [scale]);
   
-  // Add a new function to handle optimized PDF compression before exportToPDF
-  const compressPDF = useCallback(async (canvas: HTMLCanvasElement, quality: number = 0.8): Promise<Blob> => {
-    try {
-      // For very large canvases, use optimized quality and resolution
-      const MAX_DIMENSION = quality >= 0.9 ? 4000 : 3000; // Higher limit for HD/Ultra-HD quality
-      
-      // Check if canvas is very large
-      const isLargeCanvas = canvas.width > MAX_DIMENSION || canvas.height > MAX_DIMENSION;
-      
-      // Detect if the page is mostly text vs images to optimize compression
-      const ctx = canvas.getContext('2d');
-      let compressionQuality = quality;
-      let sourceCanvas = canvas;
-      let imageFormat = 'image/png';
-      
-      // Create a temporary canvas for scaling if needed
-      if (isLargeCanvas) {
-        // Create a scaled-down version for large canvases
-        const tempCanvas = document.createElement('canvas');
-        const tempCtx = tempCanvas.getContext('2d', { alpha: true });
-        
-        // Calculate scaling factor to keep aspect ratio
-        const scaleFactor = MAX_DIMENSION / Math.max(canvas.width, canvas.height);
-        
-        // Set dimensions for the temp canvas
-        tempCanvas.width = Math.floor(canvas.width * scaleFactor);
-        tempCanvas.height = Math.floor(canvas.height * scaleFactor);
-        
-        if (tempCtx) {
-          // Enable high-quality image rendering
-          (tempCtx as any).imageSmoothingEnabled = true;
-          (tempCtx as any).imageSmoothingQuality = 'high';
-          
-          // For line preservation, use round line joins and caps
-          tempCtx.lineJoin = 'round';
-          tempCtx.lineCap = 'round';
-          
-          // Draw the original canvas onto the temp canvas with scaling
-          tempCtx.drawImage(canvas, 0, 0, tempCanvas.width, tempCanvas.height);
-          sourceCanvas = tempCanvas;
-          
-          // Adjust compression based on content size and quality level
-          if (quality >= 0.95) {
-            // Ultra-HD priority is maintaining text and line quality
-            compressionQuality = 0.92;
-            imageFormat = 'image/png'; // Always use PNG for best text/line quality
-          } else if (quality >= 0.9) {
-            // HD can use PNG for better text quality but slightly compressed
-            compressionQuality = 0.9;
-            imageFormat = 'image/png';
-          } else if (quality >= 0.7) {
-            // Standard quality can use JPEG for much better compression
-            compressionQuality = 0.85;
-            
-            // Use a heuristic to determine if content is mostly text or images
-            // Text-heavy pages benefit from PNG, image-heavy from JPEG
-            try {
-              const imgData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
-              const data = imgData.data;
-              let edgeCount = 0;
-              let colorCount = 0;
-              
-              // Sample pixels to detect edges and color variation
-              for (let i = 0; i < data.length; i += 16) {
-                // Count high contrast edges (text usually has high contrast)
-                if (i % (imgData.width * 4) < imgData.width * 4 - 8) {
-                  const diff = Math.abs(data[i] - data[i + 4]) + 
-                               Math.abs(data[i + 1] - data[i + 5]) + 
-                               Math.abs(data[i + 2] - data[i + 6]);
-                  if (diff > 100) edgeCount++;
-                }
-                
-                // Check for color vs grayscale (text pages tend to be mostly grayscale)
-                const r = data[i];
-                const g = data[i + 1];
-                const b = data[i + 2];
-                const maxDiff = Math.max(Math.abs(r - g), Math.abs(r - b), Math.abs(g - b));
-                if (maxDiff > 20) colorCount++;
-              }
-              
-              // Calculate edge density and color ratio
-              const edgeDensity = edgeCount / (imgData.width * imgData.height / 16);
-              const colorRatio = colorCount / (data.length / 64);
-              
-              // If high edge density and low color ratio, likely text-heavy page
-              const isTextHeavy = edgeDensity > 0.05 && colorRatio < 0.3;
-              
-              // Use PNG for text-heavy pages, JPEG for image-heavy
-              imageFormat = isTextHeavy ? 'image/png' : 'image/jpeg';
-              
-              // Adjust compression based on content type
-              if (isTextHeavy) {
-                // Text needs higher quality to remain readable
-                compressionQuality = Math.max(0.88, compressionQuality);
-              } else {
-                // Images can be compressed more
-                compressionQuality = 0.82;
-              }
-              
-              console.log(`[PDFViewer] Content analysis: ${isTextHeavy ? 'Text-heavy' : 'Image-heavy'}, using ${imageFormat}`);
-            } catch (err) {
-              // Fallback to safer defaults
-              console.error("[PDFViewer] Error during content analysis:", err);
-              imageFormat = 'image/png';
-              compressionQuality = 0.85;
-            }
-          } else {
-            // Low quality mode - maximize compression
-            compressionQuality = 0.65;
-            
-            // Always use JPEG for maximum compression in low quality mode
-            imageFormat = 'image/jpeg';
-            
-            // Further reduce resolution for low quality mode
-            if (tempCanvas.width > 1200 || tempCanvas.height > 1200) {
-              const extraScaleFactor = 1200 / Math.max(tempCanvas.width, tempCanvas.height);
-              const superTempCanvas = document.createElement('canvas');
-              const superTempCtx = superTempCanvas.getContext('2d');
-              
-              superTempCanvas.width = Math.floor(tempCanvas.width * extraScaleFactor);
-              superTempCanvas.height = Math.floor(tempCanvas.height * extraScaleFactor);
-              
-              if (superTempCtx) {
-                // Use lower quality settings for maximum compression
-                (superTempCtx as any).imageSmoothingEnabled = true;
-                (superTempCtx as any).imageSmoothingQuality = 'medium';
-                
-                superTempCtx.drawImage(tempCanvas, 0, 0, superTempCanvas.width, superTempCanvas.height);
-                sourceCanvas = superTempCanvas;
-              }
-            }
-          }
-          
-          console.log(`[PDFViewer] Scaled canvas (${canvas.width}x${canvas.height}) to ${tempCanvas.width}x${tempCanvas.height}, format: ${imageFormat}, quality: ${compressionQuality.toFixed(2)}`);
-        }
-      } else if (quality < 0.7) {
-        // For smaller canvases but low quality, still reduce resolution
-        const tempCanvas = document.createElement('canvas');
-        const tempCtx = tempCanvas.getContext('2d', { alpha: true });
-        
-        // Calculate scaling factor based on quality
-        // Lower quality = smaller size
-        const scaleFactor = 0.5 + (quality * 0.5); // 0.5 at 0 quality, 0.85 at 0.7 quality
-        
-        tempCanvas.width = Math.floor(canvas.width * scaleFactor);
-        tempCanvas.height = Math.floor(canvas.height * scaleFactor);
-        
-        if (tempCtx) {
-          // Lower quality settings for compression
-          (tempCtx as any).imageSmoothingEnabled = true;
-          (tempCtx as any).imageSmoothingQuality = 'medium';
-          
-          tempCtx.drawImage(canvas, 0, 0, tempCanvas.width, tempCanvas.height);
-          sourceCanvas = tempCanvas;
-          
-          // Always use JPEG for maximum compression in low quality mode
-          imageFormat = 'image/jpeg';
-          compressionQuality = 0.65;
-        }
-      } else {
-        // For smaller canvases, we can use PNG with high quality
-        imageFormat = quality >= 0.9 ? 'image/png' : 'image/jpeg';
-        compressionQuality = quality;
-      }
-      
-      // Generate the data URL with the determined format and quality
-      const dataUrl = sourceCanvas.toDataURL(imageFormat, compressionQuality);
-      
-      // Convert data URL to Blob using efficient chunking
-      const byteString = atob(dataUrl.split(',')[1]);
-      const mimeType = dataUrl.split(',')[0].split(':')[1].split(';')[0];
-      
-      // Use chunking to handle large files
-      const chunkSize = 1024 * 1024; // 1MB chunks
-      const chunks = Math.ceil(byteString.length / chunkSize);
-      const byteArrays = new Array(chunks);
-      
-      for (let i = 0; i < chunks; i++) {
-        const offset = i * chunkSize;
-        const length = Math.min(byteString.length - offset, chunkSize);
-        
-        const byteNumbers = new Array(length);
-        for (let j = 0; j < length; j++) {
-          byteNumbers[j] = byteString.charCodeAt(offset + j);
-        }
-        
-        byteArrays[i] = new Uint8Array(byteNumbers);
-      }
-      
-      // Log the dimensions and format used
-      console.log(`[PDFViewer] Compressed page: ${canvas.width}x${canvas.height} using ${imageFormat} (quality: ${compressionQuality.toFixed(2)})`);
-      
-      // Create the final blob
-      return new Blob(byteArrays, { type: mimeType });
-    } catch (error) {
-      console.error('[PDFViewer] Error compressing PDF:', error);
-      throw error;
-    }
-  }, []);
-
-  // Update handleExportAllPages to use chunking and compression with 50MB file size limit
-  const handleExportAllPages = useCallback(async (quality?: "standard" | "hd" | "ultra-hd") => {
-    if (!pdf || !canvasRef.current) {
+  // Export all pages with annotations
+  const handleExportAllPages = useCallback(async (quality?: "standard" | "hd") => {
+    if (!pdf || !canvasRef.current || !viewport) {
       showToast("Cannot export - PDF not fully loaded", "error");
       return;
     }
@@ -2577,227 +1645,70 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId, document
         return;
       }
       
-      // Determine compression and quality settings based on requested quality level
-      let compressionQuality, qualityLabel, qualityScale, renderIntent;
+      // Set scale factor based on requested quality
+      const qualityScale = quality === "hd" ? 2.0 : 1.0;
+      const qualityLabel = quality === "hd" ? "HD" : "Standard";
       
-      // Configure quality settings based on the requested level
-      if (quality === "ultra-hd") {
-        compressionQuality = 1.0; // No compression for ultra-hd
-        qualityLabel = "Ultra HD";
-        qualityScale = 3.0; // Maximum scale factor for ultra-high resolution
-        renderIntent = "print"; // Print intent for highest quality text rendering
-      } else if (quality === "hd") {
-        compressionQuality = 0.95; // High quality with minimal compression
-        qualityLabel = "HD";
-        qualityScale = 2.0; // Higher scale factor for better resolution
-        renderIntent = "print"; // Print intent for better text quality
-      } else {
-        compressionQuality = 0.85; // Better than previous standard quality (was 0.75)
-        qualityLabel = "Standard";
-        qualityScale = 1.2; // Slightly higher than 1.0 for better quality
-        renderIntent = "display"; // Faster rendering
-      }
+      showToast(`Starting export of all pages with ${qualityLabel} quality...`, "success");
       
-      showToast(`Starting export of all ${pdf.numPages} pages with ${qualityLabel} quality...`, "success");
-      
-      // File size tracking for 50MB limit
-      const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB in bytes
-      let currentBatchSize = 0;
-      let batchNumber = 1;
-      let pagesInCurrentBatch = 0;
-      
-      // Create a timestamp for filename
-      const fileTimestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const baseFileName = `${documentId || 'document'}${quality === "standard" ? "" : (quality === "hd" ? "-HD" : "-ULTRA-HD")}`;
-      
-      // Track processing start time
-      const startTime = Date.now();
-      let lastProgressTime = startTime;
-      
-      // Sample large documents to estimate file size
-      let totalEstimatedSize = 0;
-      let estimatedBatches = 1;
-      
-      if (pdf.numPages > 10) {
-        // Sample pages for size estimation
-        showToast(`Analyzing document to optimize export...`, "success");
-        
-        const samplePoints = [
-          1, 
-          Math.floor(pdf.numPages / 2), 
-          Math.min(pdf.numPages - 1, Math.max(3, pdf.numPages - 2))
-        ];
-        
-        const pageSizeSamples = [];
-        
-        for (const pageNum of samplePoints) {
-          try {
-            const pageObj = await pdf.getPage(pageNum);
-            const pageViewport = pageObj.getViewport({ scale: 1.0 });
-            const annotations = currentDoc.annotations.filter(a => a.pageNumber === pageNum);
-            
-            const exportCanvas = await createAnnotatedCanvas(pageObj, annotations, qualityScale, 1.0);
-            const imgBlob = await compressPDF(exportCanvas.canvas, compressionQuality);
-            
-            pageSizeSamples.push(imgBlob.size);
-            console.log(`Sample page ${pageNum} size: ${(imgBlob.size / 1024 / 1024).toFixed(2)}MB`);
-          } catch (error) {
-            console.error(`Error sampling page ${pageNum}:`, error);
-          }
-        }
-        
-        if (pageSizeSamples.length > 0) {
-          const avgPageSize = pageSizeSamples.reduce((sum, size) => sum + size, 0) / pageSizeSamples.length;
-          totalEstimatedSize = avgPageSize * pdf.numPages * 1.1; // Add 10% overhead for PDF container
-          estimatedBatches = Math.ceil(totalEstimatedSize / MAX_FILE_SIZE);
-          
-          if (estimatedBatches > 1) {
-            showToast(`Large document detected (est. ${(totalEstimatedSize / 1024 / 1024).toFixed(1)}MB). Will split into ${estimatedBatches} parts.`, "success");
-          }
-        }
-      }
-      
-      // Get first page to initialize first batch
-      const firstPage = await pdf.getPage(1);
-      const firstPageViewport = firstPage.getViewport({ scale: 1.0 });
-      
-      // Initialize the first PDF
-      let currentPDF = new jsPDF({
-        orientation: firstPageViewport.width > firstPageViewport.height ? "landscape" : "portrait",
-        unit: "pt",
-        format: [firstPageViewport.width, firstPageViewport.height]
+      // Create a PDF with multiple pages
+      const multiPagePdf = new jsPDF({
+        orientation: viewport.width > viewport.height ? "landscape" : "portrait",
+        unit: "px",
+        format: [viewport.width, viewport.height],
       });
       
-      // Process each page
-      let isFirstPageInBatch = true;
-      
+      // Export each page
       for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
         try {
-          // Show progress updates
-          const currentTime = Date.now();
-          if (currentTime - lastProgressTime > 2000 || pageNum % 5 === 0 || pageNum === 1) {
-            const percentComplete = Math.round((pageNum / pdf.numPages) * 100);
-            const timeElapsed = (currentTime - startTime) / 1000;
-            const estimatedTotal = timeElapsed / (pageNum / pdf.numPages);
-            const timeRemaining = Math.round(estimatedTotal - timeElapsed);
-            
-            showToast(
-              `Processing page ${pageNum}/${pdf.numPages} (${percentComplete}%) - Est. ${timeRemaining} seconds remaining`,
-              "success"
-            );
-            lastProgressTime = currentTime;
-          }
-          
           // Get the page
           const pageObj = await pdf.getPage(pageNum);
-          const pageViewport = pageObj.getViewport({ scale: 1.0 });
-          
-          // Add new page to PDF if not the first page in batch
-          if (!isFirstPageInBatch) {
-            currentPDF.addPage([pageViewport.width, pageViewport.height]);
-          } else {
-            isFirstPageInBatch = false;
-          }
           
           // Get annotations for this page
-          const pageAnnotations = currentDoc.annotations.filter(a => a.pageNumber === pageNum);
-          
-          // Create the canvas with content
-          const exportCanvas = await createAnnotatedCanvas(pageObj, pageAnnotations, qualityScale, 1.0);
-          
-          // Compress the page image
-          const compressedImageBlob = await compressPDF(exportCanvas.canvas, compressionQuality);
-          const pageSize = compressedImageBlob.size;
-          
-          // Convert blob to data URL for adding to PDF
-          const reader = new FileReader();
-          const imageDataPromise = new Promise<string>((resolve, reject) => {
-            reader.onload = () => resolve(reader.result as string);
-            reader.onerror = reject;
-            reader.readAsDataURL(compressedImageBlob);
-          });
-          
-          const imgData = await imageDataPromise;
-          
-          // Add image to PDF - use PNG for HD and Ultra-HD
-          const imageFormat = quality === "standard" ? "JPEG" : "PNG";
-          currentPDF.addImage(
-            imgData,
-            imageFormat,
-            0,
-            0,
-            pageViewport.width,
-            pageViewport.height
+          const pageAnnotations = currentDoc.annotations.filter(
+            (a: Annotation) => a.pageNumber === pageNum
           );
           
-          // Update batch tracking
-          currentBatchSize += pageSize;
-          pagesInCurrentBatch++;
+          // Create a canvas with both PDF content and annotations
+          // For HD exports, we'll use a higher scale factor when rendering
+          const exportCanvas = await createAnnotatedCanvas(pageObj, pageAnnotations, qualityScale);
           
-          // Check if we need to start a new batch (file getting too large)
-          const isBatchFull = currentBatchSize > MAX_FILE_SIZE * 0.9;
-          const isLastPage = pageNum === pdf.numPages;
-          
-          // Save current batch if it's full or last page
-          if ((isBatchFull && pagesInCurrentBatch > 1) || isLastPage) {
-            // File name with batch number if multiple batches
-            const fileName = estimatedBatches > 1
-              ? `${baseFileName}-part${batchNumber}-${fileTimestamp}.pdf`
-              : `${baseFileName}-${fileTimestamp}.pdf`;
-            
-            // Save the current batch
-            currentPDF.save(fileName);
-            
-            console.log(`Saved batch ${batchNumber} with ${pagesInCurrentBatch} pages (~ ${(currentBatchSize / 1024 / 1024).toFixed(2)}MB)`);
-            
-            // If not the last page, prepare for next batch
-            if (!isLastPage) {
-              // Get next page to initialize next batch
-              const nextPage = await pdf.getPage(pageNum + 1);
-              const nextPageViewport = nextPage.getViewport({ scale: 1.0 });
-              
-              // Create new PDF for next batch
-              currentPDF = new jsPDF({
-                orientation: nextPageViewport.width > nextPageViewport.height ? "landscape" : "portrait",
-                unit: "pt",
-                format: [nextPageViewport.width, nextPageViewport.height]
-              });
-              
-              // Reset batch tracking
-              currentBatchSize = 0;
-              pagesInCurrentBatch = 0;
-              batchNumber++;
-              isFirstPageInBatch = true;
-              
-              showToast(`Created part ${batchNumber} to keep file size under 50MB`, "success");
-            }
+          // If not the first page, add a new page to the PDF
+          if (pageNum > 1) {
+            multiPagePdf.addPage([viewport.width, viewport.height]);
           }
           
-          // Log progress
-          console.log(`Processed page ${pageNum}/${pdf.numPages} (batch ${batchNumber}) with ${pageAnnotations.length} annotations (${qualityLabel} quality)`);
+          // Add the page with annotations to the PDF
+          // Use higher image quality when exporting HD
+          multiPagePdf.addImage(
+            exportCanvas.canvas.toDataURL("image/png", quality === "hd" ? 1.0 : 0.92),
+            "PNG",
+            0,
+            0,
+            viewport.width,
+            viewport.height
+          );
+          
+          // Update progress through console
+          console.log(`Processed page ${pageNum} of ${pdf.numPages} with ${pageAnnotations.length} annotations (${qualityLabel} quality)`);
         } catch (error) {
           console.error(`Error processing page ${pageNum}:`, error);
           showToast(`Error on page ${pageNum}: ${error instanceof Error ? error.message : 'Unknown error'}`, "error");
         }
       }
       
-      // Calculate total processing time
-      const totalProcessingTime = Math.round((Date.now() - startTime) / 1000);
-      
-      // Build success message
-      let successMessage = `All ${pdf.numPages} pages exported successfully with ${qualityLabel} quality in ${totalProcessingTime} seconds`;
-      if (batchNumber > 1) {
-        successMessage += ` (split into ${batchNumber} files to maintain quality while staying under 50MB)`;
-      }
-      
-      showToast(successMessage, "success");
+      // Save the complete PDF with a timestamp and quality indicator
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const qualitySuffix = quality === "hd" ? "-HD" : "";
+      multiPagePdf.save(`${documentId}-annotated${qualitySuffix}-${timestamp}.pdf`);
+      showToast(`All pages exported successfully with ${qualityLabel} quality`, "success");
     } catch (error) {
       console.error("Export all pages error:", error);
       showToast(`Export failed: ${error instanceof Error ? error.message : 'Unknown error'}`, "error");
     } finally {
       setIsExporting(false);
     }
-  }, [pdf, canvasRef, document, documentId, showToast, createAnnotatedCanvas, compressPDF]);
+  }, [pdf, canvasRef, viewport, scale, document, documentId, showToast, createAnnotatedCanvas]);
 
   // Set up event listeners
   useEffect(() => {
@@ -3693,95 +2604,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId, document
     return () => window.removeEventListener('resize', handleResize);
   }, []);
   
-  // Add this helper function before the return statement
-  const prepareAnnotationsForExport = useCallback((annotations: Annotation[]) => {
-    if (!annotations || annotations.length === 0) return [];
-    
-    // Make a deep copy to avoid modifying the original annotations
-    return annotations.map(annotation => {
-      // Ensure all required properties are present
-      const preparedAnnotation = {
-        ...annotation,
-        // Make sure these essential properties exist
-        id: annotation.id || `ann_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        type: annotation.type,
-        pageNumber: annotation.pageNumber,
-        // Include style properties
-        style: {
-          ...annotation.style,
-          // Ensure color and other style attributes exist
-          color: annotation.style?.color || '#000000',
-          lineWidth: annotation.style?.lineWidth || 1,
-          opacity: annotation.style?.opacity !== undefined ? annotation.style.opacity : 1
-        },
-        // Add timestamp if missing
-        timestamp: annotation.timestamp || Date.now(),
-        // Add version if missing
-        version: annotation.version || 1
-      };
-      
-      return preparedAnnotation;
-    });
-  }, []);
-
-  // Add a handler for downloading page by page with annotations
-  const handlePageByPageDownload = useCallback(() => {
-    if (pdf && file && typeof file === 'string') {
-      // Get all annotations from the annotation store
-      const currentDoc = document ? useAnnotationStore.getState().documents[documentId] : null;
-      const allAnnotations = currentDoc?.annotations || [];
-      
-      // Use document name from props if available, otherwise extract from URL
-      const baseFilename = documentName || file.split('/').pop() || 'document.pdf';
-      // Clean the filename by removing extension and any special characters
-      const cleanName = baseFilename.replace(/\.pdf$/i, '').replace(/[^\w\s-]/g, '').trim();
-      // Create the final filename with .pdf extension
-      const filename = `${cleanName}.pdf`;
-      
-      if (allAnnotations.length > 0) {
-        console.log(`Including ${allAnnotations.length} annotations in the downloaded PDF: ${filename}`);
-        // Prepare annotations for export, ensuring they're properly formatted
-        const preparedAnnotations = prepareAnnotationsForExport(allAnnotations);
-        // Pass annotations as additional parameter to onDownloadCompressed
-        onDownloadCompressed?.(file, filename, preparedAnnotations);
-      } else {
-        // Original functionality if no annotations exist
-        onDownloadCompressed?.(file, filename);
-      }
-    }
-  }, [pdf, file, document, documentId, prepareAnnotationsForExport, onDownloadCompressed, documentName]);
-
-  // Add a new function to download only the current page with annotations
-  const handleCurrentPageDownload = useCallback(() => {
-    if (pdf && file && typeof file === 'string' && currentPage) {
-      // Get annotations only for the current page
-      const currentDoc = document ? useAnnotationStore.getState().documents[documentId] : null;
-      const pageAnnotations = currentDoc?.annotations?.filter(a => a.pageNumber === currentPage) || [];
-      
-      // Use document name from props if available, otherwise extract from URL
-      const baseFilename = documentName || file.split('/').pop() || 'document.pdf';
-      // Clean the filename by removing extension and any special characters
-      const cleanName = baseFilename.replace(/\.pdf$/i, '').replace(/[^\w\s-]/g, '').trim();
-      // Create the final filename with page number and .pdf extension
-      const filename = `${cleanName}_page${currentPage}.pdf`;
-      
-      console.log(`Downloading page ${currentPage}${pageAnnotations.length > 0 ? ' with annotations' : ''} as ${filename}`);
-      
-      // If we have a download handler in props, use it with filtered annotations
-      if (onDownloadCompressed) {
-        if (pageAnnotations.length > 0) {
-          // Prepare annotations for export to ensure they're properly formatted
-          const preparedAnnotations = prepareAnnotationsForExport(pageAnnotations);
-          // Pass only current page annotations to onDownloadCompressed with page filter flag
-          onDownloadCompressed(file, filename, preparedAnnotations, currentPage);
-        } else {
-          // Download without annotations but with page filter flag
-          onDownloadCompressed(file, filename, undefined, currentPage);
-        }
-      }
-    }
-  }, [pdf, file, document, documentId, currentPage, prepareAnnotationsForExport, onDownloadCompressed, documentName]);
-
   // Make sure we explicitly return a JSX element to satisfy the React.FC type
   return (
     <div 
@@ -3814,11 +2636,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId, document
           onZoomIn={handleZoomIn}
           onZoomOut={handleZoomOut}
           onResetZoom={handleResetZoom}
-          onDownloadHighQuality={downloadHighQualityPDF}
-          onDownloadPremiumQuality={downloadPremiumQualityPDF}
-          onDownloadCurrentPage={handleCurrentPageDownload}
-          hasAnnotations={annotationStore.documents[documentId]?.annotations?.length > 0}
-          onDownloadPageByPage={onDownloadCompressed ? handlePageByPageDownload : undefined}
+          onDownloadCurrentPage={downloadCurrentPage}
         />
       )}
       
@@ -3911,7 +2729,35 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId, document
             </div>
           )}
           
-        
+          {/* Error state */}
+          {renderError && (
+            <div className="absolute inset-0 flex items-center justify-center z-50 bg-white">
+              <div className="bg-white p-8 rounded-xl shadow-lg max-w-md mx-auto text-center">
+                <div className="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-5">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                </div>
+                <h3 className="text-xl font-semibold text-red-900 mb-3">Failed to Load PDF</h3>
+                <p className="text-gray-600 mb-5 text-sm">{renderError.message}</p>
+                <div className="flex flex-col space-y-2 sm:flex-row sm:space-y-0 sm:space-x-3 justify-center">
+                  <button 
+                    onClick={() => window.location.reload()}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                  >
+                    Reload Page
+                  </button>
+                  <button 
+                    onClick={() => setRenderError(null)}
+                    className="px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+          
           <div 
             className={`pdf-viewer-container mx-auto ${isDragging ? grabCursorClassName : ""}`}
             style={{
@@ -4237,183 +3083,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId, document
   }, [pdf, page, viewport, scale, currentPage, document, documentId, showToast, compressPDF]);
   
   // Add optimized function for exporting all pages with better compression
-  const handleExportCompressedPDF = useCallback(async () => {
-    if (!pdf || !canvasRef.current) {
-      showToast("Cannot export - PDF not fully loaded", "error");
-      return;
-    }
-    
-    try {
-      setIsExporting(true);
-      
-      // Get all annotations from the store
-      const currentDoc = document ? useAnnotationStore.getState().documents[documentId] : null;
-      const allAnnotations = currentDoc?.annotations || [];
-      
-      // Determine if this is mostly a text PDF for optimized compression
-      const isTextBased = await isTextBasedPDF(pdf);
-      console.log(`[PDFViewer] PDF analysis: ${isTextBased ? 'Text-based' : 'Image-based'} PDF`);
-      
-      showToast(`Starting compressed export of all ${pdf.numPages} pages...`, "success");
-      
-      // Create a timestamp for filename
-      const fileTimestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const fileName = `${documentId || 'document'}-compressed-${fileTimestamp}.pdf`;
-      
-      // Get first page to initialize document
-      const firstPage = await pdf.getPage(1);
-      const firstPageViewport = firstPage.getViewport({ scale: 1.0 });
-      
-      // Create an ArrayBuffer to hold the compressed PDF data
-      const pdfDoc = await PDFDocument.create();
-      
-      // Track progress
-      let lastProgressTime = Date.now();
-      const startTime = lastProgressTime;
-      
-      // Process each page
-      for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
-        try {
-          // Show progress updates
-          const currentTime = Date.now();
-          if (currentTime - lastProgressTime > 2000 || pageNum % 5 === 0 || pageNum === 1) {
-            const percentComplete = Math.round((pageNum / pdf.numPages) * 100);
-            showToast(
-              `Processing page ${pageNum}/${pdf.numPages} (${percentComplete}%)...`,
-              "success"
-            );
-            lastProgressTime = currentTime;
-          }
-          
-          // Get the page
-          const pageObj = await pdf.getPage(pageNum);
-          const pageViewport = pageObj.getViewport({ scale: 1.0 });
-          
-          // Get annotations for this page
-          const pageAnnotations = allAnnotations.filter(a => a.pageNumber === pageNum);
-          
-          // Create a temporary canvas for rendering with reduced dimensions
-          const canvas = document.createElement("canvas");
-          
-          // Use low scale factor for compression
-          const qualityScaleFactor = isTextBased ? 0.8 : 0.7; // Keep higher quality for text-based PDFs
-          
-          // Set maximum dimensions based on content type
-          const MAX_DIMENSION = isTextBased ? 1500 : 1200;
-          const scaleRatio = Math.min(qualityScaleFactor, MAX_DIMENSION / Math.max(pageViewport.width, pageViewport.height));
-          
-          canvas.width = Math.floor(pageViewport.width * scaleRatio);
-          canvas.height = Math.floor(pageViewport.height * scaleRatio);
-          
-          const ctx = canvas.getContext("2d", { alpha: true });
-          
-          if (!ctx) {
-            throw new Error("Failed to get canvas context");
-          }
-          
-          // Use medium quality image rendering for compressed mode
-          (ctx as any).imageSmoothingEnabled = true;
-          (ctx as any).imageSmoothingQuality = 'medium';
-          
-          // Set white background
-          ctx.fillStyle = "#FFFFFF";
-          ctx.fillRect(0, 0, canvas.width, canvas.height);
-          
-          // Apply scaling
-          if (scaleRatio !== 1.0) {
-            ctx.scale(scaleRatio, scaleRatio);
-          }
-          
-          // Render the page with standard quality settings
-          const renderTask = pageObj.render({
-            canvasContext: ctx,
-            viewport: pageViewport,
-            intent: "display" // Use display intent for faster rendering
-          });
-          
-          await renderTask.promise;
-          
-          // Draw annotations if needed
-          if (pageAnnotations.length > 0) {
-            console.log(`[PDFViewer] Drawing ${pageAnnotations.length} annotations for page ${pageNum}`);
-            
-            // Use slightly thicker lines for visibility after compression
-            const lineWidthMultiplier = 1.25;
-            
-            pageAnnotations.forEach(annotation => {
-              try {
-                // Set line width before drawing
-                ctx.lineWidth = ((annotation as any).strokeWidth || 1) * lineWidthMultiplier;
-                drawAnnotation(ctx, annotation, 1.0); // Use base scale since we've already scaled the canvas
-              } catch (err) {
-                console.error(`Error drawing annotation on page ${pageNum}:`, err);
-              }
-            });
-          }
-          
-          // Compress the canvas with aggressive settings for small file sizes
-          const compressionQuality = isTextBased ? 0.65 : 0.6;
-          const compressedBlob = await compressPDF(canvas, compressionQuality);
-          
-          // Convert blob to array buffer for PDF-lib
-          const arrayBuffer = await compressedBlob.arrayBuffer();
-          
-          // This uses pdf-lib to embed the compressed image into a PDF page
-          const img = await pdfDoc.embedPng(arrayBuffer);
-          const pdfPage = pdfDoc.addPage([pageViewport.width, pageViewport.height]);
-          
-          // Draw the image on the page with proper sizing
-          pdfPage.drawImage(img, {
-            x: 0,
-            y: 0,
-            width: pageViewport.width,
-            height: pageViewport.height,
-          });
-        } catch (error) {
-          console.error(`Error processing page ${pageNum}:`, error);
-          showToast(`Error on page ${pageNum}: ${error instanceof Error ? error.message : 'Unknown error'}`, "error");
-        }
-      }
-      
-      // Apply maximum compression to the final PDF
-      const compressedBytes = await pdfDoc.save({ 
-        useObjectStreams: true,
-        addDefaultPage: false,
-        objectsPerTick: 100
-      });
-      
-      // Calculate compression ratio if possible
-      let compressionRatio = '';
-      try {
-        // Get original PDF size
-        const fileUrl = pdfFile instanceof File ? URL.createObjectURL(pdfFile) : 
-                        (typeof pdfFile === 'string' ? pdfFile : '');
-        const response = await fetch(fileUrl);
-        const originalPdfSize = (await response.blob()).size;
-        const finalSize = compressedBytes.byteLength;
-        
-        // Calculate percentage of original size
-        const percentage = Math.round((finalSize / originalPdfSize) * 100);
-        compressionRatio = ` (${percentage}% of original size)`;
-      } catch (e) {
-        // Ignore errors in size calculation
-      }
-      
-      // Create a blob and download with file-saver
-      const blob = new Blob([compressedBytes], { type: 'application/pdf' });
-      saveAs(blob, fileName);
-      
-      // Calculate total processing time
-      const totalProcessingTime = Math.round((Date.now() - startTime) / 1000);
-      
-      showToast(`All ${pdf.numPages} pages exported successfully with maximum compression${compressionRatio} in ${totalProcessingTime}s`, "success");
-    } catch (error) {
-      console.error("Compressed export error:", error);
-      showToast(`Export failed: ${error instanceof Error ? error.message : 'Unknown error'}`, "error");
-    } finally {
-      setIsExporting(false);
-    }
-  }, [pdf, compressPDF, canvasRef, document, documentId, showToast, pdfFile]);
 
   useEffect(() => {
     const initializePDFJS = async () => {

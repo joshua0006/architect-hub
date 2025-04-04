@@ -165,21 +165,12 @@ export const projectService = {
         },
       });
 
-      // Create folder structure based on useTemplateStructure flag
+      // Create default folder structure
       try {
-        const useTemplateStructure = project.useTemplateStructure !== false; // Default to true if not specified
-        
-        if (useTemplateStructure) {
-          // Create default folder structure using template
-          await folderTemplateService.createFolderStructure(docRef.id);
-          console.log("Default folder structure created for project:", docRef.id);
-        } else {
-          // Create an empty folder structure (just initialize the project without template folders)
-          console.log("Creating project with empty document structure:", docRef.id);
-          // No folder template creation needed
-        }
+        await folderTemplateService.createFolderStructure(docRef.id);
+        console.log("Default folder structure created for project:", docRef.id);
       } catch (folderError) {
-        console.error("Error setting up folder structure:", folderError);
+        console.error("Error creating folder structure:", folderError);
         // Continue even if folder creation fails
       }
 

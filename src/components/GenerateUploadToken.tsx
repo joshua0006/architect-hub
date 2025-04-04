@@ -113,101 +113,89 @@ const GenerateUploadToken: React.FC<GenerateUploadTokenProps> = ({
         <div className="p-6">
           <div className="mb-6">
             <h3 className="font-medium text-gray-700 mb-1">Upload link generated</h3>
-
+            <p className="text-sm text-gray-500 mb-4">
+              Share this link with anyone you want to upload files to this folder. 
+              They can upload {generatedToken.maxUploads === 1 ? 'only one file' : `up to ${generatedToken.maxUploads} files`}.
+            </p>
+            
             {/* Upload Link Card */}
-            <div>           
-              <div className="p-5">
-                <div className="space-y-5">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1.5">Link URL</label>
-                    <div className="relative flex items-center mb-2 group">
-                      <input
-                        type="text"
-                        readOnly
-                        value={generateUploadUrl(generatedToken, window.location.origin)}
-                        className="w-full p-3 pr-16 border border-gray-300 rounded-md bg-gray-50 text-sm font-mono shadow-sm group-hover:border-blue-300 transition-colors"
-                      />
-                      <button
-                        onClick={copyTokenLink}
-                        className="absolute right-2 px-3 py-1.5 bg-blue-100 text-blue-700 hover:bg-blue-200 rounded-md text-sm transition-colors flex items-center"
-                        title={showCopied ? "Copied!" : "Copy to clipboard"}
-                      >
-                        {showCopied ? <Check size={14} className="mr-1" /> : <Copy size={14} className="mr-1" />}
-                        {showCopied ? "Copied" : "Copy"}
-                      </button>
-                    </div>
-                    
-                    <p className="text-xs text-gray-600 mb-2 flex items-center">
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 mr-1 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                      </svg>
-                      Anyone with this link can upload files to &#8203;  <span className="font-medium"> {folderName || "this folder"}</span>
-                    </p>
+            <div className="bg-white border border-blue-300 rounded-lg shadow-lg overflow-hidden mb-6">
+              <div className="bg-blue-500 px-4 py-3 text-white">
+                <h4 className="font-medium flex items-center">
+                  <Share2 className="mr-2 h-5 w-5" />
+                  Guest Upload Link
+                </h4>
+              </div>
+              <div className="p-4">
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Link URL</label>
+                  <div className="relative flex items-center mb-2">
+                    <input
+                      type="text"
+                      readOnly
+                      value={generateUploadUrl(generatedToken, window.location.origin)}
+                      className="w-full p-3 pr-16 border border-gray-300 rounded bg-gray-50 text-sm font-mono"
+                    />
+                    <button
+                      onClick={copyTokenLink}
+                      className="absolute right-2 px-3 py-1 bg-blue-100 text-blue-700 hover:bg-blue-200 rounded text-sm transition-colors flex items-center"
+                      title={showCopied ? "Copied!" : "Copy to clipboard"}
+                    >
+                      {showCopied ? <Check size={14} className="mr-1" /> : <Copy size={14} className="mr-1" />}
+                      {showCopied ? "Copied" : "Copy"}
+                    </button>
                   </div>
                   
-                  <div className="bg-gradient-to-br from-blue-50 to-white rounded-md border border-blue-100 p-1">
-                    <div className="grid grid-cols-2 text-sm gap-3 p-2">
-                      <div className="flex flex-col">
-                        <span className="text-gray-500 text-xs uppercase tracking-wide">Max files</span>
-                        <span className="font-semibold text-gray-800 mt-1 flex items-center">
-                          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                          </svg>
-                          {generatedToken.maxUploads || 'Unlimited'}
-                        </span>
-                      </div>
-                      <div className="flex flex-col">
-                        <span className="text-gray-500 text-xs uppercase tracking-wide">File size limit</span>
-                        <span className="font-semibold text-gray-800 mt-1 flex items-center">
-                          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z" />
-                          </svg>
-                          {generatedToken.maxFileSize 
-                            ? `${(generatedToken.maxFileSize / (1024 * 1024)).toFixed(1)} MB` 
-                            : 'Unlimited'}
-                        </span>
-                      </div>
-                      <div className="flex flex-col">
-                        <span className="text-gray-500 text-xs uppercase tracking-wide">Expires</span>
-                        <span className="font-semibold text-gray-800 mt-1 flex items-center">
-                          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                          </svg>
-                          {new Date(generatedToken.expiresAt).toLocaleString()}
-                        </span>
-                      </div>
-                      <div className="flex flex-col">
-                        <span className="text-gray-500 text-xs uppercase tracking-wide">Allowed file types</span>
-                        <span className="font-semibold text-gray-800 mt-1 flex items-center">
-                          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                          </svg>
-                          <span className="truncate max-w-xs">
-                            {generatedToken.allowedFileTypes && generatedToken.allowedFileTypes.length > 0 
-                              ? generatedToken.allowedFileTypes.join(', ')
-                              : 'All types'}
-                          </span>
-                        </span>
-                      </div>
+                  <p className="text-xs text-gray-500 mb-2">
+                    Anyone with this link can upload files to <span className="font-medium">{folderName || "this folder"}</span>
+                  </p>
+                  
+                  <div className="grid grid-cols-2 gap-4 text-sm border-t border-gray-200 pt-3 mt-3">
+                    <div>
+                      <span className="block text-gray-500">Max files:</span>
+                      <span className="font-medium">{generatedToken.maxUploads || 'Unlimited'}</span>
+                    </div>
+                    <div>
+                      <span className="block text-gray-500">File size limit:</span>
+                      <span className="font-medium">
+                        {generatedToken.maxFileSize 
+                          ? `${(generatedToken.maxFileSize / (1024 * 1024)).toFixed(1)} MB` 
+                          : 'Unlimited'}
+                      </span>
                     </div>
                   </div>
-
-                  <button 
-                    onClick={copyTokenLink}
-                    className="w-full flex items-center justify-center py-3 px-4 bg-gradient-to-r from-blue-600 to-blue-500 text-white rounded-md hover:from-blue-700 hover:to-blue-600 transition-all shadow-sm"
-                  >
-                    {showCopied ? 
-                      <>
-                        <Check size={18} className="mr-2" /> 
-                        Copied to clipboard!
-                      </> : 
-                      <>
-                        <Copy size={18} className="mr-2" /> 
-                        Copy link to clipboard
-                      </>
-                    }
-                  </button>
+                  
+                  <div className="grid grid-cols-2 gap-4 text-sm mt-3">
+                    <div>
+                      <span className="block text-gray-500">Expires:</span>
+                      <span className="font-medium">{generatedToken.expiresAt.toLocaleString()}</span>
+                    </div>
+                    <div>
+                      <span className="block text-gray-500">Allowed file types:</span>
+                      <span className="font-medium truncate block">
+                        {generatedToken.allowedFileTypes && generatedToken.allowedFileTypes.length > 0 
+                          ? generatedToken.allowedFileTypes.join(', ')
+                          : 'All types'}
+                      </span>
+                    </div>
+                  </div>
                 </div>
+
+                <button 
+                  onClick={copyTokenLink}
+                  className="w-full flex items-center justify-center py-2.5 px-4 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
+                >
+                  {showCopied ? 
+                    <>
+                      <Check size={18} className="mr-2" /> 
+                      Copied to clipboard!
+                    </> : 
+                    <>
+                      <Copy size={18} className="mr-2" /> 
+                      Copy link to clipboard
+                    </>
+                  }
+                </button>
               </div>
             </div>
           </div>

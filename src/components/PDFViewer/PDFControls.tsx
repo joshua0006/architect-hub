@@ -12,9 +12,6 @@ import {
   ZoomIn,
   ZoomOut,
   RefreshCw,
-  FileText,
-  Layers,
-  FileInput
 } from "lucide-react";
 import { useKeyboardShortcutGuide } from "../../hooks/useKeyboardShortcutGuide";
 
@@ -32,14 +29,10 @@ interface PDFControlsProps {
   onZoomOut: () => void;
   onResetZoom: () => void;
   onExportCurrentPage: (format: "png" | "pdf") => void;
-  onExportAllPages: (quality?: "standard" | "hd" | "ultra-hd") => void;
+  onExportAllPages: (quality?: "standard" | "hd") => void;
   onExportAnnotations: () => void;
   onImportAnnotations: (file: File) => void;
-  onDownloadCurrentPage?: () => void;
-  onDownloadHighQuality?: () => void;
-  onDownloadPremiumQuality?: () => void;
-  onDownloadPageByPage?: () => void;
-  hasAnnotations?: boolean;
+  onDownloadCurrentPage: () => void;
 }
 
 export const PDFControls: React.FC<PDFControlsProps> = ({
@@ -60,10 +53,6 @@ export const PDFControls: React.FC<PDFControlsProps> = ({
   onExportAnnotations,
   onImportAnnotations,
   onDownloadCurrentPage,
-  onDownloadHighQuality,
-  onDownloadPremiumQuality,
-  onDownloadPageByPage,
-  hasAnnotations = false,
 }) => {
   const { setIsShortcutGuideOpen } = useKeyboardShortcutGuide();
 
@@ -163,49 +152,31 @@ export const PDFControls: React.FC<PDFControlsProps> = ({
         
         {/* Download Options */}
         <div className="flex items-center">
-          
-          
-          {/* Page-by-Page ZIP Download Button */}
-          {onDownloadPageByPage && (
-            <button
-              onClick={onDownloadPageByPage}
-              className="p-1 flex items-center gap-2 hover:bg-green-100 transition-colors duration-200"
-              title={hasAnnotations ? "Download complete PDF with annotations" : "Download compiled PDF"}
-              disabled={isExporting}
-            >
-              <Layers size={20} className={isExporting ? "text-gray-400" : hasAnnotations ? "text-purple-600" : "text-green-600"} />
-              <span className={hasAnnotations ? "text-purple-600 font-medium" : "text-green-600 font-medium"}>
-                {hasAnnotations ? "PDF with Annotations" : "Compiled PDF"}
-              </span>
-              {isExporting && (
-                <span className="ml-1 text-xs text-gray-500">Processing...</span>
-              )}
-            </button>
-          )}
-        
-          <div className="flex items-center border-l border-gray-200 ml-2">
-            
-            {/* Current Page Download Button */}
-            {onDownloadCurrentPage && (
-              <button
-                onClick={onDownloadCurrentPage}
-                className="p-1 ml-2 flex items-center gap-2 hover:bg-blue-100 transition-colors duration-200"
-                title={`Download page ${currentPage} as PDF${hasAnnotations ? ' with annotations' : ''}`}
-                disabled={isExporting}
-              >
-                <FileDown size={20} className={isExporting ? "text-gray-400" : "text-blue-600"} />
-                <span className="text-blue-600 font-medium">Page {currentPage} PDF</span>
-                {isExporting && (
-                  <span className="ml-1 text-xs text-gray-500">Processing...</span>
-                )}
-              </button>
+          <button
+            onClick={() => onExportAllPages("hd")}
+            className="p-1 flex items-center gap-2 rounded-l hover:bg-blue-100 transition-colors duration-200"
+            title="Download HD PDF with annotations"
+            disabled={isExporting}
+          >
+            <Download size={20} className={isExporting ? "text-gray-400" : "text-blue-600"} /> 
+            <span className="text-blue-600 font-medium">Download PDF</span>
+            {isExporting && (
+              <span className="ml-1 text-xs text-gray-500">Exporting...</span>
             )}
-            
-            
-            
-            
-            
-          </div>
+          </button>
+          
+          {/* Separator within download options */}
+          <div className="h-6 w-px bg-gray-200 mx-1" />
+          
+          <button
+            onClick={onDownloadCurrentPage}
+            className="p-1 flex items-center gap-2 rounded-r hover:bg-blue-100 transition-colors duration-200"
+            title={`Download current page (${currentPage})`}
+            disabled={isExporting}
+          >
+            <FileDown size={20} className={isExporting ? "text-gray-400" : "text-blue-600"} />
+            <span className="text-blue-600 font-medium">Current Page</span>
+          </button>
         </div>
       </div>
       

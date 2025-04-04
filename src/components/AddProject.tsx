@@ -21,7 +21,6 @@ export default function AddProject({ onSuccess, onCancel }: AddProjectProps) {
     progress: 0,
     startDate: '',
     endDate: '',
-    useTemplateStructure: true, // Default to using template structure
     metadata: {
       industry: '',
       projectType: '',
@@ -84,7 +83,6 @@ export default function AddProject({ onSuccess, onCancel }: AddProjectProps) {
         endDate: formData.endDate,
         // Automatically add the current user (project creator) to the project team members
         teamMemberIds: user ? [user.id] : [],
-        useTemplateStructure: formData.useTemplateStructure, // Include template structure preference
         metadata: {
           industry: formData.metadata.industry || 'N/A',
           projectType: formData.metadata.projectType || 'N/A',
@@ -241,51 +239,6 @@ export default function AddProject({ onSuccess, onCancel }: AddProjectProps) {
                   onChange={handleChange}
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
-              </div>
-            </div>
-            
-            {/* Document Structure Option */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Document Structure
-              </label>
-              <div className="space-y-3 bg-gray-50 p-4 rounded-md">
-                <div className="flex items-start">
-                  <div className="flex items-center h-5">
-                    <input
-                      type="radio"
-                      id="templateStructure"
-                      name="useTemplateStructure"
-                      checked={formData.useTemplateStructure}
-                      onChange={() => setFormData(prev => ({ ...prev, useTemplateStructure: true }))}
-                      className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300"
-                    />
-                  </div>
-                  <div className="ml-3 text-sm">
-                    <label htmlFor="templateStructure" className="font-medium text-gray-700">
-                      Template document structure
-                    </label>
-                    <p className="text-gray-500">Create project with predefined folders (ADMIN, CAD, PHOTOS, etc.)</p>
-                  </div>
-                </div>
-                <div className="flex items-start">
-                  <div className="flex items-center h-5">
-                    <input
-                      type="radio"
-                      id="emptyStructure"
-                      name="useTemplateStructure"
-                      checked={!formData.useTemplateStructure}
-                      onChange={() => setFormData(prev => ({ ...prev, useTemplateStructure: false }))}
-                      className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300"
-                    />
-                  </div>
-                  <div className="ml-3 text-sm">
-                    <label htmlFor="emptyStructure" className="font-medium text-gray-700">
-                      Empty document structure
-                    </label>
-                    <p className="text-gray-500">Start with a clean project with no predefined folders</p>
-                  </div>
-                </div>
               </div>
             </div>
           </div>

@@ -60,7 +60,6 @@ export interface Project {
   startDate: string;
   endDate: string;
   teamMemberIds: string[];
-  useTemplateStructure?: boolean; // Flag to indicate whether to use template document structure
   metadata?: {
     industry: string;
     projectType: string;
