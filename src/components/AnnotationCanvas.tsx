@@ -1742,13 +1742,14 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
     let fontStyle = '';
     if (textOptions.bold) fontStyle += 'bold ';
     if (textOptions.italic) fontStyle += 'italic ';
-    const fontSize = textOptions.fontSize || 14;
+    const baseFontSize = textOptions.fontSize || 14;
+    const scaledFontSize = baseFontSize * scale; // Scale font size
     const fontFamily = textOptions.fontFamily || 'Arial';
-    ctx.font = `${fontStyle}${fontSize}px ${fontFamily}`;
+    ctx.font = `${fontStyle}${scaledFontSize}px ${fontFamily}`; // Use scaled font size
     
     // Calculate text dimensions
     const lines = text.split('\n');
-    const lineHeight = fontSize * 1.2;
+    const scaledLineHeight = scaledFontSize * 1.2; // Use scaled font size for line height
     
     // Color settings
     ctx.fillStyle = annotation.style.color || '#000000';
@@ -1761,7 +1762,7 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
     // Render each line of text
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
-      ctx.fillText(line, textX, textY + i * lineHeight * scale);
+      ctx.fillText(line, textX, textY + i * scaledLineHeight); // Use scaled line height
     }
     
     // Restore context
@@ -1802,12 +1803,20 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
     
     // Draw text content
     ctx.fillStyle = "#000000";
-    ctx.font = `14px Arial`;
+    // Font settings for sticky note
+    const textOptions = annotation.style.textOptions || {};
+    let fontStyle = '';
+    if (textOptions.bold) fontStyle += 'bold ';
+    if (textOptions.italic) fontStyle += 'italic ';
+    const baseFontSize = textOptions.fontSize || 12; // Default sticky note font size
+    const scaledFontSize = baseFontSize * scale; // Scale font size
+    const fontFamily = textOptions.fontFamily || 'Arial';
+    ctx.font = `${fontStyle}${scaledFontSize}px ${fontFamily}`; // Use scaled font size (set before measurement)
     ctx.textBaseline = 'top';
     
     // Split text into lines and render with padding
     const lines = text.split('\n');
-    const lineHeight = 16 * scale;
+    const scaledLineHeight = scaledFontSize * 1.2; // Scaled line height based on scaled font
     const padding = 10 * scale;
     
     // Apply text wrapping for sticky notes
@@ -1852,7 +1861,7 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
       ctx.fillText(
         renderedLines[i],
         x + padding,
-        y + padding + (i * lineHeight)
+        y + padding + (i * scaledLineHeight) // Use scaled line height for positioning
       );
     }
     
