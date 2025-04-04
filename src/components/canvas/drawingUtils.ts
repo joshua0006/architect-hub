@@ -155,6 +155,7 @@ const drawHighlight = (
   scale: number,
   color: string
 ) => {
+  // Cap highlight opacity at 0.7
   ctx.globalAlpha = 0.3;
   ctx.fillStyle = color;
   const [start, end] = points;

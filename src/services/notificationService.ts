@@ -73,7 +73,6 @@ async function preventDuplicateNotifications<T>(
   
   // Check if this exact operation was performed recently
   if (existingOperation && (now - existingOperation.timestamp) < cacheDurationMs) {
-    console.log(`[Notification Cache] Returning cached result for operation: ${cacheKey}`);
     return existingOperation.notificationIds as unknown as T;
   }
   
@@ -82,26 +81,21 @@ async function preventDuplicateNotifications<T>(
   
   // Check if this operation is currently in progress
   if (activeTransactions.has(cacheKey)) {
-    console.log(`[Notification Cache] Operation already in progress: ${cacheKey}, waiting...`);
-    
     // Wait a bit longer for the operation to complete (3 seconds)
     await new Promise(resolve => setTimeout(resolve, 3000));
     
     // Check cache again after waiting
     const updatedOperation = recentNotificationOperations.get(cacheKey);
     if (updatedOperation) {
-      console.log(`[Notification Cache] Using completed operation result: ${cacheKey}`);
       return updatedOperation.notificationIds as unknown as T;
     }
     
     // If still no result, try with a new lock key
     activeTransactions.add(lockKey);
-    console.log(`[Notification Cache] No result after waiting, trying with new lock: ${lockKey}`);
   } else {
     // Mark this operation as in progress with both keys
-  activeTransactions.add(cacheKey);
+    activeTransactions.add(cacheKey);
     activeTransactions.add(lockKey);
-  console.log(`[Notification Cache] Starting new operation: ${cacheKey}`);
   }
   
   try {
@@ -114,7 +108,6 @@ async function preventDuplicateNotifications<T>(
       notificationIds: result as unknown as string[]
     });
     
-    console.log(`[Notification Cache] Completed operation: ${cacheKey}`);
     return result;
   } finally {
     // Clean up active transaction
@@ -123,15 +116,14 @@ async function preventDuplicateNotifications<T>(
     
     // Clean up old cache entries every 50 operations to prevent memory leaks
     if (Math.random() < 0.02) { // ~2% chance to run cleanup on each operation
-    const keysToDelete: string[] = [];
-    recentNotificationOperations.forEach((value, key) => {
-      if ((now - value.timestamp) > cacheDurationMs) {
-        keysToDelete.push(key);
-      }
-    });
+      const keysToDelete: string[] = [];
+      recentNotificationOperations.forEach((value, key) => {
+        if ((now - value.timestamp) > cacheDurationMs) {
+          keysToDelete.push(key);
+        }
+      });
     
-    keysToDelete.forEach(key => recentNotificationOperations.delete(key));
-      console.log(`[Notification Cache] Cleaned up ${keysToDelete.length} old cache entries`);
+      keysToDelete.forEach(key => recentNotificationOperations.delete(key));
     }
   }
 }
@@ -149,8 +141,6 @@ export const createNotification = async (
       console.error('[Notification Error] Attempting to create notification without userId');
       throw new Error('Notification must have a userId');
     }
-    
-    // Removed projectId validation since this field doesn't exist in the project collection
     
     // Additional validation specifically for mention notifications to ensure they're configured correctly
     if (notification.iconType === 'comment-mention') {
@@ -336,9 +326,6 @@ export const createFileUploadNotification = async (
     return [];
   }
   
-  // Log the notification creation attempt
-  console.log(`[Notification] Creating upload notifications for file "${fileName}" by ${formattedGuestName} for ${targetUserIds.length} users`);
-  
   // Create a notification for each target user
   const notificationPromises = targetUserIds.map(userId => {
     // Make sure we have a valid userId
@@ -382,7 +369,6 @@ export const createFileUploadNotification = async (
       !id.startsWith('general')
     );
     
-    console.log(`[Notification] Successfully created ${validNotificationIds.length} upload notifications`);
     return validNotificationIds;
   } catch (error) {
     console.error('[Notification Error] Error creating file upload notifications:', error);
@@ -633,7 +619,6 @@ export const subscribeToNotifications = (
   
   // Generate a unique subscription ID for tracking
   const subscriptionId = `${userId}-${Date.now()}`;
-  console.log(`[Notification Subscription] Creating subscription ${subscriptionId}`);
   
   // Create a query for this user's notifications
   const notificationsRef = collection(db, 'notifications');
@@ -644,8 +629,6 @@ export const subscribeToNotifications = (
   
   // If we have recent cached notifications, send them immediately
   if (cachedData && (Date.now() - cachedData.timestamp) < CACHE_DURATION_MS) {
-    console.log(`[Notification Cache] Using cached notifications for user ${userId}, age: ${(Date.now() - cachedData.timestamp) / 1000}s`);
-    
     // Use setTimeout to ensure this is asynchronous
     setTimeout(() => {
       callback(cachedData.notifications);
@@ -659,8 +642,6 @@ export const subscribeToNotifications = (
     orderBy('createdAt', 'desc'),
     limit(20) // Reduced limit to improve performance
   );
-  
-  console.log(`[Notification Subscription] Setting up real-time subscription for user ${userId}`);
   
   // Implement debounced callback for processing snapshots
   let pendingSnapshot: any = null;
@@ -710,17 +691,11 @@ export const subscribeToNotifications = (
       // Throttle callbacks based on time (except for first callback)
       const now = Date.now();
       if (!isFirstCallback && now - lastCallbackTime < throttleInterval) {
-        console.log(`[Notification Subscription] Throttling callback, too soon after last callback (${Math.floor((now - lastCallbackTime) / 1000)}s)`);
         return;
       }
       
-      // Log status along with file upload presence
-      console.log(`[Notification Subscription] Processing snapshot (hasFileUploads=${hasFileUploads}, throttleInterval=${throttleInterval}ms)`);
-      
       // Check if we have any documents
       if (snapshot.empty) {
-        console.log(`[Notification Subscription] No notifications found for user ${userId}`);
-        
         // Update the cache with empty array for faster future responses
         notificationCache.set(cacheKey, {
           timestamp: now,
@@ -740,7 +715,6 @@ export const subscribeToNotifications = (
         .filter(Boolean);
       
       if (notifications.length === 0) {
-        console.log(`[Notification Subscription] No valid notifications in snapshot for user ${userId}`);
         callback([]); // Always call callback with empty array
         return;
       }
@@ -766,14 +740,7 @@ export const subscribeToNotifications = (
       lastCallbackTime = now;
       isFirstCallback = false;
       
-      // Log information about file upload notifications
-      if (hasFileUploads) {
-        const fileUploadCount = notifications.filter(n => n.iconType === 'file-upload' && !n.read).length;
-        console.log(`[Notification Subscription] Found ${fileUploadCount} unread file upload notifications`);
-      }
-      
       // Call the callback with notifications
-      console.log(`[Notification Subscription] Calling back with ${notifications.length} notifications`);
       callback(notifications);
     } catch (error) {
       console.error('[Notification Subscription] Error processing snapshot:', error);
@@ -792,7 +759,6 @@ export const subscribeToNotifications = (
   
   // Return unsubscribe function
   return () => {
-    console.log(`[Notification Subscription] Cleaning up subscription ${subscriptionId}`);
     if (debounceTimer) {
       clearTimeout(debounceTimer);
       debounceTimer = null;
@@ -975,7 +941,7 @@ export const createCommentMentionNotifications = async (
  * @param documentId The ID of the document containing the comment
  * @param documentName The name of the document
  * @param folderId The ID of the folder containing the document
- * @param folderName The name of the folder  
+ * @param folderName The name of the folder
  * @param projectId The ID of the project
  * @param commentId The ID of the comment
  * @param commentText The text content of the comment
@@ -1338,8 +1304,6 @@ export const fixNotificationStructure = async (userId: string): Promise<number> 
  * @returns A promise that resolves when the reset is complete
  */
 export const resetNotificationSystem = async (): Promise<void> => {
-  console.log('[Notification System] Resetting notification caches and active transactions');
-  
   // Clear all cache maps
   recentNotificationOperations.clear();
   activeTransactions.clear();
@@ -1347,8 +1311,6 @@ export const resetNotificationSystem = async (): Promise<void> => {
   
   // Wait a moment to ensure any in-progress operations have time to complete
   await new Promise(resolve => setTimeout(resolve, 1000));
-  
-  console.log('[Notification System] Reset complete - notification system should now behave correctly');
 };
 
 /**
