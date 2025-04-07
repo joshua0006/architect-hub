@@ -103,7 +103,7 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
   const [scrollPosition, setScrollPosition] = useState({ left: 0, top: 0 });
   const lastScrollPosition = useRef({ left: 0, top: 0 });
   const store = useAnnotationStore();
-  const { currentTool, currentStyle, currentDrawMode } = store;
+  const { currentTool, currentStyle, currentDrawMode, selectAnnotation, setCurrentTool } = store;
   const documentState = store.documents[documentId] || initialDocumentState();
 
   // Add these refs for optimized auto-scrolling
@@ -1077,8 +1077,14 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
       // Add the annotation to the store
       store.addAnnotation(documentId, newAnnotation);
 
+      // Select the newly created annotation
+      store.selectAnnotation(newAnnotation);
+
+      // Switch back to select tool
+      store.setCurrentTool("select");
+
       // Dispatch event to notify about the change
-      dispatchAnnotationChangeEvent("userDrawing", true);
+      dispatchAnnotationChangeEvent("userDrawing", true); // Dispatch event *after* state changes
     }
 
     // Removed text dragging completion logic
