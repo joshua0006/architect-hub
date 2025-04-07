@@ -115,7 +115,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
   // Add new state for initial loading
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [initialPageRendered, setInitialPageRendered] = useState(false);
-  const [showControls, setShowControls] = useState(false); // State to control controls visibility
+  // Removed showControls state
   const [showForcedLoadingOverlay, setShowForcedLoadingOverlay] = useState(true); // State for the 2-second loading overlay
   
   // Track which pages have been rendered to prevent duplicates
@@ -322,9 +322,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     // Set flags to indicate page change is in progress
     setPageChangeInProgress(true);
 
-    // Hide controls immediately on page change
-    setShowControls(false);
-    // Clear any pending timeout to show controls
+    // Clear any pending timeout to show controls (if applicable, though state is removed)
     if (controlsTimeoutRef.current) {
       clearTimeout(controlsTimeoutRef.current);
       controlsTimeoutRef.current = null;
@@ -377,9 +375,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     // Set the page change flag
     setPageChangeInProgress(true);
 
-    // Hide controls immediately on page change
-    setShowControls(false);
-    // Clear any pending timeout to show controls
+    // Clear any pending timeout to show controls (if applicable, though state is removed)
     if (controlsTimeoutRef.current) {
       clearTimeout(controlsTimeoutRef.current);
       controlsTimeoutRef.current = null;
@@ -903,9 +899,10 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
       // Start the 2-second forced loading timer
       loadingTimer = setTimeout(() => {
         setShowForcedLoadingOverlay(false);
-        console.log('[PDFViewer] Forced loading overlay hidden after 2 seconds. Refreshing canvas.');
+        console.log('[PDFViewer] Forced loading overlay hidden after 2 seconds. Refreshing canvas and showing controls.');
         // Refresh the canvas after the overlay is hidden
         renderPdfPage();
+        // Controls will show based on `pdf` object availability
       }, 2000); // 2000ms = 2 seconds
 
       // Reset render state (might not be necessary here, but keep for now)
@@ -916,6 +913,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
       // If PDF is unloaded, viewer is not ready
       setIsViewerReady(false);
       setShowForcedLoadingOverlay(true); // Reset forced loading if PDF unloads
+      // Controls will hide automatically when `pdf` is null
     }
     // If PDF is loaded but initial page hasn't rendered, isViewerReady remains false
 
@@ -925,7 +923,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
         clearTimeout(loadingTimer);
       }
     };
-  }, [pdf, initialPageRendered]); // Depend on both pdf and initial render state
+  }, [pdf, initialPageRendered, renderPdfPage]); // Depend on pdf, initial render state, and renderPdfPage
 
   // Define function for fitting to width - placed at the top of other functions
   const handleFitToWidth = useCallback(() => {
@@ -2447,7 +2445,8 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
         />
       )}
       
-      {pdf && showControls && (
+      {/* Render controls only when the PDF object is available */}
+      {pdf && (
         <PDFControls
           currentPage={currentPage}
           totalPages={pdf.numPages}
