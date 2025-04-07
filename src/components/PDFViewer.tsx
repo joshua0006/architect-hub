@@ -113,6 +113,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
   
   // Add new state for initial loading
   const [isInitialLoading, setIsInitialLoading] = useState(true);
+  const [initialPageRendered, setInitialPageRendered] = useState(false);
   
   // Track which pages have been rendered to prevent duplicates
   const renderedPagesRef = useRef<Set<number>>(new Set());
@@ -537,6 +538,12 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
                 renderLockRef.current = false;
                 currentRenderingPageRef.current = null;
 
+                // Mark initial render as complete if not already done
+                if (!initialPageRendered) {
+                  setInitialPageRendered(true);
+                  console.log('[PDFViewer] Initial page render completed.');
+                }
+
                 // Get annotations for the current page
                 let annotations: any[] = [];
                 try {
@@ -866,21 +873,24 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
   // Debounced render is now triggered directly from zoom handlers.
 
   // Mark viewer as ready when the PDF is loaded
+  // Mark viewer as ready only when the PDF is loaded AND the first page has rendered
   useEffect(() => {
-    if (!pdf) {
+    if (pdf && initialPageRendered) {
+      // Mark the viewer as ready
+      setIsViewerReady(true);
+      console.log('[PDFViewer] Viewer marked as ready (PDF loaded and initial page rendered).');
+      
+      // Reset render state (might not be necessary here, but keep for now)
+      setRenderComplete(false);
+      setIsRendering(false);
+      
+    } else if (!pdf) {
+      // If PDF is unloaded, viewer is not ready
       setIsViewerReady(false);
-      return;
     }
+    // If PDF is loaded but initial page hasn't rendered, isViewerReady remains false
     
-    
-    // Mark the viewer as ready
-    setIsViewerReady(true);
-    
-    // Reset render state to ensure first page renders properly
-    setRenderComplete(false);
-    setIsRendering(false);
-    
-  }, [pdf]);
+  }, [pdf, initialPageRendered]); // Depend on both pdf and initial render state
 
   // Define function for fitting to width - placed at the top of other functions
   const handleFitToWidth = useCallback(() => {

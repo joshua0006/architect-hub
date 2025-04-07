@@ -102,9 +102,8 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
   const [cursorPosition, setCursorPosition] = useState<Point | null>(null);
   const [scrollPosition, setScrollPosition] = useState({ left: 0, top: 0 });
   const lastScrollPosition = useRef({ left: 0, top: 0 });
-
   const store = useAnnotationStore();
-  const { currentTool, currentStyle, currentDrawMode } = store;
+  const { currentTool, currentStyle, currentDrawMode, selectAnnotation, setCurrentTool } = store;
   const documentState = store.documents[documentId] || initialDocumentState();
 
   // Add these refs for optimized auto-scrolling
@@ -121,13 +120,14 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
   useEffect(() => {
     if (isEditingText && textInputRef.current) {
       // Use a short timeout to ensure the element is fully rendered and focusable
+      // Use a slightly longer timeout to ensure focus after potential rendering delays
       setTimeout(() => {
         textInputRef.current?.focus();
         // Select text only if it's the default placeholder
         if (editingAnnotation?.text === "Text" || editingAnnotation?.text === "Type here...") {
              textInputRef.current?.select();
         }
-      }, 50); // Small delay might still be needed
+      }, 100); // Increased timeout to 100ms
     }
   }, [isEditingText, editingAnnotation]); // Depend on editing state and the annotation being edited
 
@@ -1077,8 +1077,14 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
       // Add the annotation to the store
       store.addAnnotation(documentId, newAnnotation);
 
+      // Select the newly created annotation
+      store.selectAnnotation(newAnnotation);
+
+      // Switch back to select tool
+      store.setCurrentTool("select");
+
       // Dispatch event to notify about the change
-      dispatchAnnotationChangeEvent("userDrawing", true);
+      dispatchAnnotationChangeEvent("userDrawing", true); // Dispatch event *after* state changes
     }
 
     // Removed text dragging completion logic
@@ -1342,24 +1348,53 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
   };
 
   // Effect to handle immediate editing requested from toolbar
+  // Effect to handle immediate editing requested from toolbar
   useEffect(() => {
     const annotation = store.annotationToEditImmediately;
-    if (annotation && (annotation.type === 'text' || annotation.type === 'stickyNote')) {
-      console.log('[AnnotationCanvas] Activating immediate edit for:', annotation.id);
-      
-      // Activate editing state similar to handleMouseDown
-      setEditingAnnotation(annotation);
-      setTextInputPosition(annotation.points[0]); // Use the annotation's position
-      setIsEditingText(true);
-      setStickyNoteScale(annotation.type === 'stickyNote' ? 1 : 0);
-      
-      // Reset the trigger in the store
-      store.setAnnotationToEditImmediately(null);
-      
-      // Ensure canvas re-renders to show the input
-      render();
+    let timeoutId: NodeJS.Timeout | undefined;
+
+    // Ensure annotation exists, canvas is ready, and scale is valid before activating
+    if (annotation &&
+        (annotation.type === 'text' || annotation.type === 'stickyNote') &&
+        canvasRef.current && // Check if canvas ref is available
+        scale > 0) { // Check if scale prop is valid (passed from PDFViewer)
+          
+      console.log('[AnnotationCanvas] Scheduling immediate edit activation for:', annotation.id, 'with scale:', scale);
+
+      // Use a minimal timeout to allow the current render cycle to complete
+      timeoutId = setTimeout(() => {
+        console.log('[AnnotationCanvas] Activating immediate edit state for:', annotation.id);
+        // Activate editing state
+        setEditingAnnotation(annotation);
+        setTextInputPosition(annotation.points[0]); // Position uses annotation's base points
+        setIsEditingText(true);
+        setStickyNoteScale(annotation.type === 'stickyNote' ? 1 : 0);
+        
+        // Reset the trigger in the store
+        store.setAnnotationToEditImmediately(null);
+      }, 10); // Minimal delay (10ms)
+
+    } else if (annotation) {
+      // Log if activation was deferred due to readiness checks
+      console.log('[AnnotationCanvas] Deferred immediate edit activation for:', annotation.id, 'Canvas ready:', !!canvasRef.current, 'Scale valid:', scale > 0);
     }
-  }, [store.annotationToEditImmediately, store.setAnnotationToEditImmediately, setEditingAnnotation, setTextInputPosition, setIsEditingText, setStickyNoteScale, render]); // Add dependencies
+
+    // Cleanup function for the timeout if the component unmounts or dependencies change
+    return () => {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+    };
+  }, [
+    store.annotationToEditImmediately,
+    store.setAnnotationToEditImmediately,
+    setEditingAnnotation,
+    setTextInputPosition,
+    setIsEditingText,
+    setStickyNoteScale,
+    scale,
+    pageNumber // Keep dependencies
+  ]);
 
   // Re-render when scale changes or page changes
   useEffect(() => {
