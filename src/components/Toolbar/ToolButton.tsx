@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from "react";
 import { useAnnotationStore } from "../../store/useAnnotationStore";
-import { AnnotationType } from "../../types/annotation";
+import { Annotation, AnnotationType } from "../../types/annotation"; // Added Annotation type
 import { LucideProps } from "lucide-react";
 import { Folder, EnhancedFolder } from "../Toolbar";
 import { DEFAULT_FOLDER_ACCESS, FolderAccessPermission, PERMISSIONS_MAP, useAuth, UserRole } from "../../contexts/AuthContext";
@@ -107,13 +107,64 @@ export const ToolButton: React.FC<ToolButtonProps> = ({
   }  
 
   const handleClick = () => {
-    setCurrentTool(tool);
-    
-    // Call any additional onClick handler
-    onClick?.();
-    
-    // Dispatch event to trigger re-rendering of the PDF canvas
-    dispatchToolChangeEvent();
+    // Get necessary functions and state from the store
+    const {
+      addAnnotation,
+      setAnnotationToEditImmediately,
+      setCurrentTool,
+      currentStyle,
+      currentDocumentId
+    } = useAnnotationStore.getState();
+
+    if (tool === 'text') {
+      if (!currentDocumentId) {
+        console.error("Cannot add text annotation: No document selected.");
+        return;
+      }
+
+      // Define default properties for the new text annotation
+      const defaultPos = { x: 100, y: 100 }; // Default position (adjust as needed)
+      const defaultWidth = 120;
+      const defaultHeight = 40;
+      const defaultText = "Text";
+      const currentPage = getCurrentPageNumber(); // Use existing helper
+
+      const newAnnotation: Annotation = {
+        id: Date.now().toString(),
+        type: "text",
+        points: [defaultPos],
+        text: defaultText,
+        style: {
+          ...currentStyle,
+          text: defaultText,
+          textOptions: currentStyle.textOptions || { fontSize: 14, fontFamily: 'Arial' },
+        },
+        pageNumber: currentPage,
+        timestamp: Date.now(),
+        userId: "current-user", // Replace with actual user ID later
+        version: 1,
+        width: defaultWidth,
+        height: defaultHeight,
+      };
+
+      // Add the annotation to the store
+      addAnnotation(currentDocumentId, newAnnotation);
+      
+      // Signal AnnotationCanvas to start editing this annotation
+      setAnnotationToEditImmediately(newAnnotation);
+      
+      // Switch back to select tool immediately
+      setCurrentTool("select");
+
+      // Dispatch event to trigger canvas update for the new tool ('select')
+      dispatchToolChangeEvent();
+
+    } else {
+      // Default behavior for other tools
+      setCurrentTool(tool);
+      onClick?.(); // Call any additional onClick handler passed as prop
+      dispatchToolChangeEvent(); // Dispatch event for other tool changes
+    }
   };
 
   return (
