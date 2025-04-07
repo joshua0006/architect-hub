@@ -195,7 +195,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
         lastScrollPositionRef.current = finalScrollPosition;
         
         // Log the saved position
-        console.log('[PDFViewer] Saved scroll position:', finalScrollPosition);
       }
     }, 150); // Wait 150ms after scrolling stops before saving
   }, []);
@@ -233,7 +232,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     
     // If we have a saved scroll position, use it instead of centering
     if (lastScrollPositionRef.current) {
-      console.log('[PDFViewer] Restoring saved scroll position:', lastScrollPositionRef.current);
       scrollContainer.scrollLeft = lastScrollPositionRef.current.x;
       scrollContainer.scrollTop = lastScrollPositionRef.current.y;
       return;
@@ -253,7 +251,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     scrollContainer.scrollLeft = scrollLeft;
     scrollContainer.scrollTop = scrollTop;
     
-    console.log(`[PDFViewer] Centered document: scrollLeft=${scrollLeft}, scrollTop=${scrollTop}`);
   }, [page, viewport, isDragging]);
 
   // Helper function to get annotations for a specific page
@@ -275,7 +272,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
   const handlePrevPage = useCallback(() => {
     // Don't allow navigation while exporting
     if (isExporting) {
-      console.log('[PDFViewer] Navigation ignored - export in progress');
       return;
     }
     
@@ -302,7 +298,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
       currentRenderingPageRef.current = null;
     }
     
-    console.log('[PDFViewer] Navigating to previous page:', prevPage);
     
     // Cancel any current render task robustly
     if (renderTaskRef.current && typeof renderTaskRef.current.cancel === 'function') {
@@ -332,14 +327,12 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     // Set a timeout to clear the transition flag after navigation is complete
     setTimeout(() => {
       navigationTransitionRef.current = false;
-      console.log('[PDFViewer] Navigation transition complete, rendering can proceed');
     }, 300);
   }, [currentPage, isExporting]);
 
   const handleNextPage = useCallback(() => {
     // Don't allow navigation while exporting
     if (isExporting) {
-      console.log('[PDFViewer] Navigation ignored - export in progress');
       return;
     }
     
@@ -368,7 +361,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     // Clear render lock
     renderLockRef.current = false;
     
-    console.log('[PDFViewer] Navigating to next page:', nextPage);
 
     // Set the page change flag
     setPageChangeInProgress(true);
@@ -382,7 +374,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     // Set a timeout to clear the transition flag after navigation is complete
     setTimeout(() => {
       navigationTransitionRef.current = false;
-      console.log('[PDFViewer] Navigation transition complete, rendering can proceed');
     }, 300);
   }, [currentPage, pdf?.numPages, isExporting]);
 
@@ -399,7 +390,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
 
       // Skip rendering if we're in a navigation transition
       if (navigationTransitionRef.current) {
-        console.log('[PDFViewer] Skipping render during navigation transition');
         return;
       }
 
@@ -408,7 +398,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
         // If we're already rendering a different page, cancel that render
         if (currentRenderingPageRef.current !== null &&
             currentRenderingPageRef.current !== currentPage) {
-          console.log(`[PDFViewer] Cancelling render of page ${currentRenderingPageRef.current} to render current page ${currentPage}`);
 
           // Cancel the current render task
           if (renderTaskRef.current) {
@@ -416,7 +405,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
               renderTaskRef.current.cancel();
               renderTaskRef.current = null;
             } catch (error) {
-              console.warn('[PDFViewer] Error cancelling existing render task:', error);
             }
           }
 
@@ -425,7 +413,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
           currentRenderingPageRef.current = null;
         } else {
           // If we're already rendering the current page, don't start another render
-          console.log(`[PDFViewer] Render lock is active for page ${currentRenderingPageRef.current}, skipping render of page ${currentPage}`);
           return;
         }
       }
@@ -435,7 +422,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
         // If we're in the middle of a page change but we don't have required elements,
         // we should reset the flag to avoid getting stuck
         if (pageChangeInProgress) {
-          console.log('[PDFViewer] Resetting page change state - missing required elements');
           setPageChangeInProgress(false);
           navigationTransitionRef.current = false; // Clear transition flag
         }
@@ -474,7 +460,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
       setIsRendering(true);
       
       // Log only when starting a new render (not for retries)
-      console.log(`[PDFViewer] Rendering page ${currentPage} at scale ${scale.toFixed(2)} with quality ${qualityMultiplier}`);
 
       // Get the PDF page
       pdf.getPage(currentPage).then(
@@ -483,7 +468,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
             // Double check we're still rendering the current page
             // If page changed during loading, abort this render
             if (currentPage !== currentRenderingPageRef.current) {
-              console.log(`[PDFViewer] Page changed during loading (from ${currentRenderingPageRef.current} to ${currentPage}), aborting render`);
               renderLockRef.current = false;
               currentRenderingPageRef.current = null;
               return;
@@ -1763,7 +1747,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
   
     try {
       // Basic checks for PDF integrity
-      console.log('[PDFViewer] Verifying PDF integrity...');
       console.log(`[PDFViewer] Number of pages: ${pdf.numPages}`);
       console.log(`[PDFViewer] Page ${currentPage} dimensions: ${viewport.width}x${viewport.height}`);
       
@@ -2962,7 +2945,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
         // Add CMAPS for proper text extraction and better compression
         pdfjs.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
       } catch (error) {
-        console.warn('Could not initialize optional PDF.js components:', error);
       }
     };
 
@@ -2983,23 +2965,19 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
         event.stopPropagation();
 
         // Log the cancellation but treat it as a normal event, not an error
-        console.log('[PDFViewer] Rendering cancellation detected and handled:', event.error.message);
 
         // Help clear any stuck rendering states
         if (renderLockRef.current) {
-          console.log('[PDFViewer] Clearing render lock after cancellation');
           renderLockRef.current = false;
         }
 
         // If we're stuck in a page change state for too long, clear it
         if (pageChangeInProgress && Date.now() - renderAttemptTimestampRef.current > 1000) {
-          console.log('[PDFViewer] Clearing page change state after cancellation');
           setPageChangeInProgress(false);
         }
 
         // Also clear rendering state if needed
         if (isRendering) {
-          console.log('[PDFViewer] Clearing rendering state after cancellation');
           setIsRendering(false);
         }
 
