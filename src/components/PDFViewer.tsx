@@ -903,7 +903,9 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
       // Start the 2-second forced loading timer
       loadingTimer = setTimeout(() => {
         setShowForcedLoadingOverlay(false);
-        console.log('[PDFViewer] Forced loading overlay hidden after 2 seconds.');
+        console.log('[PDFViewer] Forced loading overlay hidden after 2 seconds. Refreshing canvas.');
+        // Refresh the canvas after the overlay is hidden
+        renderPdfPage();
       }, 2000); // 2000ms = 2 seconds
 
       // Reset render state (might not be necessary here, but keep for now)
