@@ -612,7 +612,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
                   setRenderAttempts(prev => prev + 1);
 
                   // Add a short delay before retrying
-                  console.log(`[PDFViewer] Will retry rendering page ${currentPage} (attempt ${renderAttempts + 1}/3)`);
                   setTimeout(() => {
                     // Clear render lock to allow retry
                     renderLockRef.current = false;
@@ -626,9 +625,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
 
                   // If it was a cancellation and we're changing pages, don't display error state
                   if (isCancelled && pageChangeInProgress) {
-                    console.log('[PDFViewer] Rendering cancelled due to page change, continuing...');
                   } else if (isCancelled) {
-                    console.log('[PDFViewer] Rendering cancelled, but not due to page change. Resetting state.');
                     setPageChangeInProgress(false);
                   }
 
@@ -693,7 +690,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
         pageCacheTimestamps.delete(key);
       });
       
-      console.log(`[PDFViewer] Cleared cache for file ${fileId}`);
     };
   }, [fileId]);
 
@@ -728,7 +724,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     // Set a timeout to force clear the page change flag if it gets stuck
     pageChangeTimeout = setTimeout(() => {
       if (pageChangeInProgress) {
-        console.log('[PDFViewer] Force clearing page change state after timeout');
         setPageChangeInProgress(false);
         navigationTransitionRef.current = false; // Clear transition flag
 
@@ -749,7 +744,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     
     // Always attempt to render when the page changes, but wait until navigation is complete
     if (pageChangeInProgress) {
-      console.log(`[PDFViewer] Page change detected to page ${currentPage}, preparing render`);
       
       // Reset render tracking state for the new page to force a fresh render
       hasRenderedOnceRef.current[currentPage] = false;
@@ -762,7 +756,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
       navigationCompleteTimeout = setTimeout(() => {
         // Mark navigation as complete
         navigationTransitionRef.current = false;
-        console.log(`[PDFViewer] Navigation transition complete for page ${currentPage}, can safely render now`);
 
         try {
           // Make sure we're not in a page change state anymore
@@ -774,7 +767,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
               try {
                 // Additional safety check to make sure we're still in a page change
                 if (!pageChangeInProgress) {
-                  console.log('[PDFViewer] Page change state changed during delay, aborting render');
                   return;
                 }
 
@@ -792,7 +784,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
                 renderLockRef.current = false;
 
                 // Start the render process
-                console.log(`[PDFViewer] Initiating render for page ${currentPage} after navigation complete + ${renderDelayMs}ms delay`);
                 renderPdfPage();
 
                 // Set another safety timeout to check if rendering got stuck
@@ -817,7 +808,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
 
                     // Force a fresh render attempt as a last resort
                     setTimeout(() => {
-                      console.log('[PDFViewer] Attempting recovery render after state reset');
                       renderPdfPage();
                     }, 100);
                   }
@@ -832,7 +822,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
               }
             }, renderDelayMs);
           } else {
-            console.log('[PDFViewer] Page change state cleared before rendering could start');
           }
         } catch (err) {
           console.error('[PDFViewer] Error scheduling render after navigation:', err);
@@ -867,7 +856,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
   useEffect(() => {
     // Only run if we have a page and the initial render hasn't completed yet
     if (page && !initialRenderCompletedRef.current && pdf && !pageChangeInProgress && !isRendering) {
-      console.log(`[PDFViewer] Triggering initial render for page ${currentPage}`);
       renderPdfPage(); // Call the non-debounced render for immediate display
       initialRenderCompletedRef.current = true; // Mark initial render as complete
     }
@@ -884,7 +872,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
       return;
     }
     
-    console.log(`[PDFViewer] PDF document loaded with ${pdf.numPages} pages`);
     
     // Mark the viewer as ready
     setIsViewerReady(true);
@@ -915,12 +902,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     const newWidth = viewport.width * newScale;
     const newHeight = viewport.height * newScale;
     
-    // Log the dimensions and scaling for debugging
-    console.log(`[PDFViewer] Original PDF dimensions: ${viewport.width}x${viewport.height}`);
-    console.log(`[PDFViewer] Aspect ratio: ${aspectRatio.toFixed(3)}`);
-    console.log(`[PDFViewer] Container width: ${availableWidth}`);
-    console.log(`[PDFViewer] New scale: ${newScale.toFixed(3)}`);
-    console.log(`[PDFViewer] New dimensions: ${newWidth.toFixed(0)}x${newHeight.toFixed(0)}`);
     
     // Update the scale
     setScale(newScale); // Use direct setter
@@ -933,7 +914,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     // Enable automatic fit for future page changes
     disableFitToWidthRef.current = false;
     
-    console.log(`[PDFViewer] Fit to width: scale=${newScale}`);
   }, [page, scrollToCenterDocument]);
 
   // Define zoom functions
@@ -979,8 +959,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
       scrollContainer.scrollLeft = newCenterX - viewportWidth / 2;
       scrollContainer.scrollTop = newCenterY - viewportHeight / 2;
     }, 50);
-    
-    console.log(`[PDFViewer] Zoom in: scale=${cappedScale}`);
   }, [page, scale]);
 
   const handleZoomOut = useCallback(() => {
@@ -1025,8 +1003,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
       scrollContainer.scrollLeft = newCenterX - viewportWidth / 2;
       scrollContainer.scrollTop = newCenterY - viewportHeight / 2;
     }, 50);
-    
-    console.log(`[PDFViewer] Zoom out: scale=${cappedScale}`);
   }, [page, scale]);
 
   const handleResetZoom = useCallback(() => {
@@ -1042,8 +1018,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     setTimeout(() => {
       scrollToCenterDocument();
     }, 100);
-    
-    console.log(`[PDFViewer] Reset zoom: scale=1.0`);
   }, [page, scrollToCenterDocument]);
 
   // Setup container dimensions
@@ -1221,9 +1195,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
       const pageAnnotations = currentDoc?.annotations?.filter(
         a => a.pageNumber === currentPage
       ) || [];
-      
-      console.log(`[PDFViewer] Exporting page ${currentPage} with ${pageAnnotations.length} annotations`);
-      
       // Create a canvas with both PDF and annotations
       const exportCanvas = await createExportCanvas(
         page, 
@@ -1283,7 +1254,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
         a => a.pageNumber === currentPage
       ) || [];
       
-      console.log(`[PDFViewer] Downloading page ${currentPage} with ${pageAnnotations.length} annotations`);
       
       // Create a new PDF document with just the current page
       const pdfDoc = new jsPDF({
@@ -1316,7 +1286,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
       
       // Draw annotations on top if there are any
       if (pageAnnotations.length > 0) {
-        console.log(`[PDFViewer] Drawing ${pageAnnotations.length} annotations on download canvas`);
         
         // Draw regular annotations first
         const regularAnnotations = pageAnnotations.filter(a => a.type !== 'highlight');
@@ -1442,8 +1411,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     ctx.fillStyle = "#FFFFFF";
     ctx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
     
-    // Render PDF with improved text quality
-    console.log(`[PDFViewer] Rendering PDF content to export canvas (scale: ${scale * qualityScale})`);
     
     // Enable high-quality image rendering on the context
     (ctx as any).imageSmoothingEnabled = true;
@@ -1459,8 +1426,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     // Wait for PDF rendering to complete
     await renderTask.promise;
     
-    // Now draw annotations on top
-    console.log(`[PDFViewer] Drawing ${annotations.length} annotations on export canvas`);
     
     // First draw non-highlight annotations
     const regularAnnotations = annotations.filter(a => a.type !== 'highlight');
@@ -1553,8 +1518,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
             viewport.height
           );
           
-          // Update progress through console
-          console.log(`Processed page ${pageNum} of ${pdf.numPages} with ${pageAnnotations.length} annotations (${qualityLabel} quality)`);
         } catch (error) {
           console.error(`Error processing page ${pageNum}:`, error);
           showToast(`Error on page ${pageNum}: ${error instanceof Error ? error.message : 'Unknown error'}`, "error");
@@ -1590,8 +1553,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
       const targetPageNumber = event.detail.pageNumber || currentPage;
       const forceRender = event.detail.forceRender === true;
       
-      console.log(`[PDFViewer] Annotation change detected from ${source} for page ${targetPageNumber}`);
-      
       // User interactions should always trigger a render
       const isUserInteraction = source === 'userDrawing' || source === 'userEdit' || 
                                source === 'userAction' || forceRender;
@@ -1604,7 +1565,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
       
       // If this is from user interaction, render immediately
       if (isUserInteraction) {
-        console.log(`[PDFViewer] Processing immediate render for user interaction (${source})`);
         lastRenderTime = Date.now();
         
         // Only render if the event is for the current page
@@ -1624,11 +1584,8 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
       // Shorter cooldown time for all other events
       const now = Date.now();
       if (now - lastRenderTime < RENDER_COOLDOWN) {
-        console.log(`[PDFViewer] Throttling render due to cooldown (${now - lastRenderTime}ms)`);
-        
         // Schedule with shorter delay
         renderTimeout = setTimeout(() => {
-          console.log('[PDFViewer] Executing delayed render after cooldown');
           lastRenderTime = Date.now();
           
           if (targetPageNumber === currentPage) {
@@ -1646,8 +1603,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
       
       // If we're on the page that was modified, render immediately
       if (targetPageNumber === currentPage) {
-        console.log(`[PDFViewer] Triggering regular render for non-user change (${source})`);
-        
         hasRenderedOnceRef.current[currentPage] = false;
         renderedPagesRef.current.delete(currentPage);
         
@@ -1725,8 +1680,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
       showToast(`Found ${invalidAnnotations.length} invalid annotations. They may not display correctly.`, "error");
       return false;
     }
-    
-    console.log(`[PDFViewer] All ${annotations.length} annotations on page ${pageNumber} are valid`);
     return true;
   }, [getAnnotationsForPage, page, viewport, showToast]);
   
@@ -1741,29 +1694,22 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
   // Function to verify PDF integrity and rendering quality
   const verifyPDFIntegrity = useCallback(async () => {
     if (!pdf || !page) {
-      console.log('[PDFViewer] Cannot verify PDF integrity - PDF or page not loaded');
       return false;
     }
   
     try {
       // Basic checks for PDF integrity
-      console.log(`[PDFViewer] Number of pages: ${pdf.numPages}`);
-      console.log(`[PDFViewer] Page ${currentPage} dimensions: ${viewport.width}x${viewport.height}`);
       
       // Check if text content can be extracted (sign of a properly loaded PDF)
       const textContent = await page.getTextContent();
       const hasText = textContent.items.length > 0;
-      console.log(`[PDFViewer] Text content extraction: ${hasText ? 'Successful' : 'No text found'}`);
       
       // Check annotations
       const annots = await page.getAnnotations();
-      console.log(`[PDFViewer] Annotations found: ${annots.length}`);
       
       // Log successful verification
-      console.log('[PDFViewer] PDF integrity verification complete - PDF loaded correctly');
       return true;
     } catch (error) {
-      console.error('[PDFViewer] Error verifying PDF integrity:', error);
       return false;
     }
   }, [pdf, page, currentPage, viewport]);
@@ -1781,7 +1727,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
   // Initialize PDFjs and load document when file changes
   useEffect(() => {
     let currentFileId = Math.random().toString(36).substring(2, 9);
-    console.log(`[PDFViewer] New file detected. Initializing with ID: ${currentFileId}`);
     
     // Reset all state for a fresh load
     // PDF and page state are managed by custom hooks (usePDFDocument and usePDFPage)
@@ -1798,7 +1743,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     
     // Simple load process with retry
     const loadPdf = () => {
-      console.log(`[PDFViewer] Loading PDF file: ${currentFileId}`);
       
       if (typeof file === "string") {
         // For URL, fetch it first
@@ -1846,7 +1790,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
         return;
       }
       
-      console.log(`[PDFViewer] Initializing PDF viewer with file: ${pdfFile.name}`);
       
       try {
         initializationStartedRef.current = true;
@@ -1912,13 +1855,11 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     }
     pdfLoadLogTimestampRef.current = now;
     
-    console.log("[PDFViewer] PDF document loaded successfully:", pdf.numPages, "pages");
     
     // Verify PDF integrity only if not already verified for this document
     if (!pdfVerifiedRef.current) {
       verifyPDFIntegrity().then(isValid => {
         if (isValid) {
-          console.log('[PDFViewer] PDF integrity check passed');
           pdfVerifiedRef.current = true;
           
           // Set the document ID in the annotation store to load annotations
@@ -1931,7 +1872,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
             
             // Only trigger render if we're not already rendering
             if (!isRendering && !pageChangeInProgress) {
-              console.log("[PDFViewer] Triggering initial render");
               setTimeout(() => {
                 renderPdfPage();
               }, 100); // Small delay to ensure everything is ready
@@ -2027,7 +1967,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
         },
       });
       pdfContainer.dispatchEvent(customEvent);
-      console.log('[PDFViewer] Stamp annotation added and event dispatched to container');
     }
     
     // Method 2: Dispatch to annotation canvas directly
@@ -2045,7 +1984,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
         },
       });
       annotationCanvas.dispatchEvent(canvasEvent);
-      console.log('[PDFViewer] Event dispatched to annotation canvas');
     }
     
     // Method 3: Directly trigger via document event
@@ -2063,7 +2001,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     }
     renderedPagesRef.current.delete(currentPage);
     
-    console.log('[PDFViewer] Stamp added successfully, triggered multiple render methods');
   }, [annotationStore, currentPage, currentTool, documentId, hasRenderedOnceRef, page, pdf, renderedPagesRef, scale, viewport]);
   
   // Add event listener for stamp tool when appropriate
@@ -2701,7 +2638,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
 
   // Force reset when file or documentId changes
   useEffect(() => {
-    console.log('[PDFViewer] File or documentId changed, resetting viewer state');
 
     // Reset critical state variables
     setCurrentPage(1);
@@ -2755,7 +2691,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
   useEffect(() => {
     // Only run this effect if we already have a different PDF loaded
     if (pdf && (pdfFile || hasStartedLoading)) {
-      console.log('[PDFViewer] Document changed, resetting viewer');
 
       // Reset render tracking
       hasRenderedOnceRef.current = {};
@@ -2775,7 +2710,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
 
       // Force the file to be reloaded
       if (typeof file === 'string') {
-        console.log('[PDFViewer] Reloading file from URL:', file);
         // Add timestamp to URL to force reload and bypass cache
         const timestamp = Date.now();
         const fileUrl = file.includes('?')
@@ -2814,7 +2748,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
         a => a.pageNumber === currentPage
       ) || [];
 
-      console.log(`[PDFViewer] Downloading page ${currentPage} with ${pageAnnotations.length} annotations in compressed mode`);
 
       // Create a new PDF document with just the current page
       const pdfDoc = new jsPDF({
@@ -2866,8 +2799,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
 
       // Draw annotations on top with simplification for compressed mode
       if (pageAnnotations.length > 0) {
-        console.log(`[PDFViewer] Drawing ${pageAnnotations.length} annotations on compressed canvas`);
-
         // Simplify line widths for compression
         const lineWidthMultiplier = 1.25; // Slightly thicker to ensure visibility after compression
 
