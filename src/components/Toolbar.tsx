@@ -74,13 +74,15 @@ const dispatchAnnotationChangeEvent = (pageNumber: number = 1, source: string = 
 
 export const Toolbar = ({ currentFolder }: ToolbarProps) => {
   const { isShortcutGuideOpen, setIsShortcutGuideOpen } = useKeyboardShortcutGuide();
-  const { 
-    currentStyle, 
-    setCurrentStyle, 
-    currentTool, 
+  const {
+    currentStyle,
+    setCurrentStyle,
+    currentTool,
     setCurrentTool,
     currentDocumentId,
-    documents
+    documents,
+    selectedAnnotations, // Added
+    updateAnnotation,    // Added
   } = useAnnotationStore();
   
   // State for folder info dropdown
@@ -193,7 +195,23 @@ export const Toolbar = ({ currentFolder }: ToolbarProps) => {
           {COLORS.map((color) => (
             <button
               key={color}
-              onClick={() => setCurrentStyle({ color })}
+              onClick={() => {
+                const { selectedAnnotations, updateAnnotation, currentDocumentId, setCurrentStyle } = useAnnotationStore.getState();
+                const newStyle = { color }; // Capture the clicked color
+
+                // Update selected annotations
+                if (selectedAnnotations.length > 0 && currentDocumentId) {
+                  selectedAnnotations.forEach(annotation => {
+                    updateAnnotation(currentDocumentId, {
+                      ...annotation,
+                      style: { ...annotation.style, ...newStyle }
+                    });
+                  });
+                }
+
+                // Always update the current style for new annotations
+                setCurrentStyle(newStyle);
+              }}
               className={`w-6 h-6 rounded-full border-2 transition-all hover:scale-110 ${
                 currentStyle.color === color
                   ? "border-blue-500 ring-2 ring-blue-200"
@@ -214,7 +232,23 @@ export const Toolbar = ({ currentFolder }: ToolbarProps) => {
           {LINE_WIDTHS.map((width) => (
             <button
               key={width}
-              onClick={() => setCurrentStyle({ lineWidth: width })}
+              onClick={() => {
+                const { selectedAnnotations, updateAnnotation, currentDocumentId, setCurrentStyle } = useAnnotationStore.getState();
+                const newStyle = { lineWidth: width }; // Capture the clicked width
+
+                // Update selected annotations
+                if (selectedAnnotations.length > 0 && currentDocumentId) {
+                  selectedAnnotations.forEach(annotation => {
+                    updateAnnotation(currentDocumentId, {
+                      ...annotation,
+                      style: { ...annotation.style, ...newStyle }
+                    });
+                  });
+                }
+
+                // Always update the current style for new annotations
+                setCurrentStyle(newStyle);
+              }}
               className={`h-8 flex-1 flex items-center justify-center border rounded-md transition-colors ${
                 currentStyle.lineWidth === width
                   ? "border-blue-500 bg-blue-50"
@@ -243,7 +277,23 @@ export const Toolbar = ({ currentFolder }: ToolbarProps) => {
           {OPACITY_LEVELS.map((opacity) => (
             <button
               key={opacity}
-              onClick={() => setCurrentStyle({ opacity })}
+              onClick={() => {
+                const { selectedAnnotations, updateAnnotation, currentDocumentId, setCurrentStyle } = useAnnotationStore.getState();
+                const newStyle = { opacity }; // Capture the clicked opacity
+
+                // Update selected annotations
+                if (selectedAnnotations.length > 0 && currentDocumentId) {
+                  selectedAnnotations.forEach(annotation => {
+                    updateAnnotation(currentDocumentId, {
+                      ...annotation,
+                      style: { ...annotation.style, ...newStyle }
+                    });
+                  });
+                }
+
+                // Always update the current style for new annotations
+                setCurrentStyle(newStyle);
+              }}
               className={`h-8 flex-1 border rounded-md transition-colors ${
                 currentStyle.opacity === opacity
                   ? "border-blue-500 bg-blue-50"
