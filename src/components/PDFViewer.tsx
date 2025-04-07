@@ -90,6 +90,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
   const renderAttemptTimestampRef = useRef<number>(0);
   const initializationStartedRef = useRef<boolean>(false);
   const currentRenderingPageRef = useRef<number | null>(null);
+  const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null); // Ref for controls visibility timeout
 
   // State declarations
   const [currentPage, setCurrentPage] = useState(1);
@@ -114,6 +115,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
   // Add new state for initial loading
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [initialPageRendered, setInitialPageRendered] = useState(false);
+  const [showControls, setShowControls] = useState(false); // State to control controls visibility
   
   // Track which pages have been rendered to prevent duplicates
   const renderedPagesRef = useRef<Set<number>>(new Set());
@@ -319,6 +321,14 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     // Set flags to indicate page change is in progress
     setPageChangeInProgress(true);
 
+    // Hide controls immediately on page change
+    setShowControls(false);
+    // Clear any pending timeout to show controls
+    if (controlsTimeoutRef.current) {
+      clearTimeout(controlsTimeoutRef.current);
+      controlsTimeoutRef.current = null;
+    }
+
     // Reset rendering state
     setIsRendering(false);
     
@@ -365,6 +375,14 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
 
     // Set the page change flag
     setPageChangeInProgress(true);
+
+    // Hide controls immediately on page change
+    setShowControls(false);
+    // Clear any pending timeout to show controls
+    if (controlsTimeoutRef.current) {
+      clearTimeout(controlsTimeoutRef.current);
+      controlsTimeoutRef.current = null;
+    }
 
     // Reset rendering state
     setIsRendering(false);
@@ -2411,7 +2429,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
         />
       )}
       
-      {pdf && (
+      {pdf && showControls && (
         <PDFControls
           currentPage={currentPage}
           totalPages={pdf.numPages}
