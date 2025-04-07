@@ -48,6 +48,8 @@ interface AnnotationState {
   pasteAnnotations: (pageNumber: number) => number;
   bringToFront: (documentId: string, annotationIds: string[]) => void;
   sendToBack: (documentId: string, annotationIds: string[]) => void;
+  annotationToEditImmediately: Annotation | null;
+  setAnnotationToEditImmediately: (annotation: Annotation | null) => void;
 }
 
 export const initialDocumentState = () => ({
@@ -72,6 +74,7 @@ export const useAnnotationStore = create<AnnotationState>()(
       selectedAnnotation: null,
       selectedAnnotations: [],
       clipboardAnnotations: [],
+      annotationToEditImmediately: null,
 
       setCurrentDocument: (documentId) => {
         set((state) => ({
@@ -480,6 +483,7 @@ export const useAnnotationStore = create<AnnotationState>()(
           };
         });
       },
+      setAnnotationToEditImmediately: (annotation) => set({ annotationToEditImmediately: annotation }),
     }),
     {
       name: "annotation-storage",

@@ -281,7 +281,6 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
       point.y <= bounds.bottom + buffer
     );
   };
-
   const handleMouseDown = (e: React.MouseEvent) => {
     // Prevent default behavior to avoid selections
     e.preventDefault();
@@ -573,43 +572,6 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
         ctx.lineWidth = 0.5 * scale;
         ctx.setLineDash([]);
         ctx.strokeRect(x, y, width, height);
-      } else {
-        // Show text tool indicator - position it exactly where text will appear
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.7)'; // Semi-transparent background
-        
-        // Calculate size based on average text
-        const width = 120 * scale;
-        const height = 60 * scale;
-        
-        // Draw background for text
-        ctx.fillRect(x, y, width, height);
-        
-        // Draw border
-        ctx.strokeStyle = currentStyle.color;
-        ctx.lineWidth = 1;
-        ctx.setLineDash([3, 3]);
-        ctx.strokeRect(x, y, width, height);
-        
-        // Draw text preview with proper padding (8px) to match actual text rendering
-        const padding = 8 * scale; // Match padding in drawTextAnnotation
-        
-        // Draw sample text
-        ctx.fillStyle = currentStyle.color;
-        let fontStyle = '';
-        if (textOptions.bold) fontStyle += 'bold ';
-        if (textOptions.italic) fontStyle += 'italic ';
-        const fontFamily = textOptions.fontFamily || 'Arial';
-        ctx.font = `${fontStyle}${fontSize}px ${fontFamily}`;
-        ctx.fillText('Text', x + padding, y + padding + fontSize * 0.8);
-        
-        // Draw placeholder lines with exact same padding as real text
-        const lineY = y + padding + fontSize * 1.2;
-        const lineHeight = fontSize * 1.2; // Match line height in drawTextAnnotation
-        
-        for (let i = 0; i < 2; i++) {
-          const lineWidth = (90 - i*30) * scale;
-          ctx.fillRect(x + padding, lineY + (i*lineHeight), lineWidth, 1*scale);
-        }
       }
       
       ctx.restore();
@@ -1378,6 +1340,26 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
       setContextMenu(null);
     }
   };
+
+  // Effect to handle immediate editing requested from toolbar
+  useEffect(() => {
+    const annotation = store.annotationToEditImmediately;
+    if (annotation && (annotation.type === 'text' || annotation.type === 'stickyNote')) {
+      console.log('[AnnotationCanvas] Activating immediate edit for:', annotation.id);
+      
+      // Activate editing state similar to handleMouseDown
+      setEditingAnnotation(annotation);
+      setTextInputPosition(annotation.points[0]); // Use the annotation's position
+      setIsEditingText(true);
+      setStickyNoteScale(annotation.type === 'stickyNote' ? 1 : 0);
+      
+      // Reset the trigger in the store
+      store.setAnnotationToEditImmediately(null);
+      
+      // Ensure canvas re-renders to show the input
+      render();
+    }
+  }, [store.annotationToEditImmediately, store.setAnnotationToEditImmediately, setEditingAnnotation, setTextInputPosition, setIsEditingText, setStickyNoteScale, render]); // Add dependencies
 
   // Re-render when scale changes or page changes
   useEffect(() => {

@@ -153,8 +153,8 @@ const TextInputComponent: React.ForwardRefRenderFunction<HTMLTextAreaElement, Te
             }
           `}
           style={{ // Apply dynamic font styles
-            fontSize: `${textOptions?.fontSize || 14}px`,
-            lineHeight: `${(textOptions?.fontSize || 14) * 1.2}px`,
+            fontSize: `${(textOptions?.fontSize || 14) * scale}px`, // Apply scale
+            lineHeight: `${(textOptions?.fontSize || 14) * 1.2 * scale}px`, // Apply scale
             fontFamily: textOptions?.fontFamily || "Arial",
             fontWeight: textOptions?.bold ? 'bold' : 'normal',
             fontStyle: textOptions?.italic ? 'italic' : 'normal',
