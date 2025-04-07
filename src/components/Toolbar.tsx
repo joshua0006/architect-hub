@@ -317,7 +317,7 @@ export const Toolbar = ({ currentFolder }: ToolbarProps) => {
   return (
     <>
       <div className="toolbar-fixed bg-white border-r border-gray-200 overflow-y-auto" 
-           style={{ flexShrink: 0, minWidth: '16rem', height: screenWidth < 1600 ? '63vh' : '71vh' }}>
+           style={{ flexShrink: 0, minWidth: '16rem', height: screenWidth < 1600 ? '63vh' : '70vh' }}>
         {/* Folder information section */}
         {currentFolder && (
           <div className="p-3 border-b border-gray-200">

@@ -123,24 +123,30 @@ export const useAnnotationStore = create<AnnotationState>()(
         set((state) => {
           const document =
             state.documents[documentId] || initialDocumentState();
+          // Create a new array with the updated annotation
           const newAnnotations = document.annotations.map((a) =>
-            a.id === annotation.id ? annotation : a
+            a.id === annotation.id ? { ...annotation } : a // Ensure a new object reference for the updated annotation
           );
-          const newHistory = document.history.slice(
-            0,
-            document.currentIndex + 1
-          );
-          newHistory.push(newAnnotations);
+
+          // Create a new history array slice
+          const updatedHistory = document.history.slice(0, document.currentIndex + 1);
+          // Push the new annotations array reference into the new history slice
+          updatedHistory.push(newAnnotations);
 
           return {
             documents: {
               ...state.documents,
               [documentId]: {
-                annotations: newAnnotations,
-                history: newHistory,
+                ...document, // Spread existing document state
+                annotations: newAnnotations, // Assign the new annotations array
+                history: updatedHistory, // Assign the new history array
                 currentIndex: document.currentIndex + 1,
               },
             },
+            // Ensure selected annotations are also updated if the modified one was selected
+            selectedAnnotations: state.selectedAnnotations.map(sa =>
+              sa.id === annotation.id ? { ...annotation } : sa
+            ),
           };
         });
       },

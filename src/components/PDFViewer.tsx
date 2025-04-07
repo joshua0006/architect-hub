@@ -116,6 +116,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [initialPageRendered, setInitialPageRendered] = useState(false);
   const [showControls, setShowControls] = useState(false); // State to control controls visibility
+  const [showForcedLoadingOverlay, setShowForcedLoadingOverlay] = useState(true); // State for the 2-second loading overlay
   
   // Track which pages have been rendered to prevent duplicates
   const renderedPagesRef = useRef<Set<number>>(new Set());
@@ -893,21 +894,35 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
   // Mark viewer as ready when the PDF is loaded
   // Mark viewer as ready only when the PDF is loaded AND the first page has rendered
   useEffect(() => {
+    let loadingTimer: NodeJS.Timeout | null = null;
     if (pdf && initialPageRendered) {
       // Mark the viewer as ready
       setIsViewerReady(true);
       console.log('[PDFViewer] Viewer marked as ready (PDF loaded and initial page rendered).');
-      
+
+      // Start the 2-second forced loading timer
+      loadingTimer = setTimeout(() => {
+        setShowForcedLoadingOverlay(false);
+        console.log('[PDFViewer] Forced loading overlay hidden after 2 seconds.');
+      }, 2000); // 2000ms = 2 seconds
+
       // Reset render state (might not be necessary here, but keep for now)
       setRenderComplete(false);
       setIsRendering(false);
-      
+
     } else if (!pdf) {
       // If PDF is unloaded, viewer is not ready
       setIsViewerReady(false);
+      setShowForcedLoadingOverlay(true); // Reset forced loading if PDF unloads
     }
     // If PDF is loaded but initial page hasn't rendered, isViewerReady remains false
-    
+
+    // Cleanup the timer if the component unmounts or dependencies change before timer finishes
+    return () => {
+      if (loadingTimer) {
+        clearTimeout(loadingTimer);
+      }
+    };
   }, [pdf, initialPageRendered]); // Depend on both pdf and initial render state
 
   // Define function for fitting to width - placed at the top of other functions
@@ -1764,7 +1779,8 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     setHasStartedLoading(false);
     setRenderError(null);
     setIsInitialLoading(true); // Start with loading state
-    
+    setShowForcedLoadingOverlay(true); // Reset forced loading overlay on file change
+
     // Reset render tracking
     hasRenderedOnceRef.current = {};
     renderedPagesRef.current.clear();
@@ -2610,42 +2626,70 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
                 )}
               </>
             )}
-            
-            {/* Loading indicator during rendering */}
-            {(isRendering || pageChangeInProgress) && (
-              <div className="absolute top-0 left-0 z-50 w-full h-full flex items-center justify-center bg-white bg-opacity-80 backdrop-blur-[1px]">
-                <div className="flex flex-col items-center bg-white p-5 rounded-xl shadow-lg">
-                  <div className="relative w-16 h-16 mb-3">
-                    {/* Rotating rings */}
-                    <div className="absolute inset-0 rounded-full border-4 border-blue-100 border-t-blue-600 animate-spin" style={{ animationDuration: "1s" }}></div>
-                    <div className="absolute inset-1 rounded-full border-4 border-transparent border-r-blue-400 animate-spin" style={{ animationDuration: "1.5s", animationDirection: "reverse" }}></div>
-                    
-                    {/* Page icon */}
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-7 w-7 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path 
-                          strokeLinecap="round" 
-                          strokeLinejoin="round" 
-                          strokeWidth={1.5} 
-                          d={pageChangeInProgress ? "M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" : "M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"} 
-                        />
-                      </svg>
-                    </div>
-                  </div>
-                  <div className="text-gray-800 font-medium text-base">
-                    {pageChangeInProgress ? `Loading page ${currentPage}...` : 'Rendering content...'}
-                  </div>
-                  {renderAttempts > 0 && (
-                    <div className="text-amber-600 text-xs mt-1 flex items-center">
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                      </svg>
-                      Attempt {renderAttempts + 1}/3
-                    </div>
-                  )}
-                </div>
+
+            {/* Forced Loading Overlay (2 seconds after ready) */}
+            {showForcedLoadingOverlay && isViewerReady && !renderError && (
+              <div className="absolute inset-0 flex items-center justify-center z-40 bg-white bg-opacity-90 backdrop-blur-sm">
+                 <div className="flex flex-col items-center max-w-md text-center p-8">
+                   <div className="relative w-24 h-24 mb-5">
+                     {/* Background circle */}
+                     <div className="absolute inset-0 rounded-full bg-blue-50"></div>
+                     {/* Circular progress spinner */}
+                     <div className="absolute inset-0 rounded-full border-4 border-transparent border-t-blue-600 border-r-blue-400 animate-spin" style={{ animationDuration: "1.5s" }}></div>
+                     {/* Central document icon */}
+                     <div className="absolute inset-0 flex items-center justify-center">
+                       <svg
+                         xmlns="http://www.w3.org/2000/svg"
+                         className="h-12 w-12 text-blue-600"
+                         fill="none"
+                         viewBox="0 0 24 24"
+                         stroke="currentColor"
+                       >
+                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M10 9h4m-4 4h4" />
+                       </svg>
+                     </div>
+                   </div>
+                   <h3 className="text-xl font-medium text-gray-800 mb-2">Preparing Viewer...</h3>
+                   <p className="text-sm text-gray-600 max-w-xs">Finalizing page display.</p>
+                 </div>
               </div>
             )}
+
+            {/* Loading indicator during rendering or page change */}
+            {(isRendering || pageChangeInProgress) && !showForcedLoadingOverlay && (
+               <div className="absolute top-0 left-0 z-30 w-full h-full flex items-center justify-center bg-white bg-opacity-80 backdrop-blur-[1px]">
+                 <div className="flex flex-col items-center bg-white p-5 rounded-xl shadow-lg">
+                   <div className="relative w-16 h-16 mb-3">
+                     {/* Rotating rings */}
+                     <div className="absolute inset-0 rounded-full border-4 border-blue-100 border-t-blue-600 animate-spin" style={{ animationDuration: "1s" }}></div>
+                     <div className="absolute inset-1 rounded-full border-4 border-transparent border-r-blue-400 animate-spin" style={{ animationDuration: "1.5s", animationDirection: "reverse" }}></div>
+                     {/* Page icon */}
+                     <div className="absolute inset-0 flex items-center justify-center">
+                       <svg xmlns="http://www.w3.org/2000/svg" className="h-7 w-7 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                         <path
+                           strokeLinecap="round"
+                           strokeLinejoin="round"
+                           strokeWidth={1.5}
+                           d={pageChangeInProgress ? "M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" : "M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"}
+                         />
+                       </svg>
+                     </div>
+                   </div>
+                   <div className="text-gray-800 font-medium text-base">
+                     {pageChangeInProgress ? `Loading page ${currentPage}...` : 'Rendering content...'}
+                   </div>
+                   {renderAttempts > 0 && (
+                     <div className="text-amber-600 text-xs mt-1 flex items-center">
+                       <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                       </svg>
+                       Attempt {renderAttempts + 1}/3
+                     </div>
+                   )}
+                 </div>
+               </div>
+             )}
             
         
             
@@ -2735,6 +2779,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
       setIsInitialLoading(true);
       setRenderComplete(false);
       setIsRendering(false);
+      setShowForcedLoadingOverlay(true); // Reset forced loading overlay on document change
 
       // Force the file to be reloaded
       if (typeof file === 'string') {
