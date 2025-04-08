@@ -607,7 +607,7 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
           ctx.stroke();
         }
       } else if (currentTool === "line") {
-        drawLine(ctx, currentPoints, scale);
+        drawLine(ctx, currentPoints, scale, currentStyle);
       } else if (currentTool === "rectangle") {
         drawRectangle(ctx, currentPoints, scale);
       } else if (currentTool === "circle") {
@@ -641,7 +641,7 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
         ctx.globalAlpha = originalAlpha;
       } else if (currentTool === "arrow" || currentTool === "doubleArrow") {
         // Draw arrow preview
-        drawArrow(ctx, currentPoints, scale, currentTool === "doubleArrow");
+        drawArrow(ctx, currentPoints, scale, currentTool === "doubleArrow", currentStyle);
       }
       
       ctx.restore();

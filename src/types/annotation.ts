@@ -45,7 +45,9 @@ export interface AnnotationStyle {
     bold?: boolean;
     italic?: boolean;
     text?: string;
+    underline?: boolean; // Added for text styling
   };
+  stampSize?: number; // Added for stamp resizing
 }
 
 export interface Annotation {

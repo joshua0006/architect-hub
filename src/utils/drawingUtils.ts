@@ -1,4 +1,4 @@
-import { Annotation, Point, StampType } from "../types/annotation";
+import { Annotation, Point, StampType, AnnotationStyle } from "../types/annotation";
 
 // Helper function to validate points
 export const isValidPoint = (point: Point | undefined): point is Point => {
@@ -51,13 +51,19 @@ export const drawCircle = (
 export const drawLine = (
   ctx: CanvasRenderingContext2D,
   points: Point[],
-  scale: number
+  scale: number,
+  style: AnnotationStyle
 ) => {
   if (!points || points.length < 2) return;
   const [start, end] = points;
 
   if (!isValidPoint(start) || !isValidPoint(end)) return;
+// Apply style
+ctx.lineWidth = style.lineWidth * scale;
+ctx.strokeStyle = style.color;
+ctx.globalAlpha = style.opacity;
 
+ctx.beginPath();
   ctx.beginPath();
   ctx.moveTo(start.x * scale, start.y * scale);
   ctx.lineTo(end.x * scale, end.y * scale);
@@ -208,61 +214,144 @@ export const drawArrow = (
   ctx: CanvasRenderingContext2D,
   points: Point[],
   scale: number,
-  isDoubleArrow: boolean = false
+  isDoubleArrow: boolean = false,
+  style: AnnotationStyle
 ) => {
   if (!points || points.length < 2) return;
   const [start, end] = points;
 
-  ctx.save();
-  ctx.lineWidth = 2 * scale;
-  ctx.lineCap = "round";
+  // ctx.save(); // Removed to inherit context settings like lineWidth
+  ctx.lineCap = "butt"; // Use butt cap to prevent line extending beyond shortened points
   ctx.lineJoin = "round";
 
-  // Draw the main line
-  ctx.beginPath();
-  ctx.moveTo(start.x * scale, start.y * scale);
-  ctx.lineTo(end.x * scale, end.y * scale);
-  ctx.stroke();
+  // Apply style
+  ctx.lineWidth = style.lineWidth * scale;
+  ctx.strokeStyle = style.color;
+  ctx.fillStyle = style.color; // For arrowheads
+  ctx.globalAlpha = style.opacity;
 
-  // Calculate arrowhead parameters
-  const angle = Math.atan2(
-    end.y * scale - start.y * scale,
-    end.x * scale - start.x * scale
-  );
-  const arrowLength = 10 * scale;
-  const arrowWidth = 6 * scale;
-
-  // Draw arrowhead at the end
-  ctx.beginPath();
-  ctx.moveTo(end.x * scale, end.y * scale);
-  ctx.lineTo(
-    end.x * scale - arrowLength * Math.cos(angle - Math.PI / 6),
-    end.y * scale - arrowLength * Math.sin(angle - Math.PI / 6)
-  );
-  ctx.lineTo(
-    end.x * scale - arrowLength * Math.cos(angle + Math.PI / 6),
-    end.y * scale - arrowLength * Math.sin(angle + Math.PI / 6)
-  );
-  ctx.closePath();
-  ctx.fill();
-
-  // Draw arrowhead at the start if it's a double arrow
-  if (isDoubleArrow) {
+  // Helper function to draw a single arrowhead shape
+  const drawSingleArrowhead = (
+    ctx: CanvasRenderingContext2D,
+    tipX: number,
+    tipY: number,
+    basePoint1X: number,
+    basePoint1Y: number,
+    basePoint2X: number,
+    basePoint2Y: number
+  ) => {
     ctx.beginPath();
-    ctx.moveTo(start.x * scale, start.y * scale);
-    ctx.lineTo(
-      start.x * scale + arrowLength * Math.cos(angle - Math.PI / 6),
-      start.y * scale + arrowLength * Math.sin(angle - Math.PI / 6)
-    );
-    ctx.lineTo(
-      start.x * scale + arrowLength * Math.cos(angle + Math.PI / 6),
-      start.y * scale + arrowLength * Math.sin(angle + Math.PI / 6)
-    );
+    ctx.moveTo(tipX, tipY);
+    ctx.lineTo(basePoint1X, basePoint1Y);
+    ctx.lineTo(basePoint2X, basePoint2Y);
     ctx.closePath();
     ctx.fill();
+  };
+
+  // Calculate direction vector and length
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const len = Math.sqrt(dx * dx + dy * dy);
+  let ux = 0;
+  let uy = 0;
+  if (len > 0) {
+    ux = dx / len;
+    uy = dy / len;
   }
 
-  ctx.restore();
+  // Calculate arrowhead parameters
+  // const angle = Math.atan2(dy, dx); // Angle not directly needed for vector approach
+  const baseHeadLength = 8; // Base size before scaling by line width
+  const effectiveLineWidth = Math.max(1, style.lineWidth || 1);
+  const lineWidthScaleFactor = 1 + (effectiveLineWidth - 1) * 0.5; // Scale factor based on line width
+  const scaledHeadLength = baseHeadLength * lineWidthScaleFactor * scale; // Final head length including canvas scale
+  const halfBaseWidth = scaledHeadLength * Math.sin(Math.PI / 6); // Half the width of the arrowhead base (using 30 deg angle)
+  
+  // Calculate shortening distance including half line width
+  const shorteningDistance = scaledHeadLength + (style.lineWidth * scale * 0.5);
+  
+  // Calculate shortened line endpoints using the calculated distance
+  const shortenedEndX = end.x * scale - ux * shorteningDistance;
+  const shortenedEndY = end.y * scale - uy * shorteningDistance;
+  let shortenedStartX = start.x * scale; // Initialize for potential double arrow use
+  let shortenedStartY = start.y * scale; // Initialize for potential double arrow use
+  let startDrawX = start.x * scale;
+  let startDrawY = start.y * scale;
+
+  // Adjust start point for double arrows using the calculated distance, ensuring line is long enough
+  if (isDoubleArrow && len > shorteningDistance * 2) {
+    // Update the pre-declared variables
+    shortenedStartX = start.x * scale + ux * shorteningDistance;
+    shortenedStartY = start.y * scale + uy * shorteningDistance;
+    startDrawX = shortenedStartX;
+    startDrawY = shortenedStartY;
+  // If line is shorter than the shortening distance, don't draw line (make start/end same)
+  // If line is shorter than the shortening distance(s), don't draw line (make start/end same)
+  } else if (len <= shorteningDistance || (isDoubleArrow && len <= shorteningDistance * 2)) {
+      startDrawX = shortenedEndX; // Effectively makes line zero length
+      startDrawY = shortenedEndY;
+  }
+
+
+  // Draw the main line (potentially shortened)
+  // Only draw line if it's longer than the shortening distance(s) needed
+  if (len > shorteningDistance || (isDoubleArrow && len > shorteningDistance * 2)) {
+    ctx.beginPath();
+    ctx.moveTo(startDrawX, startDrawY);
+    ctx.lineTo(shortenedEndX, shortenedEndY);
+    ctx.stroke();
+  }
+
+  // --- Draw Arrowhead at End ---
+  // Only draw if the line has length (or is just an arrowhead)
+  if (len > 0) {
+      // Calculate tip relative to the shortened end point, extending outwards
+      const endTipX = shortenedEndX + ux * scaledHeadLength;
+      const endTipY = shortenedEndY + uy * scaledHeadLength;
+
+      // Calculate base points relative to the shortened end point
+      const endBasePoint1X = shortenedEndX - uy * halfBaseWidth;
+      const endBasePoint1Y = shortenedEndY + ux * halfBaseWidth;
+      const endBasePoint2X = shortenedEndX + uy * halfBaseWidth;
+      const endBasePoint2Y = shortenedEndY - ux * halfBaseWidth;
+
+      drawSingleArrowhead(
+        ctx,
+        endTipX,
+        endTipY,
+        endBasePoint1X,
+        endBasePoint1Y,
+        endBasePoint2X,
+        endBasePoint2Y
+      );
+  }
+
+
+  // --- Draw Arrowhead at Start (if double arrow) ---
+  // Only draw if double arrow and line has length (and shortening occurred)
+  if (isDoubleArrow && len > scaledHeadLength * 2) {
+    // Calculate tip relative to the shortened start point, extending outwards
+    const startTipX = shortenedStartX - ux * scaledHeadLength;
+    const startTipY = shortenedStartY - uy * scaledHeadLength;
+
+    // Calculate base points relative to the shortened start point
+    const startBasePoint1X = shortenedStartX - uy * halfBaseWidth;
+    const startBasePoint1Y = shortenedStartY + ux * halfBaseWidth;
+    const startBasePoint2X = shortenedStartX + uy * halfBaseWidth;
+    const startBasePoint2Y = shortenedStartY - ux * halfBaseWidth;
+
+    drawSingleArrowhead(
+      ctx,
+      startTipX,
+      startTipY,
+      startBasePoint1X,
+      startBasePoint1Y,
+      startBasePoint2X,
+      startBasePoint2Y
+    );
+  }
+
+  // ctx.restore(); // Removed as save() was removed
 };
 
 // Add tick (checkmark) drawing function
@@ -464,23 +553,8 @@ export const getTextPosition = (point: Point, scale: number) => {
   };
 };
 
-// Update the AnnotationStyle type in src/types/annotation.ts
-export type AnnotationStyle = {
-  color: string;
-  lineWidth: number;
-  opacity: number;
-  circleDiameterMode?: boolean;
-  stampType?: StampType;
-  text?: string;
-  textOptions?: {
-    fontSize?: number;
-    fontFamily?: string;
-    bold?: boolean;
-    italic?: boolean;
-    underline?: boolean;
-  };
-  stampSize?: number;
-};
+// Note: The primary AnnotationStyle type is imported from "../types/annotation"
+// This local definition is removed to avoid conflicts and ensure the imported type is used.
 
 // Add highlight drawing function
 export const drawHighlight = (
@@ -632,7 +706,7 @@ export const drawAnnotation = (
       drawSmoothFreehand(ctx, annotation.points, scale, annotation.style);
       break;
     case "line":
-      drawLine(ctx, annotation.points, scale);
+      drawLine(ctx, annotation.points, scale, annotation.style);
       break;
     case "rectangle":
       drawRectangle(ctx, annotation.points, scale);
@@ -649,7 +723,8 @@ export const drawAnnotation = (
         ctx,
         annotation.points,
         scale,
-        annotation.type === "doubleArrow"
+        annotation.type === "doubleArrow",
+        annotation.style
       );
       break;
     case "stamp":
