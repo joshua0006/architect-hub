@@ -1429,11 +1429,11 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
   }, [selectedAnnotations, store.selectAnnotations]);
 
   // Reset selection when changing tools
-  useEffect(() => {
-    if (currentTool !== "select") {
-      setSelectedAnnotations([]);
-    }
-  }, [currentTool]);
+  // useEffect(() => {
+  //   if (currentTool !== "select") {
+  //     setSelectedAnnotations([]);
+  //   }
+  // }, [currentTool]);
 
   // Add paste event handler
   useEffect(() => {

@@ -454,9 +454,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
       }
 
       // Re-introduce quality multiplier
-      const qualityMultiplier = scale > 2.5 ? 2.5 : // Increased multiplier
-                               scale > 1.5 ? 2.0 : // Increased multiplier
-                               scale > 1.0 ? 1.5 : 1.0; // Increased multiplier
+      const qualityMultiplier = 1.0; // Keep original quality without enhancement
 
       // Cancel any in-progress render tasks robustly
       if (renderTaskRef.current && typeof renderTaskRef.current.cancel === 'function') {
@@ -519,8 +517,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
             canvas.style.height = `${viewport.height / qualityMultiplier}px`;
             
             // Enable high-quality image rendering on the context
-            (ctx as any).imageSmoothingEnabled = true; // Re-enable smoothing
-            (ctx as any).imageSmoothingQuality = 'high'; // Set quality to high
+            // No high-quality image rendering settings to maintain original quality
 
             // Explicitly clear the canvas *before* scaling the context
             // Use the canvas buffer dimensions (already includes devicePixelRatio)
@@ -535,7 +532,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
               canvasContext: ctx,
               viewport: viewport,
               // Use print intent for better text quality at high zoom levels
-              intent: scale > 1.0 ? "print" : "display" // Lower threshold for print intent
+              intent: "display" // Use standard quality for all zoom levels
               // Removed enableWebGL: true
             };
 
