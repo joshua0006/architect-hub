@@ -834,7 +834,7 @@ export default function DocumentList({
             {user?.role === 'Staff' && (
               <div className="mb-3">
                 <p className="block text-sm font-medium text-gray-700 mb-2">
-                  Who can also view this {popupItem.type === 'folder' ? 'folder' : 'file'}?
+                  Who can access this {popupItem.type === 'folder' ? 'folder' : 'file'}?
                 </p>
                 <div className="space-y-2">
                   <label className="flex items-center p-3 border border-gray-200 rounded-md">
