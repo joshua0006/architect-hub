@@ -835,12 +835,9 @@ export default function DocumentList({
               <div className="mb-3">
                 <p className="block text-sm font-medium text-gray-700 mb-2">
                   Who can also view this {popupItem.type === 'folder' ? 'folder' : 'file'}?
-                  
                 </p>
-                <p className="block text-sm font-medium text-gray-700 mb-2"><i>(Staff has an access to all folders)</i></p>
-                
                 <div className="space-y-2">
-                  {/* <label className="flex items-center p-3 border border-gray-200 rounded-md">
+                  <label className="flex items-center p-3 border border-gray-200 rounded-md">
                     <input
                       type="radio"
                       name="permission"
@@ -852,7 +849,7 @@ export default function DocumentList({
                       <span className="text-sm font-medium text-gray-900">Staff Only</span>
                       <p className="text-xs text-gray-500">Only staff members can view this {popupItem.type}</p>
                     </div>
-                  </label> */}
+                  </label>
                   
                   <label className="flex items-center p-3 border border-gray-200 rounded-md">
                     <input
