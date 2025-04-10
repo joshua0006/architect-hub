@@ -82,7 +82,6 @@ const DocumentsPage: React.FC<{
     if (urlProjectId && (!selectedProject || selectedProject.id !== urlProjectId)) {
       const project = projects.find(p => p.id === urlProjectId);
       if (project) {
-        console.log(`Switching to project ${project.id} from URL parameter`);
         onProjectSelect(project);
       }
     }

@@ -446,7 +446,6 @@ export default function DocumentList({
       if (matchingFolder) {
         onFolderSelect?.(matchingFolder);
       } else {
-        console.log(`Folder with ID ${folder.id} not found in folders array`);
         // If we can't find the folder, we might still want to navigate using the folder object passed
         onFolderSelect?.(folder as Folder);
       }
@@ -549,7 +548,6 @@ export default function DocumentList({
     if (selectedFile) {
       // Get the folder information for the selected file
       const fileFolder = selectedFile.folderId ? folders.find(f => f.id === selectedFile.folderId) : undefined;
-      console.log(`Setting selected document from selectedFile prop: ${selectedFile.name || 'unnamed file'} in folder: ${fileFolder?.name || 'No folder'}`);
       setSelectedDocument(selectedFile);
     }
   }, [selectedFile, folders]);
@@ -559,7 +557,6 @@ export default function DocumentList({
     if (documents.length > 0 && !selectedDocument && selectedFile) {
       // Get the folder information for the selected file
       const fileFolder = selectedFile.folderId ? folders.find(f => f.id === selectedFile.folderId) : undefined;
-      console.log(`Documents loaded, setting selected document: ${selectedFile.name || 'unnamed file'} in folder: ${fileFolder?.name || 'No folder'}`);
       setSelectedDocument(selectedFile);
     }
   }, [documents, selectedDocument, selectedFile, folders]);

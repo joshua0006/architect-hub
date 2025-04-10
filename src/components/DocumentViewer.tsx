@@ -1737,7 +1737,10 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
             />
           </div>
         ) : isVideo(document.name, document.metadata?.contentType) ? (
-          <div className="h-full flex items-center justify-center bg-white rounded-lg shadow-sm p-4 document-content">
+          <div className="h-full flex items-center justify-center bg-white rounded-lg shadow-sm p-4 document-content"
+            style={{
+              height: screenWidth < 1600 ? '63vh' : '71vh',
+            }}>
             <video 
               src={document.url} 
               controls 
