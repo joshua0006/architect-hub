@@ -44,8 +44,8 @@ const DocumentsPage: React.FC<{
   deleteFolder: any;
   updateDocument: any;
   deleteDocument: any;
-  updateDocumentPermission: (id: string, permission: 'STAFF_ONLY' | 'ALL') => Promise<void>;
-  updateFolderPermission: (id: string, permission: 'STAFF_ONLY' | 'ALL') => Promise<void>;
+  updateDocumentPermission: (id: string, permission: 'STAFF_ONLY' | 'CONTRACTORS_WRITE' | 'CLIENTS_READ' | 'ALL') => Promise<void>;
+  updateFolderPermission: (id: string, permission: 'STAFF_ONLY' | 'CONTRACTORS_WRITE' | 'CLIENTS_READ' | 'ALL') => Promise<void>;
 }> = ({ 
   projects, 
   selectedProject, 
@@ -82,7 +82,6 @@ const DocumentsPage: React.FC<{
     if (urlProjectId && (!selectedProject || selectedProject.id !== urlProjectId)) {
       const project = projects.find(p => p.id === urlProjectId);
       if (project) {
-        console.log(`Switching to project ${project.id} from URL parameter`);
         onProjectSelect(project);
       }
     }
@@ -343,7 +342,7 @@ export default function AppContent() {
       
       // If selectedProject is one of the updated projects, update it
       if (selectedProject) {
-        const updatedSelectedProject = updatedProjects.find(p => p.id === selectedProject.id);
+        const updatedSelectedProject = updatedProjects.find((p: Project) => p.id === selectedProject.id);
         if (updatedSelectedProject) {
           setSelectedProject(updatedSelectedProject);
         }
@@ -695,7 +694,7 @@ export default function AppContent() {
     setDocumentManagerFolderId(newFolderId);
   };
 
-  const updateDocumentPermission = async (id: string, permission: 'STAFF_ONLY' | 'ALL') => {
+  const updateDocumentPermission = async (id: string, permission: 'STAFF_ONLY' | 'CONTRACTORS_WRITE' | 'CLIENTS_READ' | 'ALL') => {
     try {
       // Get the current document to ensure it exists
       const docToUpdate = documents.find(d => d.id === id);
@@ -721,7 +720,7 @@ export default function AppContent() {
     }
   };
 
-  const updateFolderPermission = async (id: string, permission: 'STAFF_ONLY' | 'ALL') => {
+  const updateFolderPermission = async (id: string, permission: 'STAFF_ONLY' | 'CONTRACTORS_WRITE' | 'CLIENTS_READ' | 'ALL') => {
     try {
       // Get the current folder to ensure it exists
       const folderToUpdate = folders.find(f => f.id === id);
@@ -798,7 +797,6 @@ export default function AppContent() {
               }
             >
               <TeamList
-                teamMembers={teamMembers.filter(m => selectedProject ? m.projectIds.includes(selectedProject.id) : false)}
                 projects={projects}
                 selectedProject={selectedProject}
               />
@@ -822,11 +820,7 @@ export default function AppContent() {
               }
             >
               <PeopleList
-                teamMembers={teamMembers}
                 projects={projects}
-                onCreateMember={createTeamMember}
-                onUpdateMember={updateTeamMember}
-                onDeleteMember={deleteTeamMember}
                 onAssignToProject={assignToProject}
                 onRemoveFromProject={removeFromProject}
               />

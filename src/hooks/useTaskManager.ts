@@ -28,7 +28,7 @@ export function useTaskManager(initialTasks: Task[]) {
     projectId: string,
     title: string,
     description: string,
-    assignedTo: string,
+    assignedTo: string[], // Changed type to string array
     dueDate: string,
     priority: Task['priority'],
     category: Task['category']
@@ -38,14 +38,14 @@ export function useTaskManager(initialTasks: Task[]) {
         projectId,
         title,
         description,
-        assignedTo,
+        assignedTo, // Pass the array directly
         dueDate,
         priority,
         category,
         status: 'todo'
       });
-      setTasks(prev => [...prev, newTask]);
-      return newTask;
+      // setTasks(prev => [...prev, newTask]); // Remove immediate state update; rely on subscription/refresh
+      // return newTask; // Return void to match expected prop type
     } catch (err) {
       throw err instanceof Error ? err : new Error('Failed to create task');
     }

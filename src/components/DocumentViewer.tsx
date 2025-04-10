@@ -468,6 +468,17 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
   const unsubscribeRef = useRef<(() => void) | null>(null);
   const [showAllVersions, setShowAllVersions] = useState(false);
   const MAX_VISIBLE_VERSIONS = 3;
+  const [screenWidth , setScreenWidth] = useState(window.innerWidth);
+
+    useEffect(() => {
+      const handleResize = () => {
+        setScreenWidth(window.innerWidth);
+      };
+  
+      window.addEventListener('resize', handleResize);
+      return () => window.removeEventListener('resize', handleResize);
+    }, []);
+  
   
   // Add CSS for highlight animation in JSX
   const highlightStyles = `
@@ -1714,7 +1725,10 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
             </div>
           </div>
         ) : isImage(document.name, document.metadata?.contentType) ? (
-          <div className="h-full flex items-center justify-center bg-white rounded-lg shadow-sm p-4 document-content">
+          <div className="h-full flex items-center justify-center bg-white rounded-lg shadow-sm p-4 document-content"
+            style={{
+              height: screenWidth < 1600 ? '63vh' : '71vh',
+            }}>
             <img 
               src={document.url} 
               alt={document.name} 
@@ -1723,7 +1737,10 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
             />
           </div>
         ) : isVideo(document.name, document.metadata?.contentType) ? (
-          <div className="h-full flex items-center justify-center bg-white rounded-lg shadow-sm p-4 document-content">
+          <div className="h-full flex items-center justify-center bg-white rounded-lg shadow-sm p-4 document-content"
+            style={{
+              height: screenWidth < 1600 ? '63vh' : '71vh',
+            }}>
             <video 
               src={document.url} 
               controls 

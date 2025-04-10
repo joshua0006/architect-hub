@@ -29,26 +29,26 @@ export enum UserRole {
 export const PERMISSIONS_MAP: Record<FolderAccessPermission, Record<UserRole, { read: boolean; write: boolean }>> = {
   [FolderAccessPermission.STAFF_ONLY]: {
     [UserRole.STAFF]: { read: true, write: true },
-    [UserRole.CONTRACTOR]: { read: true, write: false },
-    [UserRole.CLIENT]: { read: true, write: false },
+    [UserRole.CONTRACTOR]: { read: false, write: false },
+    [UserRole.CLIENT]: { read: false, write: false },
     [UserRole.ADMIN]: { read: true, write: true },
   },
   [FolderAccessPermission.CONTRACTOR_WRITE]: {
     [UserRole.STAFF]: { read: true, write: true },
     [UserRole.CONTRACTOR]: { read: true, write: true },
-    [UserRole.CLIENT]: { read: true, write: false },
+    [UserRole.CLIENT]: { read: false, write: false },
     [UserRole.ADMIN]: { read: true, write: true },
   },
 
   [FolderAccessPermission.CONTRACTOR_READ]: {
     [UserRole.STAFF]: { read: true, write: true },
-    [UserRole.CONTRACTOR]: { read: true, write: false },
-    [UserRole.CLIENT]: { read: true, write: false },
+    [UserRole.CONTRACTOR]: { read: true, write: true},
+    [UserRole.CLIENT]: { read: false, write: false },
     [UserRole.ADMIN]: { read: true, write: true },
   },
   [FolderAccessPermission.CLIENTS_READ]: {
     [UserRole.STAFF]: { read: true, write: true },
-    [UserRole.CONTRACTOR]: { read: true, write: false },
+    [UserRole.CONTRACTOR]: { read: false, write: false },
     [UserRole.CLIENT]: { read: true, write: false },
     [UserRole.ADMIN]: { read: true, write: true },
   },

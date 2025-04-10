@@ -33,7 +33,8 @@ import { ConfirmDialog } from './ui/ConfirmDialog';
 import { RenameDialog } from './ui/RenameDialog';
 import { PermissionsDialog } from './ui/PermissionsDialog';
 import { NOTIFICATION_DOCUMENT_UPDATE_EVENT } from './NotificationIcon';
-import { doc, updateDoc } from 'firebase/firestore';
+// Import doc and getDoc
+import { doc, updateDoc, getDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { collection, query, where, getDocs, orderBy, limit } from 'firebase/firestore';
 import { subscribeToFolderDocuments, DOCUMENT_UPDATE_EVENT, triggerDocumentUpdate } from "../services/documentSubscriptionService";
@@ -156,6 +157,10 @@ export default function DocumentList({
   const [editNameField, setEditNameField] = useState<string>("");
   const [selectedPermission, setSelectedPermission] = useState<'STAFF_ONLY' | 'CONTRACTORS_WRITE' | 'CLIENTS_READ' | 'ALL'>('STAFF_ONLY');
 
+  // Add new state for permission fetching and saving
+  const [isFetchingPermission, setIsFetchingPermission] = useState(false);
+  const [isSavingPermission, setIsSavingPermission] = useState(false);
+
   // Add drag and drop state
   const [isDragging, setIsDragging] = useState(false);
   const [showDragOverlay, setShowDragOverlay] = useState(false);
@@ -176,20 +181,39 @@ export default function DocumentList({
   const hasActiveSubscription = useRef<boolean>(false);
 
   // Set initial values when popup opens - moved from renderEditPopup
+  // Update useEffect to fetch permissions when popup opens
   useEffect(() => {
     if (popupItem) {
-      const item = popupItem.type === 'folder' 
-        ? folders.find(f => f.id === popupItem.id)
-        : documents.find(d => d.id === popupItem.id);
-        
-      const permission = item?.metadata && 'access' in item.metadata
-        ? (item.metadata.access as 'STAFF_ONLY' | 'CONTRACTORS_WRITE' | 'CLIENTS_READ' | 'ALL')
-        : 'STAFF_ONLY';
-      
-      setEditNameField(popupItem.name);
-      setSelectedPermission(permission);
+      const fetchPermission = async () => {
+        setIsFetchingPermission(true);
+        setSelectedPermission('STAFF_ONLY'); // Default while loading
+
+        try {
+          const itemRef = doc(db, popupItem.type === 'folder' ? 'folders' : 'documents', popupItem.id);
+          const docSnap = await getDoc(itemRef);
+
+          if (docSnap.exists()) {
+            const data = docSnap.data();
+            const permission = data.metadata?.access as 'STAFF_ONLY' | 'CONTRACTORS_WRITE' | 'CLIENTS_READ' | 'ALL' || 'STAFF_ONLY';
+            setSelectedPermission(permission);
+            console.log(`Fetched permission for ${popupItem.type} ${popupItem.id}: ${permission}`);
+          } else {
+            console.warn(`Document ${popupItem.id} not found when fetching permission.`);
+            setSelectedPermission('STAFF_ONLY'); // Fallback if doc doesn't exist
+          }
+        } catch (error) {
+          console.error("Error fetching permission:", error);
+          setSelectedPermission('STAFF_ONLY'); // Fallback on error
+        } finally {
+          setIsFetchingPermission(false);
+        }
+      };
+
+      setEditNameField(popupItem.name); // Set name immediately
+      fetchPermission(); // Fetch permission async
+
     }
-  }, [popupItem, folders, documents]);
+  }, [popupItem]); // Removed folders and documents dependencies as we fetch directly
 
   const allDocs = isSharedView ? sharedDocuments || [] : documents.filter(
     (doc) => doc.folderId === currentFolder?.id
@@ -207,6 +231,16 @@ export default function DocumentList({
     writeAccess = PERMISSIONS_MAP[folderPermission][role] ?? DEFAULT_FOLDER_ACCESS;
   }
   return writeAccess.write;
+ }
+
+ const hasFolderReadPermission = (folderPermission: FolderAccessPermission): boolean => {
+  const role = user?.role as UserRole | undefined;
+
+  let writeAccess = DEFAULT_FOLDER_ACCESS;
+  if (role && folderPermission in PERMISSIONS_MAP) {
+    writeAccess = PERMISSIONS_MAP[folderPermission][role] ?? DEFAULT_FOLDER_ACCESS;
+  }
+  return writeAccess.read;
  }
 
 
@@ -233,15 +267,14 @@ export default function DocumentList({
         );
 
     // Filter folders based on user's write permissions for each folder
-    // filteredFolders = filteredFolders.filter(folder =>
-    //   hasFolderWritePermission(folder.metadata?.access as FolderAccessPermission)
-    // );
-
+    filteredFolders = filteredFolders.filter(folder =>
+      hasFolderReadPermission(folder.metadata?.access as FolderAccessPermission)
+    );
 
     // Filter documents based on user's write permissions for the current folder
-    // filteredDocs = filteredDocs.filter(doc =>
-    //   hasFolderWritePermission(currentFolder?.metadata?.access as FolderAccessPermission)
-    // );
+    filteredDocs = filteredDocs.filter(doc =>
+      hasFolderReadPermission(currentFolder?.metadata?.access as FolderAccessPermission)
+    );
 
     // Apply permission filter based on user role
     // if (user?.role !== 'Staff' && user?.role !== 'Admin') {
@@ -446,7 +479,6 @@ export default function DocumentList({
       if (matchingFolder) {
         onFolderSelect?.(matchingFolder);
       } else {
-        console.log(`Folder with ID ${folder.id} not found in folders array`);
         // If we can't find the folder, we might still want to navigate using the folder object passed
         onFolderSelect?.(folder as Folder);
       }
@@ -549,7 +581,6 @@ export default function DocumentList({
     if (selectedFile) {
       // Get the folder information for the selected file
       const fileFolder = selectedFile.folderId ? folders.find(f => f.id === selectedFile.folderId) : undefined;
-      console.log(`Setting selected document from selectedFile prop: ${selectedFile.name || 'unnamed file'} in folder: ${fileFolder?.name || 'No folder'}`);
       setSelectedDocument(selectedFile);
     }
   }, [selectedFile, folders]);
@@ -559,7 +590,6 @@ export default function DocumentList({
     if (documents.length > 0 && !selectedDocument && selectedFile) {
       // Get the folder information for the selected file
       const fileFolder = selectedFile.folderId ? folders.find(f => f.id === selectedFile.folderId) : undefined;
-      console.log(`Documents loaded, setting selected document: ${selectedFile.name || 'unnamed file'} in folder: ${fileFolder?.name || 'No folder'}`);
       setSelectedDocument(selectedFile);
     }
   }, [documents, selectedDocument, selectedFile, folders]);
@@ -779,18 +809,88 @@ export default function DocumentList({
   }, [popupPosition]);
 
   // Update the renderEditPopup function to display centered on screen
+  // Update the renderEditPopup function
   const renderEditPopup = () => {
     if (!popupItem) return null;
-    
+
+    const handleSaveChanges = async () => {
+      if (!popupItem || !editNameField.trim()) return;
+
+      const originalName = popupItem.name;
+      const newName = editNameField.trim();
+      let nameChanged = newName !== originalName;
+
+      // Determine original permission *before* potential update
+      const item = popupItem.type === 'folder'
+        ? folders.find(f => f.id === popupItem.id)
+        : documents.find(d => d.id === popupItem.id);
+      // Get the actual stored permission, which might be undefined
+      const actualStoredPermission = item?.metadata?.access as 'STAFF_ONLY' | 'CONTRACTORS_WRITE' | 'CLIENTS_READ' | 'ALL' | undefined;
+      // Check if the selected permission is different from the actually stored one
+      let permissionChanged = user?.role === 'Staff' && selectedPermission !== actualStoredPermission;
+
+      let renamePromise: Promise<void> = Promise.resolve();
+      let permissionPromise: Promise<void> = Promise.resolve();
+
+      // --- Rename Logic ---
+      if (nameChanged) {
+        if (popupItem.type === 'folder') {
+          renamePromise = onUpdateFolder(popupItem.id, newName);
+        } else {
+          renamePromise = onUpdateDocument(popupItem.id, { name: newName });
+        }
+      }
+
+      // --- Permission Logic ---
+      if (permissionChanged) {
+        setIsSavingPermission(true); // Start loading state for permission save
+        if (popupItem.type === 'folder' && onUpdateFolderPermission) {
+          permissionPromise = onUpdateFolderPermission(popupItem.id, selectedPermission);
+        } else if (popupItem.type === 'document' && onUpdateDocumentPermission) {
+          permissionPromise = onUpdateDocumentPermission(popupItem.id, selectedPermission);
+        } else {
+          // Fallback direct update (less ideal as it bypasses parent logic)
+          console.warn("Using fallback permission update for", popupItem.type);
+          const itemRef = doc(db, popupItem.type === 'folder' ? 'folders' : 'documents', popupItem.id);
+          permissionPromise = updateDoc(itemRef, {
+            'metadata.access': selectedPermission,
+            'updatedAt': new Date().toISOString()
+          });
+        }
+      }
+
+      try {
+        // Wait for both promises
+        await Promise.all([renamePromise, permissionPromise]);
+
+        // Show success toast only if something actually changed
+        if (nameChanged || permissionChanged) {
+           showToast(`${popupItem.type === 'folder' ? 'Folder' : 'File'} updated successfully`, 'success');
+        }
+
+        // Close popup and refresh if needed
+        closePopup();
+        if ((nameChanged || permissionChanged) && onRefresh) {
+          await onRefresh();
+        }
+      } catch (error) {
+        console.error("Error saving changes:", error);
+        showToast(`Failed to update ${popupItem.type}`, 'error');
+      } finally {
+        // Ensure loading state is turned off even if there's an error
+        if (permissionChanged) {
+          setIsSavingPermission(false);
+        }
+      }
+    };
+
+
     return (
-      <div 
+      <div
         className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50"
-        onClick={(e) => {
-          // Close when clicking the backdrop, but not when clicking the popup itself
-          if (e.target === e.currentTarget) closePopup();
-        }}
+        onClick={(e) => { if (e.target === e.currentTarget) closePopup(); }}
       >
-        <div 
+        <div
           id="edit-popup"
           className="bg-white rounded-md shadow-lg overflow-hidden w-full max-w-md mx-auto"
           onClick={(e) => e.stopPropagation()}
@@ -799,16 +899,13 @@ export default function DocumentList({
             <h3 className="font-medium text-gray-800">
               Edit {popupItem.type === 'folder' ? 'Folder' : 'File'}
             </h3>
-            <button 
-              onClick={closePopup}
-              className="text-gray-500 hover:text-gray-700"
-            >
+            <button onClick={closePopup} className="text-gray-500 hover:text-gray-700">
               <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
                 <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
               </svg>
             </button>
           </div>
-          
+
           <div className="p-4">
             {/* Rename Section */}
             <div className="mb-4">
@@ -821,137 +918,110 @@ export default function DocumentList({
                 value={editNameField}
                 onChange={(e) => setEditNameField(e.target.value)}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+                disabled={isSavingPermission} // Disable while saving
               />
             </div>
-            
+
             {/* Permissions Section - Only for staff users */}
             {user?.role === 'Staff' && (
               <div className="mb-3">
                 <p className="block text-sm font-medium text-gray-700 mb-2">
-                  Who can view this {popupItem.type === 'folder' ? 'folder' : 'file'}?
+                  Who can access this {popupItem.type === 'folder' ? 'folder' : 'file'}?
                 </p>
-                
-                <div className="space-y-2">
-                  <label className="flex items-center p-3 border border-gray-200 rounded-md">
-                    <input
-                      type="radio"
-                      name="permission"
-                      checked={selectedPermission === 'STAFF_ONLY'}
-                      onChange={() => setSelectedPermission('STAFF_ONLY')}
-                      className="h-4 w-4 text-primary-600"
-                    />
-                    <div className="ml-3">
-                      <span className="text-sm font-medium text-gray-900">Staff Only</span>
-                      <p className="text-xs text-gray-500">Only staff members can view this {popupItem.type}</p>
-                    </div>
-                  </label>
-                  
-                  <label className="flex items-center p-3 border border-gray-200 rounded-md">
-                    <input
-                      type="radio"
-                      name="permission"
-                      checked={selectedPermission === 'CONTRACTORS_WRITE'}
-                      onChange={() => setSelectedPermission('CONTRACTORS_WRITE')}
-                      className="h-4 w-4 text-primary-600"
-                    />
-                    <div className="ml-3">
-                      <span className="text-sm font-medium text-gray-900">Contractors Write</span>
-                      <p className="text-xs text-gray-500">Contractors can read and write to this {popupItem.type}</p>
-                    </div>
-                  </label>
-                  
-                  <label className="flex items-center p-3 border border-gray-200 rounded-md">
-                    <input
-                      type="radio"
-                      name="permission"
-                      checked={selectedPermission === 'CLIENTS_READ'}
-                      onChange={() => setSelectedPermission('CLIENTS_READ')}
-                      className="h-4 w-4 text-primary-600"
-                    />
-                    <div className="ml-3">
-                      <span className="text-sm font-medium text-gray-900">Clients Read</span>
-                      <p className="text-xs text-gray-500">Clients can read but not modify this {popupItem.type}</p>
-                    </div>
-                  </label>
-                  
-                  <label className="flex items-center p-3 border border-gray-200 rounded-md">
-                    <input
-                      type="radio"
-                      name="permission"
-                      checked={selectedPermission === 'ALL'}
-                      onChange={() => setSelectedPermission('ALL')}
-                      className="h-4 w-4 text-primary-600"
-                    />
-                    <div className="ml-3">
-                      <span className="text-sm font-medium text-gray-900">All Users</span>
-                      <p className="text-xs text-gray-500">Everyone with project access can view this {popupItem.type}</p>
-                    </div>
-                  </label>
-                </div>
+                {isFetchingPermission ? (
+                  <div className="flex justify-center items-center h-40">
+                    <Loader2 className="w-6 h-6 animate-spin text-primary-500" />
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {/* Staff Only Radio */}
+                    <label className={`flex items-center p-3 border rounded-md ${isSavingPermission ? 'opacity-50 cursor-not-allowed' : 'border-gray-200'}`}>
+                      <input
+                        type="radio"
+                        name="permission"
+                        checked={selectedPermission === 'STAFF_ONLY'}
+                        onChange={() => setSelectedPermission('STAFF_ONLY')}
+                        className="h-4 w-4 text-primary-600"
+                        disabled={isSavingPermission}
+                      />
+                      <div className="ml-3">
+                        <span className="text-sm font-medium text-gray-900">Staff Only</span>
+                        <p className="text-xs text-gray-500">Only staff members can view this {popupItem.type}</p>
+                      </div>
+                    </label>
+                    {/* Contractors Write Radio */}
+                     <label className={`flex items-center p-3 border rounded-md ${isSavingPermission ? 'opacity-50 cursor-not-allowed' : 'border-gray-200'}`}>
+                      <input
+                        type="radio"
+                        name="permission"
+                        checked={selectedPermission === 'CONTRACTORS_WRITE'}
+                        onChange={() => setSelectedPermission('CONTRACTORS_WRITE')}
+                        className="h-4 w-4 text-primary-600"
+                         disabled={isSavingPermission}
+                      />
+                      <div className="ml-3">
+                        <span className="text-sm font-medium text-gray-900">Contractors Write</span>
+                        <p className="text-xs text-gray-500">Contractors can read and write to this {popupItem.type}</p>
+                      </div>
+                    </label>
+                    {/* Clients Read Radio */}
+                     <label className={`flex items-center p-3 border rounded-md ${isSavingPermission ? 'opacity-50 cursor-not-allowed' : 'border-gray-200'}`}>
+                      <input
+                        type="radio"
+                        name="permission"
+                        checked={selectedPermission === 'CLIENTS_READ'}
+                        onChange={() => setSelectedPermission('CLIENTS_READ')}
+                        className="h-4 w-4 text-primary-600"
+                         disabled={isSavingPermission}
+                      />
+                      <div className="ml-3">
+                        <span className="text-sm font-medium text-gray-900">Clients Read</span>
+                        <p className="text-xs text-gray-500">Clients can read but not modify this {popupItem.type}</p>
+                      </div>
+                    </label>
+                    {/* All Users Radio */}
+                     <label className={`flex items-center p-3 border rounded-md ${isSavingPermission ? 'opacity-50 cursor-not-allowed' : 'border-gray-200'}`}>
+                      <input
+                        type="radio"
+                        name="permission"
+                        checked={selectedPermission === 'ALL'}
+                        onChange={() => setSelectedPermission('ALL')}
+                        className="h-4 w-4 text-primary-600"
+                         disabled={isSavingPermission}
+                      />
+                      <div className="ml-3">
+                        <span className="text-sm font-medium text-gray-900">All Users</span>
+                        <p className="text-xs text-gray-500">Everyone with project access can view this {popupItem.type}</p>
+                      </div>
+                    </label>
+                  </div>
+                )}
               </div>
             )}
-            
+
             {/* Buttons */}
             <div className="flex justify-end space-x-2 mt-4 border-t border-gray-100 pt-3">
               <button
                 onClick={closePopup}
                 className="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-colors"
+                disabled={isSavingPermission} // Disable cancel while saving permission
               >
                 Cancel
               </button>
               <button
-                onClick={() => {
-                  // Handle saving both rename and permissions in one action
-                  if (editNameField.trim() !== popupItem.name) {
-                    // Handle rename if name changed
-                    if (popupItem.type === 'folder') {
-                      onUpdateFolder(popupItem.id, editNameField.trim());
-                    } else {
-                      onUpdateDocument(popupItem.id, { name: editNameField.trim() });
-                    }
-                  }
-                  
-                  // Handle permission change if user is staff
-                  if (user?.role === 'Staff') {
-                    // Get current item and its original permission
-                    const item = popupItem.type === 'folder' 
-                      ? folders.find(f => f.id === popupItem.id)
-                      : documents.find(d => d.id === popupItem.id);
-                    
-                    const originalPermission = item?.metadata && 'access' in item.metadata
-                      ? (item.metadata.access as 'STAFF_ONLY' | 'CONTRACTORS_WRITE' | 'CLIENTS_READ' | 'ALL')
-                      : 'STAFF_ONLY';
-                    
-                    // Only update if the permission has changed
-                    if (selectedPermission !== originalPermission) {
-                      if (popupItem.type === 'folder' && onUpdateFolderPermission) {
-                        onUpdateFolderPermission(popupItem.id, selectedPermission);
-                      } else if (popupItem.type === 'document' && onUpdateDocumentPermission) {
-                        onUpdateDocumentPermission(popupItem.id, selectedPermission);
-                      } else {
-                        // Fallback to direct update
-                        const itemRef = doc(db, popupItem.type === 'folder' ? 'folders' : 'documents', popupItem.id);
-                        updateDoc(itemRef, {
-                          'metadata.access': selectedPermission,
-                          'updatedAt': new Date().toISOString()
-                        });
-                      }
-                    }
-                  }
-                  
-                  // Close popup and refresh if needed
-                  closePopup();
-                  if (onRefresh) {
-                    onRefresh();
-                  }
-                  
-                  // Show toast
-                  showToast(`${popupItem.type === 'folder' ? 'Folder' : 'File'} updated successfully`, 'success');
-                }}
-                className="px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 transition-colors"
-                disabled={!editNameField.trim()}
+                onClick={handleSaveChanges}
+                className={`px-4 py-2 rounded-md transition-colors flex items-center justify-center min-w-[120px] ${
+                  isSavingPermission
+                    ? 'bg-primary-400 text-white cursor-not-allowed'
+                    : 'bg-primary-600 text-white hover:bg-primary-700'
+                }`}
+                disabled={!editNameField.trim() || isSavingPermission || isFetchingPermission} // Disable if saving, fetching, or name is empty
               >
-                Save Changes
+                {isSavingPermission ? (
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                ) : (
+                  'Save Changes'
+                )}
               </button>
             </div>
           </div>

@@ -148,7 +148,6 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
       const canvas = canvasRef.current;
       if (canvas) {
         canvas.dispatchEvent(event);
-        console.log(`[AnnotationCanvas] Dispatched annotation event to canvas: page ${pageNumber}`);
       }
 
       // Also try to dispatch to the PDF container for broader notification
@@ -156,7 +155,6 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
         const pdfContainer = document.querySelector(".pdf-container, .pdf-container-fixed");
         if (pdfContainer) {
           pdfContainer.dispatchEvent(event);
-          console.log(`[AnnotationCanvas] Dispatched annotation event to container: page ${pageNumber}`);
         } else {
           console.warn("[AnnotationCanvas] Could not find PDF container to dispatch event");
         }
@@ -199,8 +197,6 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
     const pdfX = mouseX * scaleFactorX / scale;
     const pdfY = mouseY * scaleFactorY / scale;
     
-    // Log for debugging
-    console.log(`Mouse: (${mouseX.toFixed(1)}, ${mouseY.toFixed(1)}), Scroll Delta: (${scrollDeltaX.toFixed(1)}, ${scrollDeltaY.toFixed(1)}), PDF: (${pdfX.toFixed(1)}, ${pdfY.toFixed(1)})`);
     
     return { x: pdfX, y: pdfY };
   };
@@ -402,8 +398,6 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
         // Clear any previous points first to ensure a fresh drawing
         setCurrentPoints([point]);
         
-        // Debug: log starting position
-        console.log(`Starting freehand drawing at: (${point.x.toFixed(2)}, ${point.y.toFixed(2)})`);
       } else {
         // For other shapes, initialize with start and end at the same point
         // End point will be updated during mouse move
@@ -1358,13 +1352,8 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
         (annotation.type === 'text' || annotation.type === 'stickyNote') &&
         canvasRef.current && // Check if canvas ref is available
         scale > 0) { // Check if scale prop is valid (passed from PDFViewer)
-          
-      console.log('[AnnotationCanvas] Scheduling immediate edit activation for:', annotation.id, 'with scale:', scale);
-
       // Use a minimal timeout to allow the current render cycle to complete
       timeoutId = setTimeout(() => {
-        console.log('[AnnotationCanvas] Activating immediate edit state for:', annotation.id);
-        // Activate editing state
         setEditingAnnotation(annotation);
         setTextInputPosition(annotation.points[0]); // Position uses annotation's base points
         setIsEditingText(true);
@@ -1376,7 +1365,6 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
 
     } else if (annotation) {
       // Log if activation was deferred due to readiness checks
-      console.log('[AnnotationCanvas] Deferred immediate edit activation for:', annotation.id, 'Canvas ready:', !!canvasRef.current, 'Scale valid:', scale > 0);
     }
 
     // Cleanup function for the timeout if the component unmounts or dependencies change
