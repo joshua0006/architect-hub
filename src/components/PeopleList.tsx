@@ -11,10 +11,10 @@ import { TeamMemberType } from "../types";
 
 interface PeopleListProps {
   projects: Project[];
-  teamMembers: User[];
-  onCreateMember: (name: string, email: string, phone: string, role: string, type: TeamMemberType, projectIds?: string[]) => Promise<void>;
-  onUpdateMember: (id: string, updates: Partial<User>) => Promise<void>;
-  onDeleteMember: (id: string) => Promise<void>;
+  teamMembers?: User[]; // Made optional as component fetches its own users
+  onCreateMember?: (name: string, email: string, phone: string, role: string, type: TeamMemberType, projectIds?: string[]) => Promise<void>; // Made optional
+  onUpdateMember?: (id: string, updates: Partial<User>) => Promise<void>; // Made optional
+  onDeleteMember?: (id: string) => Promise<void>; // Made optional
   onAssignToProject: (userId: string, projectId: string) => Promise<void>;
   onRemoveFromProject: (userId: string, projectId: string) => Promise<void>;
 }
