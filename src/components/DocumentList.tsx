@@ -156,6 +156,7 @@ export default function DocumentList({
   // Add new state for rename field
   const [editNameField, setEditNameField] = useState<string>("");
   const [selectedPermission, setSelectedPermission] = useState<'STAFF_ONLY' | 'CONTRACTORS_WRITE' | 'CLIENTS_READ' | 'ALL'>('STAFF_ONLY');
+  const [initialPermissionOnPopupOpen, setInitialPermissionOnPopupOpen] = useState<'STAFF_ONLY' | 'CONTRACTORS_WRITE' | 'CLIENTS_READ' | 'ALL'>('STAFF_ONLY');
 
   // Add new state for permission fetching and saving
   const [isFetchingPermission, setIsFetchingPermission] = useState(false);
@@ -195,15 +196,18 @@ export default function DocumentList({
           if (docSnap.exists()) {
             const data = docSnap.data();
             const permission = data.metadata?.access as 'STAFF_ONLY' | 'CONTRACTORS_WRITE' | 'CLIENTS_READ' | 'ALL' || 'STAFF_ONLY';
-            setSelectedPermission(permission);
+            setSelectedPermission(permission); // Set current selection
+            setInitialPermissionOnPopupOpen(permission); // Store initial value
             console.log(`Fetched permission for ${popupItem.type} ${popupItem.id}: ${permission}`);
           } else {
             console.warn(`Document ${popupItem.id} not found when fetching permission.`);
             setSelectedPermission('STAFF_ONLY'); // Fallback if doc doesn't exist
+            setInitialPermissionOnPopupOpen('STAFF_ONLY'); // Set initial fallback too
           }
         } catch (error) {
           console.error("Error fetching permission:", error);
           setSelectedPermission('STAFF_ONLY'); // Fallback on error
+          setInitialPermissionOnPopupOpen('STAFF_ONLY'); // Set initial fallback too
         } finally {
           setIsFetchingPermission(false);
         }
@@ -820,14 +824,8 @@ export default function DocumentList({
       const newName = editNameField.trim();
       let nameChanged = newName !== originalName;
 
-      // Determine original permission *before* potential update
-      const item = popupItem.type === 'folder'
-        ? folders.find(f => f.id === popupItem.id)
-        : documents.find(d => d.id === popupItem.id);
-      // Get the actual stored permission, which might be undefined
-      const actualStoredPermission = item?.metadata?.access as 'STAFF_ONLY' | 'CONTRACTORS_WRITE' | 'CLIENTS_READ' | 'ALL' | undefined;
-      // Check if the selected permission is different from the actually stored one
-      let permissionChanged = user?.role === 'Staff' && selectedPermission !== actualStoredPermission;
+      // Check if the permission selected now is different from the one present when the popup opened
+      let permissionChanged = user?.role === 'Staff' && selectedPermission !== initialPermissionOnPopupOpen;
 
       let renamePromise: Promise<void> = Promise.resolve();
       let permissionPromise: Promise<void> = Promise.resolve();
