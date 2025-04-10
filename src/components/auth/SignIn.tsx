@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
-import { Building2, Loader2, AlertCircle } from 'lucide-react';
+import { Loader2, AlertCircle } from 'lucide-react';
 import { useOrganization } from '../../contexts/OrganizationContext';
 
 export default function SignIn() {
@@ -43,10 +43,7 @@ export default function SignIn() {
       <div className="max-w-xl mx-auto bg-white rounded-2xl shadow-xl p-8">
         <div className="text-center">
           <div className="flex justify-center items-center gap-3 mb-6">
-            <div className="w-12 h-12 bg-primary-100 rounded-xl flex items-center justify-center">
-              <Building2 className="w-7 h-7 text-primary-600" />
-            </div>
-            <h1 className="text-2xl font-bold text-gray-900">{settings.name}</h1>
+            <img src="/assets/images/logo.jpg" alt="Chris Cole Architect" className="h-14" />
           </div>
           <p className="text-gray-500 mb-8">Sign in to your account to continue</p>
         </div>

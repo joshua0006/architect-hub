@@ -1,4 +1,4 @@
-import { Building2, FileText, ListTodo, Users, LogOut, Settings as SettingsIcon, Shield } from 'lucide-react';
+import { FileText, ListTodo, Users, LogOut, Settings as SettingsIcon, Shield } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useOrganization } from '../contexts/OrganizationContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -45,7 +45,7 @@ export default function Header() {
   }, []);
 
   const navItems = [
-    { path: '/', icon: Building2, label: 'Project', onClick: handleProjectClick },
+    { path: '/', icon: Users, label: 'Project', onClick: handleProjectClick },
     { path: '/team', icon: Users, label: 'Team' },
     { path: '/documents', icon: FileText, label: 'Documents' },
     { path: '/tasks', icon: ListTodo, label: 'Tasks' },
@@ -57,9 +57,8 @@ export default function Header() {
   return (
     <header className="fixed top-0 left-0 right-0 h-16 glass-effect z-50">
       <div className="h-full  mx-auto px-4 flex items-center justify-between">
-        <div className="flex items-center space-x-2">
-          <Building2 className="w-8 h-8 text-primary-600" />
-          <span className="text-xl font-semibold text-gradient">{settings.name}</span>
+        <div className="flex items-center space-x-2 justify-center">
+          <img src="/assets/images/logo.jpg" alt="Chris Cole Architect" className="h-10" />
         </div>
         
         <div className="flex items-center space-x-8">
