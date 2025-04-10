@@ -209,6 +209,16 @@ export default function DocumentList({
   return writeAccess.write;
  }
 
+ const hasFolderReadPermission = (folderPermission: FolderAccessPermission): boolean => {
+  const role = user?.role as UserRole | undefined;
+
+  let writeAccess = DEFAULT_FOLDER_ACCESS;
+  if (role && folderPermission in PERMISSIONS_MAP) {
+    writeAccess = PERMISSIONS_MAP[folderPermission][role] ?? DEFAULT_FOLDER_ACCESS;
+  }
+  return writeAccess.read;
+ }
+
 
   // Filter and sort documents and folders based on search, view filter, and sort order
   const filteredAndSortedItems = () => {
@@ -233,15 +243,14 @@ export default function DocumentList({
         );
 
     // Filter folders based on user's write permissions for each folder
-    // filteredFolders = filteredFolders.filter(folder =>
-    //   hasFolderWritePermission(folder.metadata?.access as FolderAccessPermission)
-    // );
-
+    filteredFolders = filteredFolders.filter(folder =>
+      hasFolderReadPermission(folder.metadata?.access as FolderAccessPermission)
+    );
 
     // Filter documents based on user's write permissions for the current folder
-    // filteredDocs = filteredDocs.filter(doc =>
-    //   hasFolderWritePermission(currentFolder?.metadata?.access as FolderAccessPermission)
-    // );
+    filteredDocs = filteredDocs.filter(doc =>
+      hasFolderReadPermission(currentFolder?.metadata?.access as FolderAccessPermission)
+    );
 
     // Apply permission filter based on user role
     // if (user?.role !== 'Staff' && user?.role !== 'Admin') {
@@ -825,11 +834,13 @@ export default function DocumentList({
             {user?.role === 'Staff' && (
               <div className="mb-3">
                 <p className="block text-sm font-medium text-gray-700 mb-2">
-                  Who can view this {popupItem.type === 'folder' ? 'folder' : 'file'}?
+                  Who can also view this {popupItem.type === 'folder' ? 'folder' : 'file'}?
+                  
                 </p>
+                <p className="block text-sm font-medium text-gray-700 mb-2"><i>(Staff has an access to all folders)</i></p>
                 
                 <div className="space-y-2">
-                  <label className="flex items-center p-3 border border-gray-200 rounded-md">
+                  {/* <label className="flex items-center p-3 border border-gray-200 rounded-md">
                     <input
                       type="radio"
                       name="permission"
@@ -841,7 +852,7 @@ export default function DocumentList({
                       <span className="text-sm font-medium text-gray-900">Staff Only</span>
                       <p className="text-xs text-gray-500">Only staff members can view this {popupItem.type}</p>
                     </div>
-                  </label>
+                  </label> */}
                   
                   <label className="flex items-center p-3 border border-gray-200 rounded-md">
                     <input

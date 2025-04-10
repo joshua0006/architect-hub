@@ -5,6 +5,7 @@ import { Document, Folder as FolderType } from "../types";
 import { useToast } from "../contexts/ToastContext";
 import { DEFAULT_FOLDER_ACCESS, FolderAccessPermission, PERMISSIONS_MAP, useAuth, UserRole } from "../contexts/AuthContext";
 import GenerateUploadToken from "./GenerateUploadToken";
+import { folderService } from "../services";
 
 interface DocumentActionsProps {
   projectId: string;
@@ -248,14 +249,21 @@ export default function DocumentActions({
 
     const folderPermission = currentFolder?.metadata?.access as FolderAccessPermission;
     
-    const role = user?.role as UserRole | undefined;
-    
+    const role = user?.role as UserRole;
     
     let writeAccess = DEFAULT_FOLDER_ACCESS;
-    if (role && folderPermission in PERMISSIONS_MAP) {
-      writeAccess = PERMISSIONS_MAP[folderPermission][role] ?? DEFAULT_FOLDER_ACCESS;
-    }
 
+    if(role) {
+      if(folderPermission in PERMISSIONS_MAP) {
+        writeAccess = PERMISSIONS_MAP[folderPermission][role] ?? DEFAULT_FOLDER_ACCESS;
+      } else {
+        if(![UserRole.ADMIN, UserRole.STAFF].includes(role)) {
+          writeAccess = {read: true, write: false};
+        }
+      }
+    } else {
+      writeAccess = {read: true, write: false};
+    }
     return writeAccess.write;
   }  
 
