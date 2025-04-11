@@ -10,12 +10,17 @@ import {
   where,
   serverTimestamp,
   setDoc,
-  CollectionReference
+  CollectionReference,
+  writeBatch
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import { Folder } from '../types';
+import { Folder, Document } from '../types';
 import { documentService } from './documentService';
 import { folderPermissionService } from './folderPermissionService';
+import { FolderAccessPermission } from '../contexts/AuthContext';
+import { triggerFolderUpdate, FOLDER_UPDATE_EVENT } from './folderSubscriptionService';
+import { triggerDocumentUpdate, DOCUMENT_UPDATE_EVENT } from './documentSubscriptionService';
+import { triggerUserUpdate } from './userSubscriptionService';
 
 const COLLECTION = 'folders';
 
@@ -251,7 +256,316 @@ export const folderService = {
       return accessibleFolders;
     } catch (error) {
       console.error('Error getting accessible folders:', error);
-      throw new Error('Failed to get accessible folders');
+      return [];
+    }
+  },
+
+  /**
+   * Copy a folder and its contents to another location
+   * This will copy the folder structure but will only create references to documents
+   */
+  async copyFolder(
+    sourceFolderId: string, 
+    destinationProjectId: string, 
+    destinationParentId?: string
+  ): Promise<string> {
+    try {
+      // Get the source folder
+      const sourceFolder = await this.getById(sourceFolderId);
+      if (!sourceFolder) {
+        throw new Error('Source folder not found');
+      }
+
+      console.log(`Copying folder ${sourceFolder.name} (${sourceFolderId}) to project ${destinationProjectId}, parent ${destinationParentId || 'root'}`);
+
+      // Map to keep track of original folder IDs to new folder IDs
+      const folderIdMap = new Map<string, string>();
+
+      // Function to recursively copy folders
+      const copyFolderRecursive = async (
+        folder: Folder, 
+        destProjectId: string, 
+        destParentId?: string
+      ): Promise<string> => {
+        // Create the new folder
+        const newFolder = await this.create({
+          name: folder.name,
+          projectId: destProjectId,
+          parentId: destParentId,
+          metadata: {
+            ...folder.metadata,
+            // Reset path and level as they will be calculated in the create method
+            path: undefined,
+            level: undefined,
+            // Keep access permissions
+            access: (folder.metadata?.access as FolderAccessPermission) || 'STAFF_ONLY' as FolderAccessPermission
+          }
+        });
+
+        // Store the mapping
+        folderIdMap.set(folder.id, newFolder.id);
+        console.log(`Created folder ${newFolder.name} with ID ${newFolder.id}`);
+
+        // Get all subfolders
+        const q = query(
+          collection(db, COLLECTION),
+          where('parentId', '==', folder.id)
+        );
+        const snapshot = await getDocs(q);
+        const subfolders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Folder));
+
+        // Recursively copy subfolders
+        for (const subfolder of subfolders) {
+          await copyFolderRecursive(subfolder, destProjectId, newFolder.id);
+        }
+
+        // Get all documents in this folder
+        const documentsRef = collection(db, 'documents');
+        const documentsQuery = query(
+          documentsRef,
+          where('folderId', '==', folder.id)
+        );
+        const documentsSnapshot = await getDocs(documentsQuery);
+        const documents = documentsSnapshot.docs.map(doc => ({ 
+          id: doc.id, 
+          ...doc.data() 
+        } as Document));
+
+        // Copy document references to the new folder
+        const batch = writeBatch(db);
+        for (const document of documents) {
+          // Create a new document reference with same metadata but in the new folder
+          const newDocRef = doc(documentsRef);
+          batch.set(newDocRef, {
+            name: document.name,
+            projectId: destProjectId,
+            folderId: newFolder.id,
+            url: document.url, // Reuse the same URL
+            type: document.type,
+            version: document.version || 1,
+            dateModified: serverTimestamp(),
+            metadata: {
+              ...(document.metadata || {}),
+              originalDocumentId: document.id, // Reference to the original
+              isCopy: true,
+              size: document.metadata?.size,
+              contentType: document.metadata?.contentType,
+              originalFilename: document.metadata?.originalFilename,
+              access: document.metadata?.access || 'STAFF_ONLY'
+            }
+          });
+        }
+
+        // Commit all document copies
+        if (documents.length > 0) {
+          await batch.commit();
+          console.log(`Copied ${documents.length} document references to folder ${newFolder.id}`);
+        }
+
+        return newFolder.id;
+      };
+
+      // Start the recursive copy process
+      const newFolderId = await copyFolderRecursive(sourceFolder, destinationProjectId, destinationParentId);
+      
+      // Trigger folder update events for both source and destination projects
+      triggerFolderUpdate(sourceFolder.projectId, sourceFolderId, 'copy');
+      if (destinationProjectId !== sourceFolder.projectId) {
+        triggerFolderUpdate(destinationProjectId, newFolderId, 'copy');
+        
+        // When copying between projects, trigger user update to refresh project users
+        triggerUserUpdate(undefined, 'update');
+      }
+      
+      // Also trigger document update events for source and destination folders
+      triggerDocumentUpdate(sourceFolderId);
+      triggerDocumentUpdate(newFolderId);
+      
+      return newFolderId;
+    } catch (error) {
+      console.error('Error copying folder:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Move a folder and its contents to another location
+   */
+  async moveFolder(
+    sourceFolderId: string, 
+    destinationProjectId: string, 
+    destinationParentId?: string
+  ): Promise<string> {
+    try {
+      // Get the source folder
+      const sourceFolder = await this.getById(sourceFolderId);
+      if (!sourceFolder) {
+        throw new Error('Source folder not found');
+      }
+
+      console.log(`Moving folder ${sourceFolder.name} (${sourceFolderId}) to project ${destinationProjectId}, parent ${destinationParentId || 'root'}`);
+
+      // Check if we're moving to the same parent
+      if (sourceFolder.parentId === destinationParentId && sourceFolder.projectId === destinationProjectId) {
+        console.log('Source and destination are the same, no need to move');
+        return sourceFolderId;
+      }
+
+      // Check if the destination is a subfolder of the source (which would create a cycle)
+      if (destinationParentId) {
+        let currentFolder = await this.getById(destinationParentId);
+        while (currentFolder && currentFolder.parentId) {
+          if (currentFolder.id === sourceFolderId) {
+            throw new Error('Cannot move a folder into its own subfolder');
+          }
+          currentFolder = await this.getById(currentFolder.parentId);
+        }
+      }
+
+      // Check if name already exists in destination
+      const nameExists = await this.checkNameExists(destinationProjectId, sourceFolder.name, destinationParentId);
+      if (nameExists) {
+        throw new Error(`A folder or file named "${sourceFolder.name}" already exists in the destination`);
+      }
+
+      // Get all documents in this folder
+      const documentsRef = collection(db, 'documents');
+      const documentsQuery = query(
+        documentsRef,
+        where('folderId', '==', sourceFolderId)
+      );
+      const documentsSnapshot = await getDocs(documentsQuery);
+      const documents = documentsSnapshot.docs.map(doc => ({ 
+        id: doc.id, 
+        ...doc.data() 
+      } as Document));
+
+      // Get all subfolders recursively to update their projectId
+      const getAllSubfolderIds = async (folderId: string): Promise<string[]> => {
+        const result: string[] = [];
+        const q = query(
+          collection(db, COLLECTION),
+          where('parentId', '==', folderId)
+        );
+        const snapshot = await getDocs(q);
+        const subfolders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Folder));
+        
+        for (const subfolder of subfolders) {
+          result.push(subfolder.id);
+          const subfolderIds = await getAllSubfolderIds(subfolder.id);
+          result.push(...subfolderIds);
+        }
+        
+        return result;
+      };
+
+      const subfolderIds = await getAllSubfolderIds(sourceFolderId);
+      console.log(`Found ${subfolderIds.length} subfolders to move`);
+
+      // Update the source folder with new parent and project
+      const sourceRef = doc(db, COLLECTION, sourceFolderId);
+      
+      // Calculate new folder metadata
+      let newMetadata: any = {
+        ...sourceFolder.metadata,
+        access: sourceFolder.metadata?.access || 'STAFF_ONLY'
+      };
+      
+      // Update path based on new parent
+      if (destinationParentId) {
+        const parentFolder = await this.getById(destinationParentId);
+        if (parentFolder && parentFolder.metadata?.path) {
+          newMetadata.path = `${parentFolder.metadata.path}/${sourceFolderId}`;
+          newMetadata.level = (parentFolder.metadata?.level || 0) + 1;
+        } else {
+          newMetadata.path = sourceFolderId;
+          newMetadata.level = 0;
+        }
+      } else {
+        newMetadata.path = sourceFolderId;
+        newMetadata.level = 0;
+      }
+
+      // Update the source folder
+      await updateDoc(sourceRef, {
+        parentId: destinationParentId || null,
+        projectId: destinationProjectId,
+        updatedAt: serverTimestamp(),
+        metadata: newMetadata
+      });
+
+      // Update all documents in the folder
+      const batch = writeBatch(db);
+      for (const document of documents) {
+        const docRef = doc(documentsRef, document.id);
+        batch.update(docRef, {
+          projectId: destinationProjectId,
+          updatedAt: serverTimestamp()
+        });
+      }
+      
+      if (documents.length > 0) {
+        await batch.commit();
+        console.log(`Updated ${documents.length} documents`);
+      }
+
+      // Update all subfolders
+      for (const subfolderId of subfolderIds) {
+        const folderRef = doc(db, COLLECTION, subfolderId);
+        const subfolderSnap = await getDoc(folderRef);
+        
+        if (subfolderSnap.exists()) {
+          const subfolderData = subfolderSnap.data() as Folder;
+          
+          // Update the subfolder
+          await updateDoc(folderRef, {
+            projectId: destinationProjectId,
+            updatedAt: serverTimestamp()
+          });
+          
+          // Update documents in the subfolder
+          const subDocumentsQuery = query(
+            documentsRef,
+            where('folderId', '==', subfolderId)
+          );
+          const subDocumentsSnapshot = await getDocs(subDocumentsQuery);
+          
+          if (!subDocumentsSnapshot.empty) {
+            const subBatch = writeBatch(db);
+            subDocumentsSnapshot.docs.forEach(docSnap => {
+              const docRef = doc(documentsRef, docSnap.id);
+              subBatch.update(docRef, {
+                projectId: destinationProjectId,
+                updatedAt: serverTimestamp()
+              });
+            });
+            await subBatch.commit();
+            console.log(`Updated documents in subfolder ${subfolderId}`);
+          }
+        }
+      }
+
+      // Trigger folder update events for both source and destination projects
+      triggerFolderUpdate(sourceFolder.projectId, sourceFolderId, 'move');
+      if (destinationProjectId !== sourceFolder.projectId) {
+        triggerFolderUpdate(destinationProjectId, sourceFolderId, 'move');
+        
+        // When moving between projects, trigger user update to refresh project users
+        triggerUserUpdate(undefined, 'update');
+      }
+      
+      // Also trigger document update events for the moved folder
+      triggerDocumentUpdate(sourceFolderId);
+      
+      // If there's a destination parent folder, trigger update for it too
+      if (destinationParentId) {
+        triggerDocumentUpdate(destinationParentId);
+      }
+      
+      return sourceFolderId;
+    } catch (error) {
+      console.error('Error moving folder:', error);
+      throw error;
     }
   }
 };

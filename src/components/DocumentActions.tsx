@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Plus, Upload, FolderPlus, X, Folder, File, MoreVertical, Share2 } from "lucide-react";
+import { Plus, Upload, FolderPlus, X, Folder, File, MoreVertical, Share2, Copy, Move } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Document, Folder as FolderType } from "../types";
 import { useToast } from "../contexts/ToastContext";
@@ -24,6 +24,11 @@ interface DocumentActionsProps {
   ) => Promise<void>;
   onRefresh?: () => Promise<void>;
   onShare?: (id: string, isFolder: boolean) => Promise<void>;
+  onCopyOrMoveFile?: (
+    sourceDocumentId: string,
+    destinationFolderId: string,
+    action: 'copy' | 'move'
+  ) => Promise<void>;
 }
 
 export default function DocumentActions({
@@ -35,6 +40,7 @@ export default function DocumentActions({
   onCreateMultipleDocuments,
   onRefresh,
   onShare,
+  onCopyOrMoveFile,
 }: DocumentActionsProps) {
   const [showDropdown, setShowDropdown] = useState(false);
   const [showFolderInput, setShowFolderInput] = useState(false);
@@ -46,6 +52,11 @@ export default function DocumentActions({
   const [isDragging, setIsDragging] = useState(false);
   const [showDragOverlay, setShowDragOverlay] = useState(false);
   const [showUploadTokenModal, setShowUploadTokenModal] = useState(false);
+  const [showFileOperationDialog, setShowFileOperationDialog] = useState(false);
+  const [fileToOperateOn, setFileToOperateOn] = useState<{ id: string, name: string } | null>(null);
+  const [fileOperation, setFileOperation] = useState<'copy' | 'move'>('copy');
+  const [isProcessingFileOperation, setIsProcessingFileOperation] = useState(false);
+  const [selectedDestinationFolderId, setSelectedDestinationFolderId] = useState<string>("");
   const dragCounter = useRef(0);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -67,6 +78,29 @@ export default function DocumentActions({
       document.removeEventListener("mousedown", handleClickOutside);
     };
   }, [menuRef]);
+
+  // Add event listener for when a file is selected for operation
+  useEffect(() => {
+    function handleFileSelected(event: CustomEvent) {
+      // Type assertion for the custom event
+      const { fileId, fileName, operation } = (event as CustomEvent<{
+        fileId: string;
+        fileName: string;
+        operation: 'copy' | 'move';
+      }>).detail;
+      
+      setFileToOperateOn({ id: fileId, name: fileName });
+      setFileOperation(operation);
+      setShowFileOperationDialog(true);
+    }
+
+    // Cast to any to handle custom event with typescript
+    document.addEventListener("file-selected-for-operation", handleFileSelected as any);
+    
+    return () => {
+      document.removeEventListener("file-selected-for-operation", handleFileSelected as any);
+    };
+  }, []);
 
   const handleFolderCreate = async () => {
     if (newFolderName.trim()) {
@@ -158,6 +192,53 @@ export default function DocumentActions({
       setShowUploadTokenModal(true);
     }
     setShowDropdown(false);
+  };
+
+  const handleFileOperation = (fileId: string, fileName: string, operation: 'copy' | 'move') => {
+    setFileToOperateOn({ id: fileId, name: fileName });
+    setFileOperation(operation);
+    setShowFileOperationDialog(true);
+  };
+
+  const executeFileOperation = async () => {
+    if (!fileToOperateOn || !onCopyOrMoveFile) return;
+    
+    try {
+      setIsProcessingFileOperation(true);
+      await onCopyOrMoveFile(
+        fileToOperateOn.id, 
+        selectedDestinationFolderId || '', // Use empty string for root if not selected
+        fileOperation
+      );
+      
+      const actionText = fileOperation === 'copy' ? 'copied' : 'moved';
+      showToast(`File "${fileToOperateOn.name}" ${actionText} successfully`, "success");
+      
+      if (onRefresh) {
+        await onRefresh();
+      }
+      
+      // Dispatch custom event for file operation success
+      const fileOperationEvent = new CustomEvent('file-operation-success', {
+        bubbles: true,
+        detail: {
+          fileId: fileToOperateOn.id,
+          folderId: selectedDestinationFolderId || '',
+          operation: fileOperation,
+          timestamp: Date.now()
+        }
+      });
+      document.dispatchEvent(fileOperationEvent);
+      
+    } catch (error) {
+      console.error(`Error ${fileOperation} file:`, error);
+      showToast(`Failed to ${fileOperation} file: ${error instanceof Error ? error.message : 'Unknown error'}`, "error");
+    } finally {
+      setIsProcessingFileOperation(false);
+      setShowFileOperationDialog(false);
+      setFileToOperateOn(null);
+      setSelectedDestinationFolderId("");
+    }
   };
 
   // Handle drag events
@@ -309,8 +390,7 @@ export default function DocumentActions({
           </button>
         )}
         
-        {/* Replace info message with Upload button */}
-
+        {/* Upload button */}
         <div className="group relative">
           <button
             onClick={() => fileInputRef.current?.click()}
@@ -327,6 +407,67 @@ export default function DocumentActions({
               : "You don't have permission!"}
           </div>
         </div>
+
+        {/* File operation buttons - Only visible if we're in a folder with files */}
+        {currentFolderId && hasFolderWritePermission() && (
+          <>
+            {/* Copy Files Button */}
+            <div className="group relative">
+              <button
+                onClick={() => {
+                  setFileOperation('copy');
+                  // Only open the selection UI if the callback is available
+                  if (onCopyOrMoveFile) {
+                    // Dispatch event to document list to initiate file selection
+                    const selectFilesEvent = new CustomEvent('select-files-for-operation', {
+                      bubbles: true,
+                      detail: { operation: 'copy' }
+                    });
+                    document.dispatchEvent(selectFilesEvent);
+                  } else {
+                    showToast("File copy functionality is not available", "error");
+                  }
+                }}
+                className="px-3 py-2 flex items-center space-x-2 bg-slate-300 text-gray-700 rounded-md hover:bg-gray-200 transition-colors"
+                title="Copy files to another folder"
+              >
+                <Copy className="w-5 h-5" />
+                <span className="hidden sm:inline">Copy Files</span>
+              </button>
+              <div className="absolute top-full mb-2 left-1/2 transform -translate-x-1/2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap">
+                Copy files to another folder
+              </div>
+            </div>
+
+            {/* Move Files Button */}
+            <div className="group relative">
+              <button 
+                onClick={() => {
+                  setFileOperation('move');
+                  // Only open the selection UI if the callback is available
+                  if (onCopyOrMoveFile) {
+                    // Dispatch event to document list to initiate file selection
+                    const selectFilesEvent = new CustomEvent('select-files-for-operation', {
+                      bubbles: true,
+                      detail: { operation: 'move' }
+                    });
+                    document.dispatchEvent(selectFilesEvent);
+                  } else {
+                    showToast("File move functionality is not available", "error");
+                  }
+                }}
+                className="px-3 py-2 flex items-center space-x-2 bg-slate-300 text-gray-700 rounded-md hover:bg-gray-200 transition-colors"
+                title="Move files to another folder"
+              >
+                <Move className="w-5 h-5" />
+                <span className="hidden sm:inline">Move Files</span>
+              </button>
+              <div className="absolute top-full mb-2 left-1/2 transform -translate-x-1/2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap">
+                Move files to another folder
+              </div>
+            </div>
+          </>
+        )}
       </div>
 
       {/* File input (hidden) */}
@@ -399,6 +540,44 @@ export default function DocumentActions({
                   <span>Share Upload Link</span>
                 </button>
               )}
+              
+              {/* Copy Files option */}
+              <button
+                onClick={() => {
+                  setShowDropdown(false);
+                  setFileOperation('copy');
+                  // Since we're dealing with multiple files, we need a selection UI
+                  // This would typically interact with the document list component
+                  const selectFilesEvent = new CustomEvent('select-files-for-operation', {
+                    bubbles: true,
+                    detail: { operation: 'copy' }
+                  });
+                  document.dispatchEvent(selectFilesEvent);
+                }}
+                className="flex items-center space-x-3 px-4 py-2 text-sm w-full text-left hover:bg-gray-100 text-gray-700"
+              >
+                <Copy className="w-5 h-5 text-gray-500" />
+                <span>Copy Files</span>
+              </button>
+              
+              {/* Move Files option */}
+              <button
+                onClick={() => {
+                  setShowDropdown(false);
+                  setFileOperation('move');
+                  // Since we're dealing with multiple files, we need a selection UI
+                  // This would typically interact with the document list component
+                  const selectFilesEvent = new CustomEvent('select-files-for-operation', {
+                    bubbles: true,
+                    detail: { operation: 'move' }
+                  });
+                  document.dispatchEvent(selectFilesEvent);
+                }}
+                className="flex items-center space-x-3 px-4 py-2 text-sm w-full text-left hover:bg-gray-100 text-gray-700"
+              >
+                <Move className="w-5 h-5 text-gray-500" />
+                <span>Move Files</span>
+              </button>
               
               {/* Info text about drag & drop */}
               <div className="px-4 py-2 text-xs text-gray-500 border-t mt-1">
@@ -489,6 +668,101 @@ export default function DocumentActions({
                 // We don't auto-close the dialog so users can copy the link
               }}
             />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* File Operation Dialog */}
+      <AnimatePresence>
+        {showFileOperationDialog && fileToOperateOn && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4"
+          >
+            <div className="bg-white rounded-lg shadow-lg p-6 w-full max-w-md">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-semibold">
+                  {fileOperation === 'copy' ? 'Copy' : 'Move'} File
+                </h2>
+                <button
+                  onClick={() => setShowFileOperationDialog(false)}
+                  className="text-gray-500 hover:text-gray-700 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              
+              <p className="text-gray-600 mb-4">
+                Select destination folder for "{fileToOperateOn.name}":
+              </p>
+              
+              {/* Folder selection list */}
+              <div className="max-h-60 overflow-y-auto border border-gray-200 rounded-md mb-4">
+                <ul className="divide-y divide-gray-200">
+                  {/* Root folder option */}
+                  <li 
+                    className={`px-4 py-2 hover:bg-gray-50 cursor-pointer flex items-center justify-between ${
+                      selectedDestinationFolderId === "" ? 'bg-blue-50' : ''
+                    }`}
+                    onClick={() => setSelectedDestinationFolderId("")}
+                  >
+                    <div className="flex items-center">
+                      <Folder className="w-5 h-5 text-gray-400 mr-2" />
+                      <span>Root</span>
+                    </div>
+                    {selectedDestinationFolderId === "" && (
+                      <div className="w-2 h-2 rounded-full bg-blue-600"></div>
+                    )}
+                  </li>
+                  
+                  {/* Available folders */}
+                  {folders.map(folder => (
+                    <li 
+                      key={folder.id}
+                      className={`px-4 py-2 hover:bg-gray-50 cursor-pointer flex items-center justify-between ${
+                        folder.id === currentFolderId ? 'bg-gray-100' : ''
+                      } ${folder.id === selectedDestinationFolderId ? 'bg-blue-50' : ''}`}
+                      onClick={() => setSelectedDestinationFolderId(folder.id)}
+                    >
+                      <div className="flex items-center">
+                        <Folder className="w-5 h-5 text-gray-400 mr-2" />
+                        <span className="truncate">{folder.name}</span>
+                        {folder.id === currentFolderId && (
+                          <span className="ml-2 text-xs text-gray-500">(current)</span>
+                        )}
+                      </div>
+                      {folder.id === selectedDestinationFolderId && (
+                        <div className="w-2 h-2 rounded-full bg-blue-600"></div>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              
+              <div className="flex justify-end space-x-2">
+                <button
+                  onClick={() => setShowFileOperationDialog(false)}
+                  className="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={executeFileOperation}
+                  disabled={isProcessingFileOperation}
+                  className={`px-4 py-2 text-white bg-primary-600 rounded-md hover:bg-primary-700 transition-colors ${
+                    isProcessingFileOperation ? 'opacity-70 cursor-not-allowed' : ''
+                  }`}
+                >
+                  {isProcessingFileOperation ? (
+                    <span>Processing...</span>
+                  ) : (
+                    <span>{fileOperation === 'copy' ? 'Copy' : 'Move'}</span>
+                  )}
+                </button>
+              </div>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
