@@ -18,6 +18,12 @@ import {
   Users,
   Download,
   Upload,
+  Copy,
+  X,
+  Check,
+  FolderPlus,
+  ChevronUp,
+  FolderInput,
 } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { Document, Folder, Project } from "../types";
@@ -38,6 +44,12 @@ import { doc, updateDoc, getDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { collection, query, where, getDocs, orderBy, limit } from 'firebase/firestore';
 import { subscribeToFolderDocuments, DOCUMENT_UPDATE_EVENT, triggerDocumentUpdate } from "../services/documentSubscriptionService";
+import { subscribeToProjectFolders, FOLDER_UPDATE_EVENT, FOLDER_OPERATION_SUCCESS_EVENT, triggerFolderOperationSuccess } from "../services/folderSubscriptionService";
+import { projectService } from '../services/projectService';
+import { folderService } from '../services/folderService';
+import { User } from '../types/auth';
+import { useNavigate } from 'react-router-dom';
+import { USER_UPDATE_EVENT } from '../services/userSubscriptionService';
 
 // Local type definition for the DocumentViewer's Folder type
 interface ViewerFolder {
@@ -67,6 +79,7 @@ interface DocumentListProps {
   onShare?: (id: string, isFolder: boolean) => Promise<void>;
   onUpdateDocumentPermission?: (id: string, permission: 'STAFF_ONLY' | 'ALL' | 'CONTRACTORS_WRITE' | 'CLIENTS_READ') => Promise<void>;
   onUpdateFolderPermission?: (id: string, permission: 'STAFF_ONLY' | 'ALL' | 'CONTRACTORS_WRITE' | 'CLIENTS_READ') => Promise<void>;
+  onCopyOrMoveFolder?: (source_folder: string, destination_folder: string, action: 'move' | 'copy') => Promise<void>;
   isSharedView?: boolean;
   sharedDocuments?: Document[];
   sharedFolders?: Folder[];
@@ -106,6 +119,7 @@ export default function DocumentList({
   onShare,
   onUpdateDocumentPermission,
   onUpdateFolderPermission,
+  onCopyOrMoveFolder,
   isSharedView,
   sharedDocuments,
   sharedFolders,
@@ -137,11 +151,11 @@ export default function DocumentList({
   const [showSortDropdown, setShowSortDropdown] = useState(false);
   const filterRef = useRef<HTMLDivElement>(null);
   const sortRef = useRef<HTMLDivElement>(null);
-
+  
   // Add new state for rename dialog
   const [renameDialogOpen, setRenameDialogOpen] = useState(false);
   const [itemToRename, setItemToRename] = useState<{id: string, type: 'document' | 'folder', name: string} | null>(null);
-
+  
   // Add new state for permissions dialog
   const [permissionsDialogOpen, setPermissionsDialogOpen] = useState(false);
   const [itemForPermissions, setItemForPermissions] = useState<{id: string, type: 'document' | 'folder', permission: 'STAFF_ONLY' | 'CONTRACTORS_WRITE' | 'CLIENTS_READ' | 'ALL'} | null>(null);
@@ -161,7 +175,7 @@ export default function DocumentList({
   // Add new state for permission fetching and saving
   const [isFetchingPermission, setIsFetchingPermission] = useState(false);
   const [isSavingPermission, setIsSavingPermission] = useState(false);
-
+  
   // Add drag and drop state
   const [isDragging, setIsDragging] = useState(false);
   const [showDragOverlay, setShowDragOverlay] = useState(false);
@@ -178,8 +192,23 @@ export default function DocumentList({
 
   // Add state for real-time document updates
   const [localDocuments, setLocalDocuments] = useState<Document[]>(documents);
-  const unsubscribeRef = useRef<(() => void) | null>(null);
-  const hasActiveSubscription = useRef<boolean>(false);
+  const [localFolders, setLocalFolders] = useState<Folder[]>(folders);
+  const unsubscribeDocRef = useRef<(() => void) | null>(null);
+  const unsubscribeFolderRef = useRef<(() => void) | null>(null);
+  const hasActiveDocSubscription = useRef<boolean>(false);
+  const hasActiveFolderSubscription = useRef<boolean>(false);
+
+  // Use the local folders from state for rendering if available, otherwise use the prop folders
+  const displayFolders = isSharedView ? sharedFolders || [] : (localFolders.length > 0 ? localFolders : folders);
+
+  // Update local state when props change
+  useEffect(() => {
+    setLocalDocuments(documents);
+  }, [documents]);
+  
+  useEffect(() => {
+    setLocalFolders(folders);
+  }, [folders]);
 
   // Set initial values when popup opens - moved from renderEditPopup
   // Update useEffect to fetch permissions when popup opens
@@ -219,10 +248,10 @@ export default function DocumentList({
     }
   }, [popupItem]); // Removed folders and documents dependencies as we fetch directly
 
-  const allDocs = isSharedView ? sharedDocuments || [] : documents.filter(
+  const allDocs = isSharedView ? sharedDocuments || [] : localDocuments.filter(
     (doc) => doc.folderId === currentFolder?.id
   );
-  const allFolders = isSharedView ? sharedFolders || [] : folders.filter(
+  const allFolders = isSharedView ? sharedFolders || [] : localFolders.filter(
     (folder) => folder.parentId === currentFolder?.id
   );
 
@@ -247,7 +276,6 @@ export default function DocumentList({
   return writeAccess.read;
  }
 
-
   // Filter and sort documents and folders based on search, view filter, and sort order
   const filteredAndSortedItems = () => {
     // Apply search filter for documents
@@ -264,7 +292,8 @@ export default function DocumentList({
     // Apply search filter for folders
     let filteredFolders = isSharedView
       ? (sharedFolders || [])
-      : allFolders.filter(folder =>
+      : displayFolders.filter(folder =>
+          folder.parentId === currentFolder?.id && // Only filter direct children of current folder
           folder.name && typeof folder.name === 'string' ?
           folder.name.toLowerCase().includes(searchQuery.toLowerCase()) :
           false
@@ -471,24 +500,44 @@ export default function DocumentList({
     }
   };
 
+  // Handle breadcrumb navigation - force a clean reload when navigating to folders
   const handleBreadcrumbNavigation = (folder?: ViewerFolder | Folder) => {
+    console.log('Navigating via breadcrumbs to:', folder);
+    
+    // If we have a selected document, close it first
     if (selectedDocument) {
       setSelectedDocument(undefined);
     }
     
+    // Reset any search or filter state
+    setSearchQuery('');
+    
     if (folder) {
-      // Find the matching folder from our folders array by ID
-      // This ensures we're using the full folder object from our state
-      const matchingFolder = folders.find(f => f.id === folder.id);
-      if (matchingFolder) {
-        onFolderSelect?.(matchingFolder);
-      } else {
-        // If we can't find the folder, we might still want to navigate using the folder object passed
-        onFolderSelect?.(folder as Folder);
+      // Convert ViewerFolder to Folder if needed
+      const fullFolder = folders.find(f => f.id === folder.id);
+      
+      // Reset document subscription to force a fresh reload
+      if (unsubscribeDocRef.current) {
+        unsubscribeDocRef.current();
+        unsubscribeDocRef.current = null;
+        hasActiveDocSubscription.current = false;
+      }
+      
+      // Navigate to the folder
+      if (fullFolder && onFolderSelect) {
+        onFolderSelect(fullFolder);
+        
+        // Force a document refresh for this folder
+        triggerDocumentUpdate(fullFolder.id);
       }
     } else {
-      // Navigate to root (no folder)
-      onFolderSelect?.(undefined);
+      // Navigate to root
+      onFolderSelect(undefined);
+    }
+    
+    // Perform a comprehensive refresh if available
+    if (onRefresh) {
+      onRefresh();
     }
   };
 
@@ -1894,17 +1943,17 @@ export default function DocumentList({
     // Only set up subscription if we have a currentFolder and we're not in shared view
     if (!currentFolder || isSharedView) {
       // Cleanup any existing subscription
-      if (unsubscribeRef.current) {
+      if (unsubscribeDocRef.current) {
         console.log('[Document List] Cleaning up document subscription due to folder change');
-        unsubscribeRef.current();
-        unsubscribeRef.current = null;
-        hasActiveSubscription.current = false;
+        unsubscribeDocRef.current();
+        unsubscribeDocRef.current = null;
+        hasActiveDocSubscription.current = false;
       }
       return;
     }
 
     // Don't create multiple subscriptions for the same folder
-    if (hasActiveSubscription.current && unsubscribeRef.current) {
+    if (hasActiveDocSubscription.current && unsubscribeDocRef.current) {
       console.log(`[Document List] Already have an active subscription for this folder`);
       return;
     }
@@ -1920,20 +1969,118 @@ export default function DocumentList({
     });
 
     // Store the unsubscribe function
-    unsubscribeRef.current = unsubscribe;
-    hasActiveSubscription.current = true;
+    unsubscribeDocRef.current = unsubscribe;
+    hasActiveDocSubscription.current = true;
 
     // Cleanup on unmount or when the folder changes
     return () => {
-      if (unsubscribeRef.current) {
+      if (unsubscribeDocRef.current) {
         console.log('[Document List] Cleaning up document subscription');
-        unsubscribeRef.current();
-        unsubscribeRef.current = null;
-        hasActiveSubscription.current = false;
+        unsubscribeDocRef.current();
+        unsubscribeDocRef.current = null;
+        hasActiveDocSubscription.current = false;
       }
     };
   }, [currentFolder, isSharedView]);
-
+  
+  // Setup folder subscription for real-time updates
+  useEffect(() => {
+    if (projectId && !isSharedView) {
+      // Clean up any existing subscription first
+      if (unsubscribeFolderRef.current) {
+        unsubscribeFolderRef.current();
+        unsubscribeFolderRef.current = null;
+        hasActiveFolderSubscription.current = false;
+      }
+      
+      console.log(`Setting up real-time folder subscription for project ${projectId}`);
+      
+      // Set up the new subscription
+      const unsubscribe = subscribeToProjectFolders(projectId, (updatedFolders) => {
+        console.log(`Received ${updatedFolders.length} folders in real-time update`);
+        
+        // Force a fresh sort based on the current sort settings to ensure new items appear correctly
+        const sortedFolders = [...updatedFolders].sort((a, b) => {
+          // Apply current sort settings
+          if (sortBy === 'name') {
+            const result = a.name.localeCompare(b.name);
+            return sortOrder === 'asc' ? result : -result;
+          } else if (sortBy === 'dateModified') {
+            // Use the lastUpdated field from metadata
+            const aDate = a.metadata?.lastUpdated ? new Date(a.metadata.lastUpdated).getTime() : 0;
+            const bDate = b.metadata?.lastUpdated ? new Date(b.metadata.lastUpdated).getTime() : 0;
+            return sortOrder === 'asc' ? aDate - bDate : bDate - aDate;
+          } else {
+            // For dateCreated, we don't have that in the Folder type, fallback to name
+            return sortBy === 'dateCreated' ? 
+              (sortOrder === 'asc' ? a.name.localeCompare(b.name) : b.name.localeCompare(a.name)) : 
+              0;
+          }
+        });
+        
+        setLocalFolders(sortedFolders);
+        
+        // Force document refresh if current folder was modified
+        if (currentFolder && sortedFolders.some(f => f.id === currentFolder.id)) {
+          console.log(`Current folder ${currentFolder.id} found in update, refreshing documents`);
+          triggerDocumentUpdate(currentFolder.id);
+        }
+      });
+      
+      unsubscribeFolderRef.current = unsubscribe;
+      hasActiveFolderSubscription.current = true;
+      
+      // Clean up subscription on unmount
+      return () => {
+        if (unsubscribeFolderRef.current) {
+          console.log('Cleaning up folder subscription on unmount');
+          unsubscribeFolderRef.current();
+          unsubscribeFolderRef.current = null;
+          hasActiveFolderSubscription.current = false;
+        }
+      };
+    }
+  }, [projectId, isSharedView, currentFolder, sortBy, sortOrder]);
+  
+  // Listen for folder update events (like when folders are copied)
+  useEffect(() => {
+    const handleFolderUpdate = (event: Event) => {
+      const customEvent = event as CustomEvent;
+      const { projectId: updatedProjectId, folderId, action } = customEvent.detail;
+      
+      console.log(`Received folder ${action} event for project ${updatedProjectId}${folderId ? `, folder ${folderId}` : ''}`);
+      
+      // Refresh once for copy and move operations regardless of subscription status
+      if (action === 'copy' || action === 'move') {
+        console.log(`Folder ${action} operation detected - performing single refresh`);
+        if (onRefresh) {
+          onRefresh();
+        }
+        
+        // If we're in the folder that was moved, navigate back to root
+        if (action === 'move' && currentFolder && folderId === currentFolder.id) {
+          console.log('Current folder was moved, navigating to root');
+          onFolderSelect(undefined);
+        }
+        return;
+      }
+      
+      // For other operations, refresh only if this is our current project and we don't have an active subscription
+      if (updatedProjectId === projectId && !hasActiveFolderSubscription.current) {
+        if (onRefresh) {
+          console.log('Manually refreshing folders after update event');
+          onRefresh();
+        }
+      }
+    };
+    
+    document.addEventListener(FOLDER_UPDATE_EVENT, handleFolderUpdate as EventListener);
+    
+    return () => {
+      document.removeEventListener(FOLDER_UPDATE_EVENT, handleFolderUpdate as EventListener);
+    };
+  }, [projectId, onRefresh, currentFolder, onFolderSelect]);
+  
   // Listen for document update events from other sources
   useEffect(() => {
     const handleDocumentUpdate = (event: Event) => {
@@ -2017,6 +2164,557 @@ export default function DocumentList({
       }
     };
   }, [isFullscreen]);
+
+  // Update state for copy/move dialog
+  const [showCopyMoveDialog, setShowCopyMoveDialog] = useState(false);
+  const [folderToCopyOrMove, setFolderToCopyOrMove] = useState<{id: string, name: string} | null>(null);
+  const [copyMoveAction, setCopyMoveAction] = useState<'copy' | 'move'>('copy');
+  const [destinationFolder, setDestinationFolder] = useState("");
+  const [isLoadingFolders, setIsLoadingFolders] = useState(false);
+  const [isLoadingProjects, setIsLoadingProjects] = useState(false);
+  const [isCopyingOrMoving, setIsCopyingOrMoving] = useState(false);
+  const [projectFolders, setProjectFolders] = useState<{[projectId: string]: Folder[]}>({});
+  const [availableProjects, setAvailableProjects] = useState<Project[]>([]);
+  const [selectedDestinationProjectId, setSelectedDestinationProjectId] = useState("");
+  const [selectedDestinationFolderId, setSelectedDestinationFolderId] = useState("");
+  const [showProjectDropdown, setShowProjectDropdown] = useState(false);
+  const [showFolderDropdown, setShowFolderDropdown] = useState(false);
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
+
+  const projectDropdownRef = useRef<HTMLDivElement>(null);
+  const folderDropdownRef = useRef<HTMLDivElement>(null);
+  
+  // Toggle folder expansion in the folder tree
+  const toggleFolderExpansion = (folderId: string, e: React.MouseEvent<HTMLButtonElement>) => {
+    e.stopPropagation();
+    
+    setExpandedFolders(prev => {
+      const newExpanded = new Set(prev);
+      if (newExpanded.has(folderId)) {
+        newExpanded.delete(folderId);
+      } else {
+        newExpanded.add(folderId);
+      }
+      return newExpanded;
+    });
+  };
+
+  // Load available projects for the dropdown when the dialog opens
+  useEffect(() => {
+    if (showCopyMoveDialog) {
+      const loadProjects = async () => {
+        try {
+          setIsLoadingProjects(true);
+          
+          // Fetch projects from Firebase based on user role
+          let fetchedProjects: Project[] = [];
+          if (user) {
+            if (user.role === 'Staff') {
+              fetchedProjects = await projectService.getAll();
+            } else {
+              fetchedProjects = await projectService.getUserProjects(user.id);
+            }
+          }
+          
+          // If no projects were fetched but we have a selected project, use that
+          if (fetchedProjects.length === 0 && selectedProject) {
+            fetchedProjects = [selectedProject];
+          }
+          
+          setAvailableProjects(fetchedProjects);
+          
+          // Set the current project as default if available
+          if (selectedProject) {
+            setSelectedDestinationProjectId(selectedProject.id);
+            
+            // Load the folders for this project
+            await loadProjectFolders(selectedProject.id);
+          }
+          
+          setIsLoadingProjects(false);
+        } catch (error) {
+          console.error("Error loading projects:", error);
+          showToast("Failed to load available projects", "error");
+          setIsLoadingProjects(false);
+        }
+      };
+      
+      loadProjects();
+    }
+  }, [showCopyMoveDialog, selectedProject, user]);
+
+  // Function to load folders for a given project
+  const loadProjectFolders = async (projectId: string) => {
+    if (!projectId) return;
+    
+    try {
+      setIsLoadingFolders(true);
+      
+      // If we already have the folders for this project, don't reload
+      if (projectFolders[projectId]) {
+        setIsLoadingFolders(false);
+        return;
+      }
+      
+      // Fetch folders from Firebase using folderService
+      const fetchedFolders = await folderService.getByProjectId(projectId);
+      
+      // Store the fetched folders in state
+      setProjectFolders(prev => ({
+        ...prev,
+        [projectId]: fetchedFolders
+      }));
+      
+      setIsLoadingFolders(false);
+    } catch (error) {
+      console.error(`Error loading folders for project ${projectId}:`, error);
+      setIsLoadingFolders(false);
+      showToast(`Failed to load folders for the selected project`, "error");
+    }
+  };
+  
+  // Handle project change in dropdown
+  const handleDestinationProjectChange = async (projectId: string) => {
+    setSelectedDestinationProjectId(projectId);
+    setSelectedDestinationFolderId(""); // Reset folder selection
+    setShowProjectDropdown(false);
+    
+    // Load folders for the selected project
+    await loadProjectFolders(projectId);
+  };
+  
+  // Handle folder selection
+  const handleDestinationFolderSelect = (folderId: string) => {
+    setSelectedDestinationFolderId(folderId);
+    setShowFolderDropdown(false);
+  };
+  
+  // Helper function to get folder name by ID
+  const getFolderNameById = (folderId: string): string => {
+    if (!folderId) return "Root";
+    
+    const folder = projectFolders[selectedDestinationProjectId]?.find(f => f.id === folderId);
+    return folder ? folder.name : "Unknown folder";
+  };
+  
+  // Helper to build folder tree structure
+  const buildFolderTree = (folders: Folder[], parentId?: string): Folder[] => {
+    return folders
+      .filter(folder => folder.parentId === parentId)
+      .map(folder => folder);
+  };
+  
+  // Recursively render folder tree
+  const renderFolderTree = (folders: Folder[], parentId?: string, level: number = 0) => {
+    const folderItems = buildFolderTree(folders, parentId);
+    
+    return (
+      <div style={{ marginLeft: level > 0 ? `${level * 16}px` : '0' }}>
+        {folderItems.map(folder => {
+          const hasChildren = folders.some(f => f.parentId === folder.id);
+          const isExpanded = expandedFolders.has(folder.id);
+          
+          return (
+            <div key={folder.id}>
+              <div 
+                className="flex items-center py-2 px-2 hover:bg-gray-100 rounded cursor-pointer"
+                onClick={(e) => {
+                  e.stopPropagation(); // Prevent event propagation
+                  handleDestinationFolderSelect(folder.id);
+                }}
+              >
+                {hasChildren ? (
+                  <button 
+                    className="mr-1 p-1 rounded-full hover:bg-gray-200"
+                    onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
+                      e.stopPropagation(); // Prevent event propagation
+                      toggleFolderExpansion(folder.id, e);
+                    }}
+                  >
+                    {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                  </button>
+                ) : (
+                  <span className="w-6" />
+                )}
+                <FolderOpen className="w-4 h-4 mr-2 text-gray-400" />
+                <span className={`truncate ${selectedDestinationFolderId === folder.id ? 'font-medium text-blue-600' : 'text-gray-700'}`}>
+                  {folder.name}
+                </span>
+                {selectedDestinationFolderId === folder.id && (
+                  <Check className="w-4 h-4 ml-2 text-blue-600" />
+                )}
+              </div>
+              
+              {isExpanded && hasChildren && renderFolderTree(folders, folder.id, level + 1)}
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+  
+  // Define utility function for folder operations
+  const emitFolderOperationSuccess = (action: 'copy' | 'move', folderId: string) => {
+    triggerFolderOperationSuccess({
+      action,
+      folderId,
+      projectId: projectId,
+      source: 'documentList'
+    });
+    
+    // Also trigger document update event for the folder to refresh its documents
+    triggerDocumentUpdate(folderId);
+  };
+  
+  // Add this function right after the loadProjectFolders function
+  const forceReloadFolders = async (targetProjectId?: string) => {
+    try {
+      console.log(`[DocumentList] Force reloading folders for project ${targetProjectId || projectId}`);
+      
+      // If a specific project ID is provided, load those folders
+      if (targetProjectId) {
+        const freshFolders = await folderService.getByProjectId(targetProjectId);
+        
+        // If this is the current project, update local folders
+        if (targetProjectId === projectId) {
+          console.log(`[DocumentList] Updating local folders with ${freshFolders.length} items`);
+          setLocalFolders(freshFolders);
+        }
+        
+        // Also update the project folders cache
+        setProjectFolders(prev => ({
+          ...prev,
+          [targetProjectId]: freshFolders
+        }));
+      } 
+      // Otherwise reload current project folders
+      else if (projectId) {
+        const freshFolders = await folderService.getByProjectId(projectId);
+        console.log(`[DocumentList] Updating local folders with ${freshFolders.length} items`);
+        setLocalFolders(freshFolders);
+      }
+      
+      // Also call the parent refresh if available
+      if (onRefresh) {
+        console.log(`[DocumentList] Calling parent refresh`);
+        await onRefresh();
+      }
+    } catch (error) {
+      console.error("Error force reloading folders:", error);
+      showToast("Failed to reload folders", "error");
+    }
+  };
+  
+  // Update the copyOrMoveFolder function
+  const copyOrMoveFolder = async (source_folder: string, destination_project_id: string, destination_folder: string, action: 'move' | 'copy') => {
+    try {
+      // Set loading state to true when operation starts
+      setIsCopyingOrMoving(true);
+      
+      // First, get the source folder details to show in toast notification
+      const sourceFolderDetails = folders.find(f => f.id === source_folder) || 
+                                 await folderService.getById(source_folder);
+      
+      if (!sourceFolderDetails) {
+        throw new Error('Source folder not found');
+      }
+      
+      const sourceFolderName = sourceFolderDetails.name;
+      const sourceProjectId = sourceFolderDetails.projectId;
+
+      if (action === 'copy') {
+        // If we have a handler function from parent, use it for copying
+        if (onCopyOrMoveFolder) {
+          await onCopyOrMoveFolder(source_folder, destination_folder, action);
+          // Trigger custom event for folder copy success
+          triggerFolderOperationSuccess({
+            action,
+            folderId: source_folder,
+            projectId: destination_project_id,
+            source: 'documentList'
+          });
+        } else {
+          // Use folderService to copy the folder
+          const copiedFolderId = await folderService.copyFolder(
+            source_folder,
+            destination_project_id,
+            destination_folder || undefined
+          );
+          
+          console.log(`Folder copied successfully. New folder ID: ${copiedFolderId}`);
+          // Trigger custom event for folder copy success
+          triggerFolderOperationSuccess({
+            action,
+            folderId: copiedFolderId,
+            projectId: destination_project_id,
+            source: 'documentList'
+          });
+        }
+        
+        // Force immediate refresh of destination project folders
+        await forceReloadFolders(destination_project_id);
+        
+        // If it's cross-project, also refresh source project
+        if (sourceProjectId !== destination_project_id) {
+          console.log('Cross-project copy detected, refreshing source project');
+          triggerFolderOperationSuccess({
+            action: 'refresh',
+            projectId: sourceProjectId,
+            source: 'documentList'
+          });
+          
+          // Force refresh source project folders
+          if (sourceProjectId !== projectId) {
+            await forceReloadFolders(sourceProjectId);
+          }
+        }
+      } else {
+        // action is 'move' here
+        // If we have a handler function from parent, use it for moving
+        if (onCopyOrMoveFolder) {
+          await onCopyOrMoveFolder(source_folder, destination_folder, action);
+          // Trigger custom event for folder move success
+          triggerFolderOperationSuccess({
+            action,
+            folderId: source_folder,
+            projectId: destination_project_id,
+            source: 'documentList'
+          });
+        } else {
+          // Use folderService to move the folder
+          const movedFolderId = await folderService.moveFolder(
+            source_folder,
+            destination_project_id,
+            destination_folder || undefined
+          );
+          
+          console.log(`Folder moved successfully. Folder ID: ${movedFolderId}`);
+          // Trigger custom event for folder move success
+          triggerFolderOperationSuccess({
+            action,
+            folderId: movedFolderId,
+            projectId: destination_project_id,
+            source: 'documentList'
+          });
+          
+          // If we moved the current folder, navigate to root
+          if (currentFolder && currentFolder.id === source_folder) {
+            console.log('Current folder was moved, navigating to root');
+            onFolderSelect(undefined);
+          }
+        }
+        
+        // Force immediate refresh of destination project folders
+        await forceReloadFolders(destination_project_id);
+        
+        // If it's cross-project, also refresh source project
+        if (sourceProjectId !== destination_project_id) {
+          console.log('Cross-project move detected, refreshing source project');
+          triggerFolderOperationSuccess({
+            action: 'refresh',
+            projectId: sourceProjectId,
+            source: 'documentList'
+          });
+          
+          // Force refresh source project folders if it's not the current project
+          if (sourceProjectId !== projectId) {
+            await forceReloadFolders(sourceProjectId);
+          }
+        }
+      }
+      
+      // Force immediate UI update
+      setLocalFolders(prev => [...prev]);
+      setLocalDocuments(prev => [...prev]);
+      
+      const actionText = action === 'copy' ? 'copied' : 'moved';
+      showToast(`Folder ${sourceFolderName} ${actionText} successfully`, 'success');
+      
+      // Close the dialog and reset states
+      setShowCopyMoveDialog(false);
+      setFolderToCopyOrMove(null);
+      setCopyMoveAction('copy');
+      setDestinationFolder("");
+      setSelectedDestinationProjectId("");
+      setSelectedDestinationFolderId("");
+    } catch (error) {
+      console.error(`Error ${action === 'copy' ? 'copying' : 'moving'} folder:`, error);
+      showToast(`Failed to ${action} folder: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
+    } finally {
+      // Set loading state to false regardless of success or failure
+      setIsCopyingOrMoving(false);
+    }
+  };
+  
+  // Update function to handle copy button click
+  const handleCopyClick = (id: string, name: string) => {
+    setFolderToCopyOrMove({id, name});
+    setCopyMoveAction('copy');
+    setShowCopyMoveDialog(true);
+    setSelectedDestinationProjectId(projectId || "");
+    if (projectId) {
+      loadProjectFolders(projectId);
+    }
+  };
+
+  // Add function to handle move button click
+  const handleMoveClick = (id: string, name: string) => {
+    setFolderToCopyOrMove({id, name});
+    setCopyMoveAction('move');
+    setShowCopyMoveDialog(true);
+    setSelectedDestinationProjectId(projectId || "");
+    if (projectId) {
+      loadProjectFolders(projectId);
+    }
+  };
+
+  // Function to handle downloading a folder
+  const handleFolderDownload = async (folderId: string, folderName: string) => {
+    try {
+      setLoading(true);
+      
+      // Get all documents in this folder
+      const folderDocs = documents.filter(doc => doc.folderId === folderId);
+      
+      if (folderDocs.length === 0) {
+        showToast('No files to download in this folder', 'error');
+        setLoading(false);
+        return;
+      }
+      
+      // For simplicity, create a list of links for the user to download
+      const linksText = folderDocs.map(doc => `${doc.name}: ${doc.url}`).join('\n');
+      
+      // Create a download file with the links
+      const blob = new Blob([linksText], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      
+      // Create temporary link and trigger download
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${folderName}_links.txt`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      
+      showToast(`Download links for folder "${folderName}" created`, 'success');
+    } catch (error) {
+      console.error('Error downloading folder:', error);
+      showToast('Failed to download folder', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Create event listeners for folder operations
+  useEffect(() => {
+    // Define custom events for folder operations
+    const FOLDER_OPERATION_SUCCESS_EVENT = 'folder-operation-success';
+    
+    // Define handler for successful folder operations
+    const handleFolderOperationSuccess = (event: Event) => {
+      const customEvent = event as CustomEvent;
+      const { action, folderId, projectId: eventProjectId } = customEvent.detail;
+      
+      console.log(`[DocumentList] Folder operation completed successfully, action: ${action}, folderId: ${folderId || 'N/A'}, projectId: ${eventProjectId || 'N/A'}`);
+      
+      // Immediately force reload folders to ensure UI is updated
+      if (action === 'copy' || action === 'move' || action === 'refresh') {
+        // If a project ID is specified in the event, refresh those folders specifically
+        if (eventProjectId) {
+          console.log(`[DocumentList] Force reloading folders for project ${eventProjectId} due to ${action} operation`);
+          forceReloadFolders(eventProjectId);
+        } 
+        // Otherwise refresh the current project folders
+        else if (projectId) {
+          console.log(`[DocumentList] Force reloading current project folders due to ${action} operation`);
+          forceReloadFolders(projectId);
+        }
+      }
+      
+      // Refresh regardless of action
+      if (onRefresh) {
+        console.log('[DocumentList] Refreshing due to folder operation');
+        onRefresh();
+      }
+      
+      // Additional handling for cross-project moves
+      if (action === 'move' && eventProjectId && eventProjectId !== selectedProject?.id) {
+        console.log('[DocumentList] Cross-project move detected, force reloading folders');
+        folderService.getByProjectId(eventProjectId).then(setLocalFolders);
+      }
+    };
+    
+    // Add event listeners
+    document.addEventListener(FOLDER_OPERATION_SUCCESS_EVENT, handleFolderOperationSuccess as EventListener);
+    
+    // Return cleanup function
+    return () => {
+      document.removeEventListener(FOLDER_OPERATION_SUCCESS_EVENT, handleFolderOperationSuccess as EventListener);
+    };
+  }, [onRefresh, selectedProject, projectId]);
+
+  // Refresh contents when currentFolder changes
+  useEffect(() => {
+    if (currentFolder) {
+      console.log(`Current folder changed to: ${currentFolder.id} (${currentFolder.name}), refreshing content`);
+      
+      // Force a document refresh for this folder to ensure we have the latest content
+      triggerDocumentUpdate(currentFolder.id);
+      
+      // If we have a refresh function, also call it
+      if (onRefresh) {
+        console.log('Calling full refresh due to folder change');
+        onRefresh();
+      }
+    }
+  }, [currentFolder?.id, onRefresh]);
+
+  // Listen for user update events when folder operations occur between projects
+  useEffect(() => {
+    const handleUserUpdate = (event: Event) => {
+      const customEvent = event as CustomEvent;
+      const { action, source } = customEvent.detail;
+      
+      console.log(`[Document List] User update event received from ${source}, action: ${action}`);
+      
+      // Only refresh if we have an onRefresh callback and the update is related to folder operations
+      if (onRefresh && source === 'userService') {
+        console.log('[Document List] Refreshing after user update event from folder operation');
+        onRefresh();
+      }
+    };
+    
+    document.addEventListener(USER_UPDATE_EVENT, handleUserUpdate as EventListener);
+    
+    return () => {
+      document.removeEventListener(USER_UPDATE_EVENT, handleUserUpdate as EventListener);
+    };
+  }, [onRefresh]);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      // Handle project dropdown
+      if (showProjectDropdown && 
+          projectDropdownRef.current && 
+          !projectDropdownRef.current.contains(event.target as Node)) {
+        setShowProjectDropdown(false);
+      }
+      
+      // Handle folder dropdown
+      if (showFolderDropdown && 
+          folderDropdownRef.current && 
+          !folderDropdownRef.current.contains(event.target as Node)) {
+        setShowFolderDropdown(false);
+      }
+    };
+    
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showProjectDropdown, showFolderDropdown]);
 
   return (
     <div 
@@ -2265,7 +2963,6 @@ export default function DocumentList({
                     {!isSharedView && (
                       <div className="flex items-center space-x-1">
                         {/* Only show edit button if user can edit documents */}
-
                           <div className="group relative">
                             <button
                               onClick={(e) => handleEditClick(e, folder.id, 'folder', typeof folder.name === 'string' ? folder.name : 'Unnamed folder')}
@@ -2284,6 +2981,56 @@ export default function DocumentList({
                             </div>
                           </div>
                       
+                        {/* Copy button */}
+                        <div className="group relative">
+                          <button
+                            onClick={() => handleCopyClick(folder.id, typeof folder.name === 'string' ? folder.name : 'Unnamed folder')}
+                            className={`p-1 ${!hasFolderWritePermission(folder?.metadata?.access as FolderAccessPermission) ?
+                              'text-gray-300 cursor-not-allowed' :
+                              'text-gray-400 hover:text-gray-600 hover:bg-gray-100'} rounded-full`}
+                            aria-label="Copy folder"
+                            disabled={!hasFolderWritePermission(folder?.metadata?.access as FolderAccessPermission)}
+                          >
+                            <Copy className="w-5 h-5" />
+                          </button>
+                          <div className={`absolute ${index === 0 ? 'top-full mt-2' : 'bottom-full mb-2'} left-1/2 transform -translate-x-1/2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap`}>
+                            Copy
+                          </div>
+                        </div>
+
+                        {/* Move button */}
+                        <div className="group relative">
+                          <button
+                            onClick={() => handleMoveClick(folder.id, typeof folder.name === 'string' ? folder.name : 'Unnamed folder')}
+                            className={`p-1 ${!hasFolderWritePermission(folder?.metadata?.access as FolderAccessPermission) ?
+                              'text-gray-300 cursor-not-allowed' :
+                              'text-gray-400 hover:text-gray-600 hover:bg-gray-100'} rounded-full`}
+                            aria-label="Move folder"
+                            disabled={!hasFolderWritePermission(folder?.metadata?.access as FolderAccessPermission)}
+                          >
+                            <FolderInput className="w-5 h-5" />
+                          </button>
+                          <div className={`absolute ${index === 0 ? 'top-full mt-2' : 'bottom-full mb-2'} left-1/2 transform -translate-x-1/2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap`}>
+                            Move
+                          </div>
+                        </div>
+
+                        {/* Download button */}
+                        <div className="group relative">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleFolderDownload(folder.id, typeof folder.name === 'string' ? folder.name : 'Unnamed folder');
+                            }}
+                            className="p-1 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100"
+                            aria-label="Download folder"
+                          >
+                            <Download className="w-5 h-5" />
+                          </button>
+                          <div className={`absolute ${index === 0 ? 'top-full mt-2' : 'bottom-full mb-2'} left-1/2 transform -translate-x-1/2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap`}>
+                            Download
+                          </div>
+                        </div>
 
                         {/* Only show share button if user can share documents */}
                         {canShareDocuments() && (
@@ -2292,7 +3039,6 @@ export default function DocumentList({
                               onClick={() => handleShare(folder.id, true)}
                               className="p-1 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100"
                               aria-label="Share folder"
-
                             >
                               <Share2 className="w-5 h-5" />
                             </button>
@@ -2365,35 +3111,26 @@ export default function DocumentList({
                       <div className="flex items-center space-x-1">
                         {/* Only show edit button if user can edit documents */}
 
-                          {/* <div className="group relative">
-                            <button
-                              onClick={(e) => handleEditClick(e, doc.id, 'document', typeof doc.name === 'string' ? doc.name : 'Unnamed document')}
-                              className="p-1 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100"
-                              disabled={!hasFolderWritePermission(currentFolder?.metadata?.access as FolderAccessPermission)}
-                            >
-                              <Edit className="w-5 h-5" />
-                            </button>
-                            <div className="absolute bottom-full mb-2 left-1/2 transform -translate-x-1/2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap">
-                              Edit
-                            </div>
-                          </div> */}
-
-                        
-                        {/* Only show share button if user can share documents */}
-                        {canShareDocuments() && (
+                        {/* Copy button for documents */}
+                        {canEditDocuments() && (
                           <div className="group relative">
                             <button
-                              onClick={() => handleShare(doc.id, false)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                // Logic to copy the document
+                                showToast(`Copying document functionality not implemented yet`, 'error');
+                              }}
                               className="p-1 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100"
-                              aria-label="Share document"
+                              aria-label="Copy document"
                             >
-                              <Share2 className="w-5 h-5" />
+                              <Copy className="w-5 h-5" />
                             </button>
                             <div className="absolute bottom-full mb-2 left-1/2 transform -translate-x-1/2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap">
-                              Share
+                              Copy
                             </div>
                           </div>
                         )}
+                      
                         
                         {/* Download button always shown for all users */}
                         <div className="group relative">
@@ -2413,6 +3150,22 @@ export default function DocumentList({
                           </div>
                         </div>
                         
+                         {/* Only show share button if user can share documents */}
+                         {canShareDocuments() && (
+                          <div className="group relative">
+                            <button
+                              onClick={() => handleShare(doc.id, false)}
+                              className="p-1 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100"
+                              aria-label="Share document"
+                            >
+                              <Share2 className="w-5 h-5" />
+                            </button>
+                            <div className="absolute bottom-full mb-2 left-1/2 transform -translate-x-1/2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap">
+                              Share
+                            </div>
+                          </div>
+                        )}
+
                         {/* Only show delete button if user can delete documents */}
                         {canDeleteDocuments() && (
                           <div className="group relative">
@@ -2458,6 +3211,7 @@ export default function DocumentList({
         </>
       )}
 
+      {/* Standard dialogs */}
       <ConfirmDialog
         isOpen={showDeleteConfirm}
         title={`Delete ${itemToDelete?.type === 'folder' ? 'Folder' : 'File'}`}
@@ -2487,6 +3241,244 @@ export default function DocumentList({
         onSave={handleUpdatePermission}
         onCancel={closePermissionsDialog}
       />
+
+      {/* Copy/Move dialog with folder selection */}
+      <div className={`fixed inset-0 flex items-center justify-center z-50 ${showCopyMoveDialog ? 'block' : 'hidden'}`}>
+        {/* Backdrop with blur effect */}
+        <div 
+          className="fixed inset-0 bg-black/40 backdrop-blur-[2px] transition-opacity duration-200" 
+          onClick={() => {
+            setShowCopyMoveDialog(false);
+            setFolderToCopyOrMove(null);
+            setDestinationFolder("");
+            setSelectedDestinationProjectId("");
+            setSelectedDestinationFolderId("");
+          }} 
+          aria-hidden="true"
+        />
+        
+        {/* Dialog */}
+        <div className="relative bg-white rounded-xl shadow-lg w-full max-w-lg mx-4 overflow-visible transition-all duration-200 scale-100 opacity-100 max-h-[80vh] flex flex-col">
+          {/* Header */}
+          <div className="flex items-center justify-between p-4 border-b border-gray-200/80 flex-shrink-0">
+            <h3 className="text-lg font-semibold text-gray-900">
+              {copyMoveAction === 'copy' ? 'Copy' : 'Move'} Folder
+            </h3>
+            <button
+              onClick={() => {
+                setShowCopyMoveDialog(false);
+                setFolderToCopyOrMove(null);
+                setDestinationFolder("");
+                setSelectedDestinationProjectId("");
+                setSelectedDestinationFolderId("");
+              }}
+              className="text-gray-500 hover:text-gray-700 transition-colors rounded-full p-1.5 hover:bg-gray-100/80 focus:outline-none focus:ring-2 focus:ring-blue-500/70"
+              aria-label="Close"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+          
+          {/* Content */}
+          <div className="p-6 overflow-y-auto flex-grow">
+            <p className="text-gray-600 mb-4">
+              {copyMoveAction === 'copy' ? 'Copy' : 'Move'} "{folderToCopyOrMove?.name || 'this folder'}" to:
+            </p>
+            
+            {/* Project selection dropdown */}
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Destination Project
+              </label>
+              <div className="relative">
+                <button
+                  className="w-full flex items-center justify-between px-3 py-2 border border-gray-300 rounded-md shadow-sm bg-white text-left focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  onClick={(e) => {
+                    e.stopPropagation(); // Prevent event propagation
+                    setShowProjectDropdown(!showProjectDropdown);
+                  }}
+                >
+                  <span className="truncate">
+                    {selectedDestinationProjectId 
+                      ? availableProjects.find(p => p.id === selectedDestinationProjectId)?.name || "Unknown project"
+                      : "Select a project"
+                    }
+                  </span>
+                  <ChevronDown className="w-4 h-4 text-gray-400" />
+                </button>
+                
+                {showProjectDropdown && (
+                  <div 
+                    ref={projectDropdownRef}
+                    className="fixed z-50 mt-1 bg-white shadow-lg rounded-md py-1 max-h-60 overflow-auto" 
+                    style={{
+                      width: 'calc(100% - 48px)',
+                      left: '50%',
+                      transform: 'translateX(-50%)'
+                    }}
+                  >
+                    {isLoadingProjects ? (
+                      <div className="flex justify-center items-center p-4">
+                        <Loader2 className="w-5 h-5 text-blue-600 animate-spin" />
+                        <span className="ml-2 text-gray-600">Loading projects...</span>
+                      </div>
+                    ) : (
+                      availableProjects.map(project => (
+                        <button
+                          key={project.id}
+                          className={`w-full text-left px-4 py-2 hover:bg-gray-100 ${
+                            selectedDestinationProjectId === project.id ? 'bg-blue-50 text-blue-600' : 'text-gray-900'
+                          }`}
+                          onClick={() => handleDestinationProjectChange(project.id)}
+                        >
+                          {project.name}
+                        </button>
+                      ))
+                    )}
+                    
+                    {!isLoadingProjects && availableProjects.length === 0 && (
+                      <div className="px-4 py-2 text-gray-500 text-sm">
+                        No projects available
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+            
+            {/* Folder selection */}
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Destination Folder
+              </label>
+              
+              <div className="relative">
+                <button
+                  className="w-full flex items-center justify-between px-3 py-2 border border-gray-300 rounded-md shadow-sm bg-white text-left focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  onClick={(e) => {
+                    e.stopPropagation(); // Prevent event propagation
+                    if (selectedDestinationProjectId) {
+                      setShowFolderDropdown(!showFolderDropdown);
+                    } else {
+                      showToast("Please select a project first", "error");
+                    }
+                  }}
+                  disabled={!selectedDestinationProjectId}
+                >
+                  <span className="truncate">
+                    {selectedDestinationFolderId 
+                      ? getFolderNameById(selectedDestinationFolderId)
+                      : "Root folder"
+                    }
+                  </span>
+                  <ChevronDown className="w-4 h-4 text-gray-400" />
+                </button>
+                
+                {showFolderDropdown && selectedDestinationProjectId && (
+                  <div 
+                    ref={folderDropdownRef}
+                    className="fixed z-50 mt-1 bg-white shadow-lg rounded-md py-1 max-h-[300px] overflow-auto" 
+                    style={{
+                      width: 'calc(100% - 48px)',
+                      left: '50%',
+                      transform: 'translateX(-50%)'
+                    }}
+                  >
+                    {isLoadingFolders ? (
+                      <div className="flex justify-center items-center p-4">
+                        <Loader2 className="w-5 h-5 text-blue-600 animate-spin" />
+                        <span className="ml-2 text-gray-600">Loading folders...</span>
+                      </div>
+                    ) : (
+                      <>
+                        {/* Root folder option */}
+                        <button
+                          className={`w-full text-left px-4 py-2 hover:bg-gray-100 flex items-center ${
+                            selectedDestinationFolderId === "" ? 'bg-blue-50 text-blue-600' : 'text-gray-900'
+                          }`}
+                          onClick={() => handleDestinationFolderSelect("")}
+                        >
+                          <Home className="w-4 h-4 mr-2 text-gray-400" />
+                          <span>Root folder</span>
+                          {selectedDestinationFolderId === "" && (
+                            <Check className="w-4 h-4 ml-2 text-blue-600" />
+                          )}
+                        </button>
+                        
+                        {/* Folder tree */}
+                        {renderFolderTree(projectFolders[selectedDestinationProjectId] || [])}
+                        
+                        {/* No folders message */}
+                        {(projectFolders[selectedDestinationProjectId]?.length === 0) && (
+                          <div className="px-4 py-2 text-gray-500 text-sm">
+                            No folders available
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+            
+            <div className="mt-2 text-xs text-gray-500">
+              Selected destination: {selectedDestinationProjectId ? 
+                `${availableProjects.find(p => p.id === selectedDestinationProjectId)?.name || "Unknown"} / ${selectedDestinationFolderId ? 
+                  getFolderNameById(selectedDestinationFolderId) : "Root folder"}` 
+                : "Please select a destination"
+              }
+            </div>
+          </div>
+          
+          {/* Footer */}
+          <div className="flex justify-end gap-3 p-4 border-t border-gray-200/80 bg-gray-50/80 flex-shrink-0">
+            <button
+              onClick={() => {
+                setShowCopyMoveDialog(false);
+                setFolderToCopyOrMove(null);
+                setDestinationFolder("");
+                setSelectedDestinationProjectId("");
+                setSelectedDestinationFolderId("");
+              }}
+              className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 
+                         rounded-lg shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 
+                         focus:ring-blue-500/50 transition-all duration-200"
+              disabled={isCopyingOrMoving}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => {
+                if (folderToCopyOrMove && selectedDestinationProjectId && !isCopyingOrMoving) {
+                  copyOrMoveFolder(
+                    folderToCopyOrMove.id, 
+                    selectedDestinationProjectId,
+                    selectedDestinationFolderId,
+                    copyMoveAction
+                  );
+                }
+              }}
+              disabled={!selectedDestinationProjectId || isCopyingOrMoving}
+              className={`px-4 py-2 text-sm font-medium text-white rounded-lg shadow-sm 
+                          focus:outline-none focus:ring-2 focus:ring-offset-1
+                          transition-all duration-200 flex items-center justify-center min-w-[80px]
+                          ${!selectedDestinationProjectId || isCopyingOrMoving ? 'bg-blue-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 active:bg-blue-800 focus:ring-blue-500/50'}`}
+            >
+              {isCopyingOrMoving ? (
+                <>
+                  <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  {copyMoveAction === 'copy' ? "Copying..." : "Moving..."}
+                </>
+              ) : (
+                <>{copyMoveAction === 'copy' ? "Copy" : "Move"}</>
+              )}
+            </button>
+          </div>
+        </div>
+      </div>
 
       {renderEditPopup()}
 

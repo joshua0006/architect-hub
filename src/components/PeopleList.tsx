@@ -8,6 +8,7 @@ import { formatDateToTimezone } from "../utils/dateUtils";
 import { useOrganization } from "../contexts/OrganizationContext";
 import { useNavigate, useLocation } from "react-router-dom";
 import { TeamMemberType } from "../types";
+import { subscribeToAllUsers, USER_UPDATE_EVENT } from "../services/userSubscriptionService";
 
 interface PeopleListProps {
   projects: Project[];
@@ -109,6 +110,7 @@ export default function PeopleList({ projects, teamMembers, onCreateMember, onUp
     }
   };
 
+  // Setup user subscription with better handling
   const setupUserSubscription = () => {
     // Make sure to clean up any existing subscription first
     if (unsubscribeRef.current) {
@@ -118,11 +120,10 @@ export default function PeopleList({ projects, teamMembers, onCreateMember, onUp
     
     // Set up new subscription
     try {
-      const unsubscribe = userService.subscribeToAllUsers((updatedUsers) => {
-
-        // setUsers(updatedUsers);
-        // setError(null);
-        console.log("Users updated:", updatedUsers);  
+      const unsubscribe = subscribeToAllUsers((updatedUsers) => {
+        setUsers(updatedUsers);
+        setError(null);
+        console.log("Users updated via subscription:", updatedUsers.length);  
       });
       
       // Store the unsubscribe function
@@ -130,10 +131,31 @@ export default function PeopleList({ projects, teamMembers, onCreateMember, onUp
     } catch (err) {
       console.error('Error setting up user subscription:', err);
       // If subscription fails, fall back to non-realtime data
-      // loadUsers();
+      loadUsers();
     }
   };
   
+  // Listen for user update events
+  useEffect(() => {
+    const handleUserUpdate = (event: Event) => {
+      const customEvent = event as CustomEvent;
+      const { action, source } = customEvent.detail;
+      
+      console.log(`[People List] User update event received from ${source}, action: ${action}`);
+      
+      // If we don't have an active subscription, manually reload users
+      if (!unsubscribeRef.current) {
+        console.log('[People List] No active subscription, manually reloading users');
+        loadUsers();
+      }
+    };
+    
+    document.addEventListener(USER_UPDATE_EVENT, handleUserUpdate as EventListener);
+    
+    return () => {
+      document.removeEventListener(USER_UPDATE_EVENT, handleUserUpdate as EventListener);
+    };
+  }, []);
 
   const handleProjectSelect = (projectId: string) => {
     // Find the selected project to ensure it exists
