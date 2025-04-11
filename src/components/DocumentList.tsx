@@ -256,6 +256,14 @@ export default function DocumentList({
   );
 
 
+  const isUserAdminOrStaff = (): boolean =>{
+    if(!user || !user.role) {
+      return false;
+    }
+    return [UserRole.ADMIN, UserRole.STAFF].includes(user.role);
+  }
+
+
  const hasFolderWritePermission = (folderPermission: FolderAccessPermission): boolean => {
   const role = user?.role as UserRole | undefined;
 
@@ -2989,12 +2997,14 @@ export default function DocumentList({
                               'text-gray-300 cursor-not-allowed' :
                               'text-gray-400 hover:text-gray-600 hover:bg-gray-100'} rounded-full`}
                             aria-label="Copy folder"
-                            disabled={!hasFolderWritePermission(folder?.metadata?.access as FolderAccessPermission)}
-                          >
+                            disabled={!hasFolderWritePermission(folder?.metadata?.access as FolderAccessPermission) ||
+                                      !isUserAdminOrStaff()}>
                             <Copy className="w-5 h-5" />
                           </button>
                           <div className={`absolute ${index === 0 ? 'top-full mt-2' : 'bottom-full mb-2'} left-1/2 transform -translate-x-1/2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap`}>
-                            Copy
+                              {hasFolderWritePermission(folder?.metadata?.access as FolderAccessPermission) && isUserAdminOrStaff()
+                                ? "Copy"
+                                : "You don't have permission to copy folder"}   
                           </div>
                         </div>
 
@@ -3006,12 +3016,14 @@ export default function DocumentList({
                               'text-gray-300 cursor-not-allowed' :
                               'text-gray-400 hover:text-gray-600 hover:bg-gray-100'} rounded-full`}
                             aria-label="Move folder"
-                            disabled={!hasFolderWritePermission(folder?.metadata?.access as FolderAccessPermission)}
-                          >
+                            disabled={!hasFolderWritePermission(folder?.metadata?.access as FolderAccessPermission) ||
+                                      !isUserAdminOrStaff()}>
                             <FolderInput className="w-5 h-5" />
                           </button>
                           <div className={`absolute ${index === 0 ? 'top-full mt-2' : 'bottom-full mb-2'} left-1/2 transform -translate-x-1/2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap`}>
-                            Move
+                          {hasFolderWritePermission(folder?.metadata?.access as FolderAccessPermission) && isUserAdminOrStaff()
+                                ? "Move"
+                                : "You don't have permission to move folder."} 
                           </div>
                         </div>
 
