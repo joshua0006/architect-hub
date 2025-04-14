@@ -1015,8 +1015,8 @@ export default function DocumentList({
                          disabled={isSavingPermission}
                       />
                       <div className="ml-3">
-                        <span className="text-sm font-medium text-gray-900">Contractors Write</span>
-                        <p className="text-xs text-gray-500">Contractors can read and write to this {popupItem.type}</p>
+                        <span className="text-sm font-medium text-gray-900">Consultants Write</span>
+                        <p className="text-xs text-gray-500">Consultants can read and write to this {popupItem.type}</p>
                       </div>
                     </label>
                     {/* Clients Read Radio */}
