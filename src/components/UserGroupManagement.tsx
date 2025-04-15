@@ -1,16 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { User, UserGroup, Permission, PermissionAction, PermissionResource } from '../types';
+import { User as UserType, UserGroup, Permission, PermissionAction, PermissionResource } from '../types';
+import { User as AuthUser } from '../types/auth';
 import { userService } from '../services/userService';
 import { permissionService } from '../services/permissionService';
 import { PlusIcon, TrashIcon, PencilIcon, CheckIcon, XCircleIcon } from '@heroicons/react/24/outline';
 
 // Handle the case where User comes from auth context and may not have groupIds
-interface UserWithGroups extends User {
+interface UserWithGroups extends UserType {
   groupIds: string[];
 }
 
 interface UserGroupManagementProps {
-  currentUser: User;
+  currentUser: AuthUser;
 }
 
 export default function UserGroupManagement({ currentUser }: UserGroupManagementProps) {

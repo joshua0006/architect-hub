@@ -291,12 +291,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // Permission checks based on user role
   const isStaffOrContractor = () => {
-    // return state.user?.role === 'Staff' || state.user?.role === 'Contractor';
-    return state.user?.role === 'Staff' || state.user?.role === 'Contractor';
+    return state.user?.role === 'Staff' || state.user?.role === 'Contractor' || state.user?.role === 'Admin';
   };
 
   const isStaffOnly = () => {
-    return state.user?.role === 'Staff';
+    return state.user?.role === 'Staff' || state.user?.role === 'Admin';
   };
 
   const canAssignTasks = () => {

@@ -408,66 +408,7 @@ export default function DocumentActions({
           </div>
         </div>
 
-        {/* File operation buttons - Only visible if we're in a folder with files */}
-        {currentFolderId && hasFolderWritePermission() && (
-          <>
-            {/* Copy Files Button */}
-            <div className="group relative">
-              <button
-                onClick={() => {
-                  setFileOperation('copy');
-                  // Only open the selection UI if the callback is available
-                  if (onCopyOrMoveFile) {
-                    // Dispatch event to document list to initiate file selection
-                    const selectFilesEvent = new CustomEvent('select-files-for-operation', {
-                      bubbles: true,
-                      detail: { operation: 'copy' }
-                    });
-                    document.dispatchEvent(selectFilesEvent);
-                  } else {
-                    showToast("File copy functionality is not available", "error");
-                  }
-                }}
-                className="px-3 py-2 flex items-center space-x-2 bg-slate-300 text-gray-700 rounded-md hover:bg-gray-200 transition-colors"
-                title="Copy files to another folder"
-              >
-                <Copy className="w-5 h-5" />
-                <span className="hidden sm:inline">Copy Files</span>
-              </button>
-              <div className="absolute top-full mb-2 left-1/2 transform -translate-x-1/2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap">
-                Copy files to another folder
-              </div>
-            </div>
-
-            {/* Move Files Button */}
-            <div className="group relative">
-              <button 
-                onClick={() => {
-                  setFileOperation('move');
-                  // Only open the selection UI if the callback is available
-                  if (onCopyOrMoveFile) {
-                    // Dispatch event to document list to initiate file selection
-                    const selectFilesEvent = new CustomEvent('select-files-for-operation', {
-                      bubbles: true,
-                      detail: { operation: 'move' }
-                    });
-                    document.dispatchEvent(selectFilesEvent);
-                  } else {
-                    showToast("File move functionality is not available", "error");
-                  }
-                }}
-                className="px-3 py-2 flex items-center space-x-2 bg-slate-300 text-gray-700 rounded-md hover:bg-gray-200 transition-colors"
-                title="Move files to another folder"
-              >
-                <Move className="w-5 h-5" />
-                <span className="hidden sm:inline">Move Files</span>
-              </button>
-              <div className="absolute top-full mb-2 left-1/2 transform -translate-x-1/2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap">
-                Move files to another folder
-              </div>
-            </div>
-          </>
-        )}
+       
       </div>
 
       {/* File input (hidden) */}

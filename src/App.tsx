@@ -14,6 +14,7 @@ import SharedContent from './components/SharedContent';
 import { Toolbar } from './components/Toolbar';
 import TokenUpload from './components/TokenUpload';
 import UserGroupManagement from './components/UserGroupManagement';
+import AdminPage from './pages/AdminPage';
 
 
 // Protected Route Component
@@ -36,7 +37,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 }
 
 // Admin-only route component
-function AdminRoute({ children }: { children: React.ReactNode }) {
+function AdminRoute({ children, staffAllowed = false }: { children: React.ReactNode, staffAllowed?: boolean }) {
   const { user, loading } = useAuth();
 
   if (loading) {
@@ -51,7 +52,7 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
     return <Navigate to="/signin" />;
   }
 
-  if (user.role !== 'Admin' && user.role !== 'Staff') {
+  if (user.role !== 'Admin' && (!staffAllowed || user.role !== 'Staff')) {
     return <Navigate to="/" />;
   }
 
@@ -91,8 +92,16 @@ export const App: React.FC = () => {
                 <Route
                   path="/admin/user-groups"
                   element={
-                    <AdminRoute>
+                    <AdminRoute staffAllowed={true}>
                       <UserGroupManagementWrapper />
+                    </AdminRoute>
+                  }
+                />
+                <Route
+                  path="/admin"
+                  element={
+                    <AdminRoute>
+                      <AdminPage />
                     </AdminRoute>
                   }
                 />

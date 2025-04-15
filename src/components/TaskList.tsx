@@ -11,6 +11,7 @@ import {
   ChevronUp,
   Filter,
   SlidersHorizontal,
+  Link,
 } from "lucide-react";
 import { Task, TeamMember, User } from "../types";
 import TaskActions from "./TaskActions";
@@ -21,6 +22,9 @@ import { userService } from "../services/userService";
 import { projectService } from "../services/projectService";
 import { taskService } from "../services/taskService";
 import { subtaskService, Subtask } from "../services/subtaskService";
+import { createSubtaskNotification, createTaskNotification } from "../services/notificationService";
+import { useLocation, useNavigate } from "react-router-dom";
+import toast from "react-hot-toast";
 
 interface TaskListProps {
   tasks: Task[];
@@ -82,6 +86,39 @@ export default function TaskList({
   // Add new state for loading states
   const [addingSubTask, setAddingSubTask] = useState<{[taskId: string]: boolean}>({});
   const [creatingTask, setCreatingTask] = useState(false);
+  
+  // Add new state for highlighted task
+  const [highlightedTaskId, setHighlightedTaskId] = useState<string | null>(null);
+  const location = useLocation();
+  const navigate = useNavigate();
+  
+  // Add reference for highlighted task element
+  const highlightedTaskRef = useRef<HTMLDivElement>(null);
+  
+  // Get query params
+  function getSearchParams() {
+    return new URLSearchParams(location.search);
+  }
+  
+  // Check for task_id in URL on component mount
+  useEffect(() => {
+    const params = getSearchParams();
+    const taskId = params.get('task_id');
+    if (taskId) {
+      setHighlightedTaskId(taskId);
+      setExpandedTask(taskId);
+      
+      // Set a timeout to scroll to the highlighted task
+      setTimeout(() => {
+        highlightedTaskRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 500);
+      
+      // Clear the highlight after 3 seconds
+      setTimeout(() => {
+        setHighlightedTaskId(null);
+      }, 3000);
+    }
+  }, [location.search]);
   
   useEffect(() => {
     loadUsers();
@@ -258,6 +295,13 @@ export default function TaskList({
     e.preventDefault();
     if (editingTask) {
       try {
+        // Find the original task to compare assigned users
+        const originalTask = tasks.find(t => t.id === editingTask.id);
+        // Find newly assigned users (users in editingTask.assignedTo but not in originalTask.assignedTo)
+        const newlyAssignedUsers = editingTask.assignedTo.filter(
+          userId => !originalTask?.assignedTo.includes(userId)
+        );
+        
         // Check if assigned user has project access
         const assignedUsers = allUsers.filter(
           (u) => editingTask.assignedTo.includes(u.id)
@@ -285,9 +329,30 @@ export default function TaskList({
           priority: editingTask.priority,
         });
         
+        // If there are newly assigned users, send notifications
+        if (newlyAssignedUsers.length > 0) {
+          // Generate the task link
+          const taskLink = `${window.location.origin}/projects/${projectId}?task_id=${editingTask.id}`;
+          
+          const creatorName = user?.displayName || "A team member";
+          
+          await createTaskNotification(
+            editingTask.id,
+            editingTask.title,
+            projectId,
+            settings?.name || "Project",
+            creatorName,
+            newlyAssignedUsers,
+            taskLink
+          );
+          
+          toast.success(`Notifications sent to ${newlyAssignedUsers.length} newly assigned team member${newlyAssignedUsers.length > 1 ? 's' : ''}`);
+        }
+        
         setEditingTask(null);
       } catch (err) {
         console.error("Error updating task:", err);
+        toast.error("Failed to update task");
       }
     }
   };
@@ -324,7 +389,28 @@ export default function TaskList({
       }
       
       // Create new subtask in the dedicated subtasks collection
-      await subtaskService.create(subtaskData);
+      const newSubtaskId = await subtaskService.create(subtaskData);
+      
+      // Find the parent task to get its title and assigned users
+      const parentTask = tasks.find(t => t.id === parentTaskId);
+      
+      // Send notifications to users assigned to the parent task
+      if (parentTask && parentTask.assignedTo.length > 0) {
+        // Get the current user's name for notification
+        const creatorName = user?.displayName || "A team member";
+        
+        // Send notifications to all users assigned to the parent task
+        await createSubtaskNotification(
+          parentTaskId,
+          parentTask.title,
+          newSubtaskId,
+          title,
+          projectId,
+          settings?.name || "Project",
+          creatorName,
+          parentTask.assignedTo
+        );
+      }
       
       // Clear input
       setNewSubTaskTitle(prev => ({
@@ -390,9 +476,30 @@ export default function TaskList({
         taskData.parentTaskId = parentTaskId;
       }
       
-      await taskService.create(taskData);
+      const newTaskId = await taskService.create(taskData);
+      
+      // Generate the task link
+      const taskLink = `${window.location.origin}/projects/${projectId}?task_id=${newTaskId}`;
+      
+      // If users are assigned, send notifications
+      if (assignedTo.length > 0) {
+        const creatorName = user?.displayName || "A team member";
+        
+        await createTaskNotification(
+          newTaskId,
+          title,
+          projectId,
+          settings?.name || "Project",
+          creatorName,
+          assignedTo,
+          taskLink
+        );
+        
+        toast.success(`Task created and notifications sent to ${assignedTo.length} team member${assignedTo.length > 1 ? 's' : ''}`);
+      }
     } catch (err) {
       console.error("Error creating task:", err);
+      toast.error("Failed to create task");
     } finally {
       setCreatingTask(false);
     }
@@ -402,6 +509,20 @@ export default function TaskList({
   const getCategoryColor = (categoryId: string): string => {
     const category = settings?.taskCategories?.find(cat => cat.id === categoryId);
     return category?.color || '#3b82f6'; // Default to blue-500 if category not found
+  };
+
+  // Add function to copy task link
+  const copyTaskLink = async (e: React.MouseEvent, taskId: string) => {
+    e.stopPropagation(); // Prevent card expansion
+    const taskLink = `${window.location.origin}/projects/${projectId}?task_id=${taskId}`;
+    
+    try {
+      await navigator.clipboard.writeText(taskLink);
+      toast.success("Task link copied to clipboard");
+    } catch (err) {
+      console.error("Failed to copy link:", err);
+      toast.error("Failed to copy link");
+    }
   };
 
   if (isLoading) {
@@ -661,12 +782,16 @@ export default function TaskList({
         {mainTasks.map((task) => (
           <div
             key={task.id}
+            ref={task.id === highlightedTaskId ? highlightedTaskRef : null}
             className={`p-4 bg-white border border-gray-200 rounded-lg shadow-sm relative ${
               subtasksMap[task.id]?.length > 0 
                 ? 'hover:shadow-md transition-all duration-200' 
                 : 'hover:shadow-sm transition-shadow'
+            } ${
+              task.id === highlightedTaskId 
+                ? 'ring-2 ring-blue-500 animate-pulse' 
+                : ''
             }`}
-            
           >
             {editingTask?.id === task.id ? (
               <form onSubmit={handleUpdateTask} className="space-y-4">
@@ -1067,6 +1192,7 @@ export default function TaskList({
                         )}
                       </div>
                       <div className="flex items-center space-x-2">
+                        
                         {canEditTask() && (
                           <button
                             onClick={(e) => {

@@ -1533,6 +1533,7 @@ async function checkForExistingMentionNotification(
  * @param projectName The name of the project
  * @param creatorName The name of the user who created or updated the task
  * @param assignedUserIds Array of user IDs assigned to the task
+ * @param taskLink The link to the task
  * @param dueDate The due date of the task
  * @param isUpdate Whether this is a task update (true) or new task creation (false)
  * @returns Array of created notification IDs
@@ -1544,7 +1545,8 @@ export const createTaskNotification = async (
   projectName: string,
   creatorName: string,
   assignedUserIds: string[],
-  dueDate: string,
+  taskLink?: string,
+  dueDate?: string,
   isUpdate: boolean = false
 ): Promise<string[]> => {
   try {
@@ -1557,7 +1559,7 @@ export const createTaskNotification = async (
     }
     
     // Create the link to the task
-    const link = `/projects/${projectId}/tasks?task=${taskId}`;
+    const link = taskLink || `/projects/${projectId}?task_id=${taskId}`;
     
     // Create a notification for each assigned user
     const notificationPromises = assignedUserIds.map(userId => {
@@ -1579,7 +1581,7 @@ export const createTaskNotification = async (
           uploadDate: new Date().toISOString(),
           projectId,
           taskId,
-          dueDate
+          dueDate: dueDate || ''
         }
       };
       
@@ -1597,6 +1599,80 @@ export const createTaskNotification = async (
     }
   } catch (error) {
     console.error('[Notification Error] Error in createTaskNotification:', error);
+    return [];
+  }
+};
+
+/**
+ * Creates notifications for task assignees when a new subtask is added
+ * @param parentTaskId The ID of the parent task
+ * @param parentTaskTitle The title of the parent task
+ * @param subtaskId The ID of the subtask
+ * @param subtaskTitle The title of the subtask
+ * @param projectId The ID of the project
+ * @param projectName The name of the project
+ * @param creatorName The name of the user who created the subtask
+ * @param assignedUserIds Array of user IDs assigned to the parent task
+ * @returns Array of created notification IDs
+ */
+export const createSubtaskNotification = async (
+  parentTaskId: string,
+  parentTaskTitle: string,
+  subtaskId: string,
+  subtaskTitle: string,
+  projectId: string,
+  projectName: string,
+  creatorName: string,
+  assignedUserIds: string[]
+): Promise<string[]> => {
+  try {
+    console.log(`[Notification Info] Creating subtask notifications for ${assignedUserIds.length} users`);
+    
+    // If no target users provided, return empty array
+    if (!assignedUserIds || assignedUserIds.length === 0) {
+      console.warn('[Notification Warning] No target users provided for subtask notification');
+      return [];
+    }
+    
+    // Create the link to the task with task ID as query parameter to highlight it
+    const link = `/projects/${projectId}?task_id=${parentTaskId}`;
+    
+    // Create a notification for each assigned user
+    const notificationPromises = assignedUserIds.map(userId => {
+      const notification = {
+        iconType: 'task-subtask',
+        type: 'info' as const,
+        message: `${creatorName} added subtask "${subtaskTitle}" to "${parentTaskTitle}"`,
+        link,
+        read: false,
+        userId, // Set the target user ID
+        metadata: {
+          contentType: 'subtask',
+          fileName: '', // Using subtask title in message instead
+          folderId: '',
+          folderName: '',
+          guestName: creatorName,
+          uploadDate: new Date().toISOString(),
+          projectId,
+          taskId: parentTaskId,
+          subtaskId
+        }
+      };
+      
+      return createNotification(notification);
+    });
+    
+    try {
+      // Wait for all notifications to be created
+      const notificationIds = await Promise.all(notificationPromises);
+      console.log(`[Notification Success] Created ${notificationIds.length} subtask notifications`);
+      return notificationIds;
+    } catch (error) {
+      console.error('[Notification Error] Error creating subtask notifications:', error);
+      return [];
+    }
+  } catch (error) {
+    console.error('[Notification Error] Error in createSubtaskNotification:', error);
     return [];
   }
 };

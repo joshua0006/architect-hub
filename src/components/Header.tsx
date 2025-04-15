@@ -51,8 +51,8 @@ export default function Header() {
     { path: '/tasks', icon: ListTodo, label: 'Tasks' },
   ];
   
-  // Add admin routes for Staff and Admin users
-  const isAdminUser = user?.role === 'Admin' || user?.role === 'Staff';
+  // Check if user is an Admin
+  const isAdmin = user?.role === 'Admin';
   
   return (
     <header className="fixed top-0 left-0 right-0 h-16 glass-effect z-50">
@@ -93,6 +93,19 @@ export default function Header() {
                 </div>
               );
             })}
+
+            {/* Admin Link */}
+            {isAdmin && (
+              <Link
+                to="/admin"
+                className={`flex items-center space-x-2 px-3 py-2 rounded-md hover:bg-primary-50 ${
+                  location.pathname.startsWith('/admin') ? 'bg-primary-50 text-primary-600' : 'text-gray-600 hover:text-primary-600'
+                }`}
+              >
+                <Shield className="w-5 h-5" />
+                <span>Admin</span>
+              </Link>
+            )}
           </nav>
 
           {/* Notification Icon */}
@@ -130,6 +143,16 @@ export default function Header() {
                   <SettingsIcon className="w-4 h-4" />
                   <span>Account Settings</span>
                 </Link>
+                {isAdmin && (
+                  <Link
+                    to="/admin"
+                    onClick={() => setShowUserMenu(false)}
+                    className="flex items-center space-x-2 px-4 py-2 text-sm text-purple-600 hover:bg-purple-50"
+                  >
+                    <Shield className="w-4 h-4" />
+                    <span>Admin Dashboard</span>
+                  </Link>
+                )}
                 <button
                   onClick={handleSignOut}
                   className="flex items-center space-x-2 px-4 py-2 text-sm text-red-600 hover:bg-red-50 w-full"

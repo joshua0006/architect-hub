@@ -28,6 +28,8 @@ const NotificationContent: React.FC<NotificationContentProps> = ({
         return <AtSign className="w-4 h-4 text-blue-500" />;
       case 'task-assignment':
         return <CheckSquare className="w-4 h-4 text-purple-500" />;
+      case 'task-subtask':
+        return <CheckSquare className="w-4 h-4 text-indigo-500" />;
       case 'invite':
         return <User className="w-4 h-4 text-purple-500" />;
       case 'share':

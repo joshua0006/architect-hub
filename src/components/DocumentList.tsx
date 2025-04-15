@@ -50,6 +50,7 @@ import { folderService } from '../services/folderService';
 import { User } from '../types/auth';
 import { useNavigate } from 'react-router-dom';
 import { USER_UPDATE_EVENT } from '../services/userSubscriptionService';
+import { documentService } from '../services/documentService';
 
 // Local type definition for the DocumentViewer's Folder type
 interface ViewerFolder {
@@ -2176,6 +2177,7 @@ export default function DocumentList({
   // Update state for copy/move dialog
   const [showCopyMoveDialog, setShowCopyMoveDialog] = useState(false);
   const [folderToCopyOrMove, setFolderToCopyOrMove] = useState<{id: string, name: string} | null>(null);
+  const [documentToCopyOrMove, setDocumentToCopyOrMove] = useState<{id: string, name: string} | null>(null);
   const [copyMoveAction, setCopyMoveAction] = useState<'copy' | 'move'>('copy');
   const [destinationFolder, setDestinationFolder] = useState("");
   const [isLoadingFolders, setIsLoadingFolders] = useState(false);
@@ -2724,6 +2726,130 @@ export default function DocumentList({
     };
   }, [showProjectDropdown, showFolderDropdown]);
 
+  // Function to copy or move a document
+  const copyOrMoveDocument = async (source_document: string, destination_project_id: string, destination_folder: string, action: 'move' | 'copy') => {
+    try {
+      // Set loading state to true when operation starts
+      setIsCopyingOrMoving(true);
+      
+      // First, get the source document details for toast notification
+      const sourceDocumentDetails = documents.find(d => d.id === source_document);
+      
+      if (!sourceDocumentDetails) {
+        throw new Error('Source document not found');
+      }
+      
+      const sourceDocumentName = sourceDocumentDetails.name;
+      const sourceProjectId = sourceDocumentDetails.projectId;
+      const sourceFolderId = sourceDocumentDetails.folderId;
+
+      if (action === 'copy') {
+        // First get the document file to re-upload
+        const response = await fetch(sourceDocumentDetails.url);
+        const blob = await response.blob();
+        const file = new File([blob], sourceDocumentDetails.name, { type: blob.type });
+        
+        // Create a new document in the destination folder
+        const newDocData = {
+          projectId: destination_project_id,
+          name: sourceDocumentDetails.name,
+          type: sourceDocumentDetails.type,
+          dateModified: new Date().toISOString(),
+          folderId: destination_folder, // Ensure it's not undefined
+          version: 1,
+          metadata: {
+            ...sourceDocumentDetails.metadata,
+            copiedFrom: source_document
+          }
+        };
+
+        // Use document service to create the new document
+        await documentService.create(destination_folder, newDocData, file);
+        
+        // Show success message
+        showToast(`Document ${sourceDocumentName} copied successfully`, 'success');
+        
+      } else {
+        // action is 'move'
+        // Get the document file to re-upload
+        const response = await fetch(sourceDocumentDetails.url);
+        const blob = await response.blob();
+        const file = new File([blob], sourceDocumentDetails.name, { type: blob.type });
+        
+        // Create a new document in the destination folder
+        const newDocData = {
+          projectId: destination_project_id,
+          name: sourceDocumentDetails.name,
+          type: sourceDocumentDetails.type,
+          dateModified: new Date().toISOString(),
+          folderId: destination_folder, // Ensure it's not undefined
+          version: sourceDocumentDetails.version,
+          metadata: sourceDocumentDetails.metadata
+        };
+
+        // Use document service to create the new document in destination
+        await documentService.create(destination_folder, newDocData, file);
+        
+        // Delete the original document after successful move
+        await documentService.delete(sourceFolderId, source_document);
+        
+        // If the moved document was selected, deselect it
+        if (selectedDocument && selectedDocument.id === source_document) {
+          setSelectedDocument(undefined);
+        }
+        
+        // Show success message
+        showToast(`Document ${sourceDocumentName} moved successfully`, 'success');
+      }
+      
+      // Force immediate refresh of destination project folders
+      if (onRefresh) {
+        console.log(`[DocumentList] Calling parent refresh`);
+        await onRefresh();
+      }
+      
+      // Force immediate UI update
+      setLocalFolders(prev => [...prev]);
+      setLocalDocuments(prev => [...prev]);
+      
+      // Close the dialog and reset states
+      setShowCopyMoveDialog(false);
+      setDocumentToCopyOrMove(null);
+      setCopyMoveAction('copy');
+      setDestinationFolder("");
+      setSelectedDestinationProjectId("");
+      setSelectedDestinationFolderId("");
+    } catch (error) {
+      console.error(`Error ${action === 'copy' ? 'copying' : 'moving'} document:`, error);
+      showToast(`Failed to ${action} document: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
+    } finally {
+      // Set loading state to false regardless of success or failure
+      setIsCopyingOrMoving(false);
+    }
+  };
+
+  // Function to handle document copy button click
+  const handleDocumentCopyClick = (id: string, name: string) => {
+    setDocumentToCopyOrMove({id, name});
+    setCopyMoveAction('copy');
+    setShowCopyMoveDialog(true);
+    setSelectedDestinationProjectId(projectId || "");
+    if (projectId) {
+      loadProjectFolders(projectId);
+    }
+  };
+
+  // Function to handle document move button click
+  const handleDocumentMoveClick = (id: string, name: string) => {
+    setDocumentToCopyOrMove({id, name});
+    setCopyMoveAction('move');
+    setShowCopyMoveDialog(true);
+    setSelectedDestinationProjectId(projectId || "");
+    if (projectId) {
+      loadProjectFolders(projectId);
+    }
+  };
+
   return (
     <div 
       ref={dropZoneRef}
@@ -3129,8 +3255,7 @@ export default function DocumentList({
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                // Logic to copy the document
-                                showToast(`Copying document functionality not implemented yet`, 'error');
+                                handleDocumentCopyClick(doc.id, typeof doc.name === 'string' ? doc.name : 'Unnamed document');
                               }}
                               className="p-1 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100"
                               aria-label="Copy document"
@@ -3142,7 +3267,25 @@ export default function DocumentList({
                             </div>
                           </div>
                         )}
-                      
+                        
+                        {/* Move button for documents */}
+                        {canEditDocuments() && (
+                          <div className="group relative">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDocumentMoveClick(doc.id, typeof doc.name === 'string' ? doc.name : 'Unnamed document');
+                              }}
+                              className="p-1 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100"
+                              aria-label="Move document"
+                            >
+                              <FolderInput className="w-5 h-5" />
+                            </button>
+                            <div className="absolute bottom-full mb-2 left-1/2 transform -translate-x-1/2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap">
+                              Move
+                            </div>
+                          </div>
+                        )}
                         
                         {/* Download button always shown for all users */}
                         <div className="group relative">
@@ -3162,8 +3305,8 @@ export default function DocumentList({
                           </div>
                         </div>
                         
-                         {/* Only show share button if user can share documents */}
-                         {canShareDocuments() && (
+                        {/* Only show share button if user can share documents */}
+                        {canShareDocuments() && (
                           <div className="group relative">
                             <button
                               onClick={() => handleShare(doc.id, false)}
@@ -3262,6 +3405,7 @@ export default function DocumentList({
           onClick={() => {
             setShowCopyMoveDialog(false);
             setFolderToCopyOrMove(null);
+            setDocumentToCopyOrMove(null);
             setDestinationFolder("");
             setSelectedDestinationProjectId("");
             setSelectedDestinationFolderId("");
@@ -3274,12 +3418,13 @@ export default function DocumentList({
           {/* Header */}
           <div className="flex items-center justify-between p-4 border-b border-gray-200/80 flex-shrink-0">
             <h3 className="text-lg font-semibold text-gray-900">
-              {copyMoveAction === 'copy' ? 'Copy' : 'Move'} Folder
+              {copyMoveAction === 'copy' ? 'Copy' : 'Move'} {folderToCopyOrMove ? 'Folder' : 'Document'}
             </h3>
             <button
               onClick={() => {
                 setShowCopyMoveDialog(false);
                 setFolderToCopyOrMove(null);
+                setDocumentToCopyOrMove(null);
                 setDestinationFolder("");
                 setSelectedDestinationProjectId("");
                 setSelectedDestinationFolderId("");
@@ -3294,7 +3439,7 @@ export default function DocumentList({
           {/* Content */}
           <div className="p-6 overflow-y-auto flex-grow">
             <p className="text-gray-600 mb-4">
-              {copyMoveAction === 'copy' ? 'Copy' : 'Move'} "{folderToCopyOrMove?.name || 'this folder'}" to:
+              {copyMoveAction === 'copy' ? 'Copy' : 'Move'} "{folderToCopyOrMove?.name || documentToCopyOrMove?.name || 'this item'}" to:
             </p>
             
             {/* Project selection dropdown */}
@@ -3448,6 +3593,7 @@ export default function DocumentList({
               onClick={() => {
                 setShowCopyMoveDialog(false);
                 setFolderToCopyOrMove(null);
+                setDocumentToCopyOrMove(null);
                 setDestinationFolder("");
                 setSelectedDestinationProjectId("");
                 setSelectedDestinationFolderId("");
@@ -3464,6 +3610,13 @@ export default function DocumentList({
                 if (folderToCopyOrMove && selectedDestinationProjectId && !isCopyingOrMoving) {
                   copyOrMoveFolder(
                     folderToCopyOrMove.id, 
+                    selectedDestinationProjectId,
+                    selectedDestinationFolderId,
+                    copyMoveAction
+                  );
+                } else if (documentToCopyOrMove && selectedDestinationProjectId && !isCopyingOrMoving) {
+                  copyOrMoveDocument(
+                    documentToCopyOrMove.id,
                     selectedDestinationProjectId,
                     selectedDestinationFolderId,
                     copyMoveAction

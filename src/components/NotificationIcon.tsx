@@ -302,24 +302,39 @@ export const NotificationIcon: React.FC = () => {
       if (notification.link) {
         // Check if this is a task notification
         const isTaskNotification = notification.iconType === 'task-assignment';
+        // Check if this is a subtask notification
+        const isSubtaskNotification = notification.iconType === 'task-subtask';
         
         // Check if this is a file upload notification
         const isFileUploadNotification = notification.iconType === 'file-upload';
         
-        if (isTaskNotification) {
-          // For task notifications, use the taskId from metadata
+        if (isTaskNotification || isSubtaskNotification) {
+          // For task/subtask notifications, use the taskId from metadata
           const taskId = notification.metadata?.taskId;
           const projectId = notification.metadata?.projectId;
           
           if (taskId && projectId) {
-            // Navigate to the project's tasks page with the specific task highlighted
-            navigate(`/projects/${projectId}/tasks?task=${taskId}`, { 
-              state: { 
-                fromNotification: true,
-                highlightTaskId: taskId,
-                timestamp: Date.now()
-              }
-            });
+            // Check if the link is a custom format with task_id parameter
+            if (notification.link.includes('task_id=')) {
+              // Use the link directly as it already has the correct format
+              navigate(notification.link, { 
+                state: { 
+                  fromNotification: true,
+                  highlightTaskId: taskId,
+                  timestamp: Date.now()
+                }
+              });
+            } else {
+              // Use the old format for backward compatibility
+              // Create the new link format that uses task_id instead of taskId
+              navigate(`/projects/${projectId}?task_id=${taskId}`, { 
+                state: { 
+                  fromNotification: true,
+                  highlightTaskId: taskId,
+                  timestamp: Date.now()
+                }
+              });
+            }
             return;
           }
         }
