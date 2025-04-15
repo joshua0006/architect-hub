@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { ChevronRight, FolderOpen, Home, MoreHorizontal, FileText } from 'lucide-react';
+import { ChevronRight, FolderOpen, Home, MoreHorizontal, FileText, Image } from 'lucide-react';
 import { Folder, Document } from '../types';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { db } from '../lib/firebase';
@@ -162,6 +162,11 @@ export default function DocumentBreadcrumbs({
 
   // Get appropriate icon for document type
   const getDocumentIcon = (type: string) => {
+    if (type === 'pdf') {
+      return <FileText className="w-4 h-4 text-red-400" />;
+    } else if (type === 'heic' || type === 'image/heic') {
+      return <Image className="w-4 h-4 text-blue-400" />;
+    }
     return <FileText className="w-4 h-4 text-gray-400" />;
   };
 

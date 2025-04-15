@@ -24,6 +24,7 @@ import {
   FolderPlus,
   ChevronUp,
   FolderInput,
+  Image,
 } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { Document, Folder, Project } from "../types";
@@ -2155,10 +2156,14 @@ export default function DocumentList({
   // Simple function to check if the document is a PDF
   const isPdf = (doc?: Document) => {
     if (!doc) return false;
-    if (doc.type === "pdf") return true;
-    
-    // Check by extension if type not explicitly set
-    return doc.name.toLowerCase().endsWith(".pdf");
+    const extension = doc.name.split('.').pop()?.toLowerCase();
+    return extension === 'pdf' || (doc.metadata?.contentType === 'application/pdf');
+  };
+  
+  const isHeic = (doc?: Document) => {
+    if (!doc) return false;
+    const extension = doc.name.split('.').pop()?.toLowerCase();
+    return extension === 'heic' || (doc.metadata?.contentType === 'image/heic');
   };
   
   // Find the Layout component ref or context to update its state when fullscreen changes
@@ -3230,7 +3235,13 @@ export default function DocumentList({
                       }}
                       className="flex items-center space-x-3 flex-1"
                     >
-                      <FileText className="w-6 h-6 text-gray-400" />
+                      {isHeic(doc) ? (
+                        <Image className="w-6 h-6 text-blue-400" />
+                      ) : isPdf(doc) ? (
+                        <FileText className="w-6 h-6 text-red-400" />
+                      ) : (
+                        <FileText className="w-6 h-6 text-gray-400" />
+                      )}
                       <div>
                         <div className="text-left">
                           <span className="font-medium text-gray-900">
