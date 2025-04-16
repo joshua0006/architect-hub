@@ -11,7 +11,7 @@ import Settings from './Settings';
 import TeamList from './TeamList';
 import TaskList from './TaskList';
 import AccountSettings from './AccountSettings';
-import { Project, Folder, Document } from '../types';
+import { Project, Folder, Document, Task, TeamMember } from '../types';
 import { projectService } from '../services';
 import { sampleTasks, sampleTeamMembers } from '../data/sampleData';
 import { useDocumentManager } from '../hooks/useDocumentManager';
@@ -223,6 +223,66 @@ const DocumentsPage: React.FC<{
         </div>
       )}
     </Layout>
+  );
+};
+
+// Define the TaskDetailView component inside the AppContent component
+interface TaskDetailViewProps {
+  projects: Project[];
+  selectedProject?: Project;
+  setSelectedProject: (project?: Project) => void;
+  tasks: Task[];
+  teamMembers: TeamMember[];
+  createTask: (
+    projectId: string,
+    title: string,
+    description: string,
+    assignedTo: string[],
+    dueDate: string,
+    priority: Task["priority"],
+    category: Task["category"],
+    parentTaskId?: string
+  ) => Promise<void>;
+  updateTask: (id: string, updates: Partial<Omit<Task, "id" | "projectId">>) => Promise<void>;
+  deleteTask: (id: string) => Promise<void>;
+}
+
+const TaskDetailView: React.FC<TaskDetailViewProps> = ({ 
+  projects, 
+  selectedProject, 
+  setSelectedProject, 
+  tasks,
+  teamMembers,
+  createTask,
+  updateTask,
+  deleteTask
+}) => {
+  const { projectId, taskId } = useParams();
+  
+  // Find the project and switch to it if needed
+  useEffect(() => {
+    if (projectId && (!selectedProject || selectedProject.id !== projectId)) {
+      const project = projects.find(p => p.id === projectId);
+      if (project) {
+        setSelectedProject(project);
+      }
+    }
+  }, [projectId, selectedProject, projects, setSelectedProject]);
+  
+  return selectedProject ? (
+    <TaskList
+      tasks={tasks.filter(t => t.projectId === selectedProject.id)}
+      teamMembers={teamMembers.filter(m => m.projectIds.includes(selectedProject.id))}
+      projectId={selectedProject.id}
+      onCreateTask={createTask}
+      onStatusChange={(taskId, status) => updateTask(taskId, { status })}
+      onUpdateTask={updateTask}
+      onDeleteTask={deleteTask}
+    />
+  ) : (
+    <div className="h-full flex items-center justify-center text-gray-500">
+      Loading project...
+    </div>
   );
 };
 
@@ -958,6 +1018,35 @@ export default function AppContent() {
                   Select a project to view tasks
                 </div>
               )}
+            </Layout>
+          }
+        />
+        
+        <Route
+          path="/tasks/:projectId/:taskId"
+          element={
+            <Layout
+              sidebar={
+                <ProjectList
+                  projects={projects}
+                  selectedId={selectedProject?.id}
+                  onSelect={setSelectedProject}
+                  onProjectsChange={loadProjects}
+                  onUpdateProject={handleUpdateProject}
+                  tasks={tasks}
+                />
+              }
+            >
+              <TaskDetailView 
+                projects={projects}
+                selectedProject={selectedProject}
+                setSelectedProject={setSelectedProject}
+                tasks={tasks}
+                teamMembers={teamMembers}
+                createTask={createTask}
+                updateTask={updateTask}
+                deleteTask={deleteTask}
+              />
             </Layout>
           }
         />

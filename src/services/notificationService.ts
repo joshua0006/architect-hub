@@ -22,6 +22,10 @@ export interface Notification {
     fileId?: string; // Add fileId to metadata for file upload notifications
     taskId?: string; // Add taskId to metadata for task notifications
     dueDate?: string; // Add dueDate to metadata for task notifications
+    subtaskId?: string; // Add subtaskId to metadata for subtask notifications
+    parentTaskId?: string; // Add parentTaskId to metadata for subtask notifications
+    parentTaskTitle?: string; // Add parentTaskTitle for context
+    projectName?: string; // Add projectName for better display
   };
   raw?: {
     userId: string;
@@ -1299,19 +1303,111 @@ export const fixNotificationStructure = async (userId: string): Promise<number> 
 };
 
 /**
- * Reset the notification system cache and active transactions
- * Call this function when experiencing issues with notifications
- * @returns A promise that resolves when the reset is complete
+ * Reset the notification system by cleaning caches and checking database structure
  */
 export const resetNotificationSystem = async (): Promise<void> => {
-  // Clear all cache maps
-  recentNotificationOperations.clear();
-  activeTransactions.clear();
-  existingNotificationCache.clear();
-  
-  // Wait a moment to ensure any in-progress operations have time to complete
-  await new Promise(resolve => setTimeout(resolve, 1000));
+  try {
+    console.log('[Notification System] Resetting notification system');
+    
+    // Clear all local caches
+    notificationCache.clear();
+    recentNotificationOperations.clear();
+    activeTransactions.clear();
+    existingNotificationCache.clear();
+    
+    // Perform validation and cleanup of subtask notifications
+    await fixSubtaskNotifications();
+    
+    console.log('[Notification System] Notification system reset complete');
+  } catch (error) {
+    console.error('[Notification Error] Error resetting notification system:', error);
+  }
 };
+
+/**
+ * Fixes issues with subtask notifications by ensuring they have the correct metadata
+ */
+async function fixSubtaskNotifications(): Promise<void> {
+  try {
+    // Query for all subtask notifications that might have issues
+    const notificationsRef = collection(db, 'notifications');
+    const q = query(
+      notificationsRef,
+      where('iconType', '==', 'task-subtask')
+    );
+    
+    const snapshot = await getDocs(q);
+    
+    if (snapshot.empty) {
+      console.log('[Notification System] No subtask notifications found to fix');
+      return;
+    }
+    
+    console.log(`[Notification System] Found ${snapshot.size} subtask notifications to check`);
+    let fixCount = 0;
+    
+    const updatePromises = snapshot.docs.map(async (docSnapshot) => {
+      const notification = docSnapshot.data() as Notification;
+      const needsUpdate = validateAndFixSubtaskNotification(notification);
+      
+      if (needsUpdate) {
+        fixCount++;
+        await updateDoc(doc(db, 'notifications', docSnapshot.id), {
+          metadata: notification.metadata,
+          link: notification.link
+        });
+      }
+    });
+    
+    await Promise.all(updatePromises);
+    console.log(`[Notification System] Fixed ${fixCount} subtask notifications`);
+  } catch (error) {
+    console.error('[Notification Error] Error fixing subtask notifications:', error);
+  }
+}
+
+/**
+ * Validates a subtask notification and fixes any issues with the metadata or link
+ * @param notification The notification to validate and fix
+ * @returns true if the notification was updated, false otherwise
+ */
+function validateAndFixSubtaskNotification(notification: Notification): boolean {
+  let updated = false;
+  const metadata = notification.metadata;
+  
+  // If there's no subtaskId, try to extract it from other fields
+  if (!metadata.subtaskId) {
+    // Look for subtask ID in any other field that might contain it
+    console.warn(`[Notification Warning] Subtask notification ${notification.id} missing subtaskId`);
+    // No way to recover this value if missing
+  }
+  
+  // Fix missing parentTaskId by using taskId
+  if (!metadata.parentTaskId && metadata.taskId) {
+    metadata.parentTaskId = metadata.taskId;
+    updated = true;
+    console.log(`[Notification System] Added parentTaskId from taskId for notification ${notification.id}`);
+  }
+  
+  // Fix missing taskId by using parentTaskId
+  if (!metadata.taskId && metadata.parentTaskId) {
+    metadata.taskId = metadata.parentTaskId;
+    updated = true;
+    console.log(`[Notification System] Added taskId from parentTaskId for notification ${notification.id}`);
+  }
+  
+  // Fix incorrect link format
+  if (metadata.projectId && metadata.taskId) {
+    const correctLink = `/tasks/${metadata.projectId}/${metadata.taskId}`;
+    if (notification.link !== correctLink) {
+      notification.link = correctLink;
+      updated = true;
+      console.log(`[Notification System] Fixed link for notification ${notification.id}`);
+    }
+  }
+  
+  return updated;
+}
 
 /**
  * Handles notifications for users who have been mentioned in a comment
@@ -1559,7 +1655,7 @@ export const createTaskNotification = async (
     }
     
     // Create the link to the task
-    const link = taskLink || `/projects/${projectId}?task_id=${taskId}`;
+    const link = taskLink || `/tasks/${projectId}/${taskId}`;
     
     // Create a notification for each assigned user
     const notificationPromises = assignedUserIds.map(userId => {
@@ -1581,7 +1677,8 @@ export const createTaskNotification = async (
           uploadDate: new Date().toISOString(),
           projectId,
           taskId,
-          dueDate: dueDate || ''
+          dueDate: dueDate || '',
+          projectName: projectName || ''
         }
       };
       
@@ -1635,7 +1732,7 @@ export const createSubtaskNotification = async (
     }
     
     // Create the link to the task with task ID as query parameter to highlight it
-    const link = `/projects/${projectId}?task_id=${parentTaskId}`;
+    const link = `/tasks/${projectId}/${parentTaskId}`;
     
     // Create a notification for each assigned user
     const notificationPromises = assignedUserIds.map(userId => {
@@ -1655,7 +1752,10 @@ export const createSubtaskNotification = async (
           uploadDate: new Date().toISOString(),
           projectId,
           taskId: parentTaskId,
-          subtaskId
+          parentTaskId,
+          parentTaskTitle,
+          subtaskId,
+          projectName: projectName || ''
         }
       };
       
@@ -1673,6 +1773,83 @@ export const createSubtaskNotification = async (
     }
   } catch (error) {
     console.error('[Notification Error] Error in createSubtaskNotification:', error);
+    return [];
+  }
+};
+
+/**
+ * Creates notifications when users are assigned to a subtask
+ * @param parentTaskId The ID of the parent task
+ * @param parentTaskTitle The title of the parent task
+ * @param subtaskId The ID of the subtask
+ * @param subtaskTitle The title of the subtask
+ * @param projectId The ID of the project
+ * @param projectName The name of the project
+ * @param creatorName The name of the user who assigned the subtask
+ * @param assignedUserIds Array of user IDs assigned to the subtask
+ * @returns Array of created notification IDs
+ */
+export const createSubtaskAssignmentNotification = async (
+  parentTaskId: string,
+  parentTaskTitle: string,
+  subtaskId: string,
+  subtaskTitle: string,
+  projectId: string,
+  projectName: string,
+  creatorName: string,
+  assignedUserIds: string[]
+): Promise<string[]> => {
+  try {
+    console.log(`[Notification Info] Creating subtask assignment notifications for ${assignedUserIds.length} users`);
+    
+    // If no target users provided, return empty array
+    if (!assignedUserIds || assignedUserIds.length === 0) {
+      console.warn('[Notification Warning] No target users provided for subtask assignment notification');
+      return [];
+    }
+    
+    // Create the link to the task page with the correct URL format
+    const link = `/tasks/${projectId}/${parentTaskId}`;
+    
+    // Create a notification for each assigned user
+    const notificationPromises = assignedUserIds.map(userId => {
+      const notification = {
+        iconType: 'task-subtask',
+        type: 'info' as const,
+        message: `${creatorName} assigned you to subtask "${subtaskTitle}"`,
+        link,
+        read: false,
+        userId,
+        metadata: {
+          contentType: 'subtask-assignment',
+          fileName: '',
+          folderId: '',
+          folderName: '',
+          guestName: creatorName,
+          uploadDate: new Date().toISOString(),
+          projectId,
+          taskId: parentTaskId,
+          subtaskId,
+          projectName: projectName || '',
+          parentTaskTitle,
+          parentTaskId
+        }
+      };
+      
+      return createNotification(notification);
+    });
+    
+    try {
+      // Wait for all notifications to be created
+      const notificationIds = await Promise.all(notificationPromises);
+      console.log(`[Notification Success] Created ${notificationIds.length} subtask assignment notifications`);
+      return notificationIds;
+    } catch (error) {
+      console.error('[Notification Error] Error creating subtask assignment notifications:', error);
+      return [];
+    }
+  } catch (error) {
+    console.error('[Notification Error] Error in createSubtaskAssignmentNotification:', error);
     return [];
   }
 };

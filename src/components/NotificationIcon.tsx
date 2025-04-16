@@ -18,6 +18,15 @@ import NotificationContent from './NotificationContent';
 import { useToast } from '../contexts/ToastContext';
 import { useAuth } from '../contexts/AuthContext';
 
+// Extended notification interface to include subtaskId in metadata
+interface ExtendedNotification extends Notification {
+  metadata: Notification['metadata'] & {
+    subtaskId?: string;
+    parentTaskId?: string;
+    parentTaskTitle?: string;
+  }
+}
+
 // Add a custom event for document refreshing
 export const NOTIFICATION_DOCUMENT_UPDATE_EVENT = 'notification-document-update';
 
@@ -43,6 +52,187 @@ export const NotificationIcon: React.FC = () => {
   
   // Count of read notifications
   const readCount = notifications.filter(n => n.read).length;
+  
+  // Function to handle navigation for task and subtask notifications
+  const handleTaskNotificationNavigation = (notification: ExtendedNotification) => {
+    // Extract task ID and project ID from metadata
+    let taskId = notification.metadata?.taskId;
+    let projectId = notification.metadata?.projectId;
+    
+    console.log('Task Notification Navigation Debug:', {
+      notification: {
+        id: notification.id,
+        iconType: notification.iconType,
+        contentType: notification.metadata?.contentType,
+        metadata: notification.metadata,
+        link: notification.link
+      },
+      taskId,
+      projectId,
+      currentPath: window.location.pathname
+    });
+    
+    // For subtask notifications, check if we have a subtaskId in metadata
+    const isSubtaskRelated = notification.iconType === 'task-subtask';
+    const isSubtaskAssignment = isSubtaskRelated && notification.metadata?.contentType === 'subtask-assignment';
+    
+    // If this is a subtask notification, make sure we highlight both the task and subtask
+    let subtaskId = isSubtaskRelated ? notification.metadata?.subtaskId : null;
+    
+    // For subtask notifications, try different ways of getting the subtask ID
+    if (isSubtaskRelated && !subtaskId) {
+      // Look for subtaskId in the URL
+      const subtaskIdMatch = notification.link.match(/subtask_id=([^&]+)/);
+      if (subtaskIdMatch && subtaskIdMatch[1]) {
+        subtaskId = subtaskIdMatch[1];
+        console.log('Extracted subtaskId from link query param:', subtaskId);
+      } else {
+        console.warn('Could not find subtaskId in notification for a subtask notification', {
+          notificationId: notification.id,
+          link: notification.link,
+          metadata: notification.metadata
+        });
+      }
+    }
+    
+    // Handle legacy notification format where link has task_id query parameter
+    if (!taskId && notification.link.includes('task_id=')) {
+      const taskIdMatch = notification.link.match(/task_id=([^&]+)/);
+      if (taskIdMatch && taskIdMatch[1]) {
+        taskId = taskIdMatch[1];
+        console.log('Extracted taskId from legacy link format:', taskId);
+      }
+    }
+    
+    // Handle legacy notification format where link has /projects/ path
+    if (!projectId && notification.link.includes('/projects/')) {
+      const projectIdMatch = notification.link.match(/\/projects\/([^\/\?]+)/);
+      if (projectIdMatch && projectIdMatch[1]) {
+        projectId = projectIdMatch[1];
+        console.log('Extracted projectId from legacy link format:', projectId);
+      }
+    }
+    
+    // Extract both projectId and taskId from links with /tasks/{projectId}/{taskId} format
+    if ((!projectId || !taskId) && notification.link.includes('/tasks/')) {
+      const taskUrlMatch = notification.link.match(/\/tasks\/([^\/]+)\/([^\/\?]+)/);
+      if (taskUrlMatch && taskUrlMatch.length >= 3) {
+        const extractedProjectId = taskUrlMatch[1];
+        const extractedTaskId = taskUrlMatch[2];
+        
+        if (!projectId && extractedProjectId) {
+          projectId = extractedProjectId;
+          console.log('Extracted projectId from tasks URL:', projectId);
+        }
+        
+        if (!taskId && extractedTaskId) {
+          taskId = extractedTaskId;
+          console.log('Extracted taskId from tasks URL:', taskId);
+        }
+      }
+    }
+    
+    // For subtask notifications, if we don't have a task ID, use the parent task ID
+    if (isSubtaskRelated && !taskId && notification.metadata?.parentTaskId) {
+      taskId = notification.metadata.parentTaskId;
+      console.log('Using parentTaskId for subtask notification:', taskId);
+    }
+    
+    // For subtask notifications, make sure we have a task ID
+    if (isSubtaskRelated && !taskId) {
+      console.error('Subtask notification missing required taskId/parentTaskId metadata');
+      return;
+    }
+    
+    if (!taskId || !projectId) {
+      console.error('Task notification missing required taskId or projectId metadata:', {
+        taskId,
+        projectId,
+        link: notification.link,
+        metadata: notification.metadata
+      });
+      
+      // Try one more fallback approach - parse the URL directly for tasks
+      if (notification.link.startsWith('/tasks/')) {
+        const pathParts = notification.link.split('/').filter(Boolean);
+        if (pathParts.length >= 3 && pathParts[0] === 'tasks') {
+          // The URL format should be /tasks/{projectId}/{taskId}
+          projectId = pathParts[1];
+          taskId = pathParts[2];
+          
+          console.log('Fallback extraction from URL path:', { projectId, taskId });
+          
+          if (projectId && taskId) {
+            // Continue with navigation using these extracted IDs
+            console.log('Using fallback IDs for navigation');
+          } else {
+            showToast('Unable to navigate to this task', 'error');
+            return;
+          }
+        } else {
+          showToast('Unable to navigate to this task', 'error');
+          return;
+        }
+      } else {
+        showToast('Unable to navigate to this task', 'error');
+        return;
+      }
+    }
+    
+    // Navigate to the task page with the correct URL format
+    const taskUrl = `/tasks/${projectId}/${taskId}`;
+    console.log(`Navigating to task page: ${taskUrl} with subtaskId: ${subtaskId || 'none'}`);
+    
+    // Special handling for legacy URL formats that might have unexpected structure
+    if (notification.link && notification.link !== taskUrl) {
+      console.log(`Link format mismatch. Using generated URL ${taskUrl} instead of original ${notification.link}`);
+    }
+    
+    // First, dispatch a custom event for task refresh to prepare the component
+    const eventDetail = {
+      taskId,
+      projectId,
+      subtaskId,
+      notificationType: notification.iconType,
+      timestamp: Date.now(),
+      source: 'notification',
+      isSubtaskAssignment
+    };
+    
+    // Enhanced logging to debug subtask navigation
+    console.log('Task Navigation Details:', {
+      navigatingTo: taskUrl,
+      subtaskId,
+      isSubtaskRelated,
+      isSubtaskAssignment,
+      eventDetail,
+      notificationMetadata: notification.metadata
+    });
+    
+    // Dispatch task update event that components can listen for
+    const customEvent = new CustomEvent('task-notification-update', { 
+      detail: eventDetail,
+      bubbles: true
+    });
+    document.dispatchEvent(customEvent);
+    
+    // Give a short delay to ensure the event is processed before navigation
+    setTimeout(() => {
+      navigate(taskUrl, { 
+        state: { 
+          fromNotification: true,
+          highlightTaskId: taskId,
+          highlightSubtaskId: subtaskId,
+          isSubtaskAssignment,
+          isSubtaskRelated,
+          parentTaskId: isSubtaskRelated ? taskId : undefined,
+          parentTaskTitle: isSubtaskRelated ? notification.metadata?.parentTaskTitle : undefined,
+          timestamp: Date.now()
+        },
+        replace: true // Use replace to avoid history stacking
+      });
+    }, 100);
+  };
   
   // Function to deduplicate notifications by ID - memoized to prevent recreating
   const deduplicateNotifications = useCallback((notifs: Notification[]): Notification[] => {
@@ -273,6 +463,15 @@ export const NotificationIcon: React.FC = () => {
   const handleNotificationClick = async (notification: Notification) => {
     if (!user) return;
     
+    console.log('Notification clicked:', {
+      id: notification.id,
+      type: notification.type,
+      iconType: notification.iconType,
+      link: notification.link,
+      hasMetadata: !!notification.metadata,
+      metadata: notification.metadata
+    });
+    
     try {
       // Verify this notification belongs to the current user
       if (notification.userId !== user.id) {
@@ -305,39 +504,23 @@ export const NotificationIcon: React.FC = () => {
         // Check if this is a subtask notification
         const isSubtaskNotification = notification.iconType === 'task-subtask';
         
+        console.log('Notification link checks:', {
+          isTaskNotification,
+          isSubtaskNotification,
+          willUseTaskHandler: isTaskNotification || isSubtaskNotification,
+          notificationLink: notification.link,
+          metadata: notification.metadata
+        });
+        
+        // Handle task and subtask notifications with a separate function
+        if (isTaskNotification || isSubtaskNotification) {
+          console.log('Calling handleTaskNotificationNavigation');
+          handleTaskNotificationNavigation(notification as ExtendedNotification);
+          return;
+        }
+        
         // Check if this is a file upload notification
         const isFileUploadNotification = notification.iconType === 'file-upload';
-        
-        if (isTaskNotification || isSubtaskNotification) {
-          // For task/subtask notifications, use the taskId from metadata
-          const taskId = notification.metadata?.taskId;
-          const projectId = notification.metadata?.projectId;
-          
-          if (taskId && projectId) {
-            // Check if the link is a custom format with task_id parameter
-            if (notification.link.includes('task_id=')) {
-              // Use the link directly as it already has the correct format
-              navigate(notification.link, { 
-                state: { 
-                  fromNotification: true,
-                  highlightTaskId: taskId,
-                  timestamp: Date.now()
-                }
-              });
-            } else {
-              // Use the old format for backward compatibility
-              // Create the new link format that uses task_id instead of taskId
-              navigate(`/projects/${projectId}?task_id=${taskId}`, { 
-                state: { 
-                  fromNotification: true,
-                  highlightTaskId: taskId,
-                  timestamp: Date.now()
-                }
-              });
-            }
-            return;
-          }
-        }
         
         // Handle file upload notifications specially
         if (isFileUploadNotification) {
@@ -469,7 +652,7 @@ export const NotificationIcon: React.FC = () => {
           }
         }
         
-        // Update navigation state with the correct target link
+        // Create navigation state with the correct target link
         navigationState.targetLink = targetLink;
         
         // Dispatch a custom event to trigger document refresh
@@ -493,11 +676,16 @@ export const NotificationIcon: React.FC = () => {
         }
         
         // First navigate to documents to ensure we're in the documents section
-        if (!isInDocuments) {
-          navigate(targetLink, { state: navigationState, replace: true });
-        } else {
-          // If we need project switching, always navigate directly to the target
-          navigate(targetLink, { state: navigationState, replace: true });
+        // Make sure we're not handling task notifications here by checking the icon type
+        const isTaskRelated = notification.iconType === 'task-assignment' || notification.iconType === 'task-subtask';
+        
+        if (!isTaskRelated) {
+          if (!isInDocuments) {
+            navigate(targetLink, { state: navigationState, replace: true });
+          } else {
+            // If we need project switching, always navigate directly to the target
+            navigate(targetLink, { state: navigationState, replace: true });
+          }
         }
       }
     } catch (error) {

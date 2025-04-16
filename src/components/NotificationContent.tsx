@@ -2,8 +2,33 @@ import React from 'react';
 import { Folder, ExternalLink, File, User, MessageSquare, AtSign, CheckSquare } from 'lucide-react';
 import { Notification } from '../services/notificationService';
 
+// Extend the notification metadata type to include optional projectName and parentTaskTitle
+interface ExtendedMetadata {
+  contentType: string;
+  fileName: string;
+  folderId: string;
+  folderName: string;
+  guestName: string;
+  uploadDate: string;
+  projectId?: string;
+  projectName?: string;
+  commentId?: string;
+  commentText?: string;
+  mentionedUserId?: string;
+  fileId?: string;
+  taskId?: string;
+  dueDate?: string;
+  parentTaskId?: string;
+  parentTaskTitle?: string;
+}
+
+// Define extended notification type with the enhanced metadata
+interface ExtendedNotification extends Omit<Notification, 'metadata'> {
+  metadata: ExtendedMetadata;
+}
+
 interface NotificationContentProps {
-  notification: Notification;
+  notification: ExtendedNotification;
   formatTime: (timestamp: any) => string;
   getIconClass: (type: string) => string;
 }
@@ -45,6 +70,15 @@ const NotificationContent: React.FC<NotificationContentProps> = ({
   // Check if this is a task notification
   const isTaskNotification = (notification.iconType === 'task-assignment');
   
+  // Check if this is a subtask notification
+  const isSubtaskNotification = (notification.iconType === 'task-subtask');
+  
+  // Check if this is a subtask assignment notification specifically
+  const isSubtaskAssignmentNotification = (
+    notification.iconType === 'task-subtask' && 
+    notification.metadata?.contentType === 'subtask-assignment'
+  );
+  
   // Check if this is a file upload notification
   const isFileUploadNotification = (notification.iconType === 'file-upload');
   
@@ -70,6 +104,9 @@ const NotificationContent: React.FC<NotificationContentProps> = ({
           )}
           {isTaskNotification && (
             <CheckSquare className="w-3 h-3 mr-1 text-purple-500 inline-flex flex-shrink-0" />
+          )}
+          {isSubtaskNotification && (
+            <CheckSquare className="w-3 h-3 mr-1 text-indigo-500 inline-flex flex-shrink-0" />
           )}
           {isFileUploadNotification && (
             <File className="w-3 h-3 mr-1 text-green-500 inline-flex flex-shrink-0" />
@@ -149,6 +186,26 @@ const NotificationContent: React.FC<NotificationContentProps> = ({
               </div>
             )}
             
+            {/* For task and subtask notifications, show project name if available */}
+            {(isTaskNotification || isSubtaskNotification) && notification.metadata?.projectName && (
+              <div className="mt-1 flex items-center">
+                <Folder className="w-3 h-3 mr-1 flex-shrink-0" />
+                <span className="truncate max-w-[170px] overflow-hidden" title={notification.metadata.projectName}>
+                  {notification.metadata.projectName}
+                </span>
+              </div>
+            )}
+            
+            {/* For subtask notifications, show parent task if available */}
+            {isSubtaskNotification && notification.metadata?.parentTaskTitle && (
+              <div className="mt-1 flex items-center">
+                <CheckSquare className="w-3 h-3 mr-1 flex-shrink-0" />
+                <span className="truncate max-w-[170px] overflow-hidden" title={notification.metadata.parentTaskTitle}>
+                  Parent: {notification.metadata.parentTaskTitle}
+                </span>
+              </div>
+            )}
+            
             {/* For file upload notifications, show a "View file" link */}
             {isFileUploadNotification && notification.link && (
               <div className="mt-2 flex justify-end">
@@ -172,8 +229,18 @@ const NotificationContent: React.FC<NotificationContentProps> = ({
             {/* For task notifications, show a "View task" link */}
             {isTaskNotification && notification.link && (
               <div className="mt-2 flex justify-end">
-                <span className="text-purple-600 text-xs flex items-center">
+                <span className="text-purple-600 text-xs flex items-center bg-purple-50 px-2 py-1 rounded hover:bg-purple-100 transition-colors">
                   <span className="mr-1">View task</span>
+                  <ExternalLink className="w-3 h-3" />
+                </span>
+              </div>
+            )}
+            
+            {/* For subtask notifications, show a "View subtask" link */}
+            {isSubtaskNotification && notification.link && (
+              <div className="mt-2 flex justify-end">
+                <span className="text-indigo-600 text-xs flex items-center bg-indigo-50 px-2 py-1 rounded hover:bg-indigo-100 transition-colors">
+                  <span className="mr-1">{isSubtaskAssignmentNotification ? "Go to subtask" : "View subtask"}</span>
                   <ExternalLink className="w-3 h-3" />
                 </span>
               </div>
