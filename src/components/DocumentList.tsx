@@ -380,11 +380,11 @@ export default function DocumentList({
     // }
 
     // Apply view filter
-    // if (viewFilter === 'files') {
-    //   filteredFolders = [];
-    // } else if (viewFilter === 'folders') {
-    //   filteredDocs = [];
-    // }
+    if (viewFilter === 'files') {
+      filteredFolders = [];
+    } else if (viewFilter === 'folders') {
+      filteredDocs = [];
+    }
 
     // Sort documents and folders based on sortBy and sortOrder
     const sortFunction = (a: any, b: any) => {

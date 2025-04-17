@@ -180,7 +180,7 @@ const ProjectItem = ({
 
   const renderStatusMenu = () => {
     // For non-staff users, just show the status without dropdown
-    if (user?.role !== 'Staff') {
+    if (user?.role !== 'Staff' && user?.role !== 'Admin'	) {
       return (
         <div className="status-menu">
           <button
