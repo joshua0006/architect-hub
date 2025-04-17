@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { Plus, X, Loader2, FolderOpen, AlertCircle } from 'lucide-react';
+import { Plus, X, Loader2, FolderOpen, AlertCircle, FolderTree, FolderX } from 'lucide-react';
 import { Project } from '../types';
 import { projectService } from '../services';
 import { useAuth } from '../contexts/AuthContext';
+import { PROJECT_FOLDER_TEMPLATE } from '../constants/folderTemplates';
 
 interface AddProjectProps {
   onSuccess?: () => void;
@@ -13,6 +14,7 @@ export default function AddProject({ onSuccess, onCancel }: AddProjectProps) {
   const [isCreating, setIsCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { user } = useAuth();
+  const [useTemplate, setUseTemplate] = useState(true);
   
   const [formData, setFormData] = useState({
     name: '',
@@ -92,7 +94,8 @@ export default function AddProject({ onSuccess, onCancel }: AddProjectProps) {
             country: formData.metadata.location.country || 'N/A'
           },
           budget: formData.metadata.budget || 'N/A',
-          scope: formData.metadata.scope || 'N/A'
+          scope: formData.metadata.scope || 'N/A',
+          useDefaultTemplate: useTemplate
         }
       };
       
@@ -237,6 +240,46 @@ export default function AddProject({ onSuccess, onCancel }: AddProjectProps) {
                   onChange={handleChange}
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
+              </div>
+            </div>
+
+            {/* Folder Template Section */}
+            <div className="space-y-4 mt-6">
+              <h3 className="text-lg font-medium text-gray-900">Project Templates</h3>
+              <div className="grid grid-cols-2 gap-4">
+                <div 
+                  className={`border p-4 rounded-lg cursor-pointer ${useTemplate ? 'border-blue-500 bg-blue-50' : 'border-gray-300'}`}
+                  onClick={() => setUseTemplate(true)}
+                >
+                  <div className="flex items-center space-x-3 mb-3">
+                    <FolderTree className="w-5 h-5 text-blue-600" />
+                    <span className="font-medium">Use Default Template</span>
+                  </div>
+                  <div className="bg-gray-50 p-3 rounded text-sm space-y-1 text-gray-700">
+                    <p>./Documents</p>
+                    <p className="pl-4">/ADMIN (Staff only)</p>
+                    <p className="pl-4">/CAD (Staff only)</p>
+                    <p className="pl-4">/PHOTOS (All)</p>
+                    <p className="pl-4">/CONSULTANTS (All)</p>
+                    <p className="pl-4">/MARKUPS (Staff only)</p>
+                    <p className="pl-4">/ISSUED DRAWINGS (All)</p>
+                    <p className="pl-4">/Emails (Staff Only)</p>
+                  </div>
+                </div>
+                
+                <div 
+                  className={`border p-4 rounded-lg cursor-pointer ${!useTemplate ? 'border-blue-500 bg-blue-50' : 'border-gray-300'}`}
+                  onClick={() => setUseTemplate(false)}
+                >
+                  <div className="flex items-center space-x-3 mb-3">
+                    <FolderX className="w-5 h-5 text-gray-600" />
+                    <span className="font-medium">No Template</span>
+                  </div>
+                  <div className="bg-gray-50 p-3 rounded text-sm space-y-1 text-gray-700">
+                    <p>Create a project without predefined folders.</p>
+                    <p>You can add custom folders after project creation.</p>
+                  </div>
+                </div>
               </div>
             </div>
           </div>

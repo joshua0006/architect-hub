@@ -10,6 +10,7 @@ import { folderService } from "../services";
 interface DocumentActionsProps {
   projectId: string;
   currentFolderId?: string;
+  rootFolderId?: string; // The invisible root folder ID if available
   folders: FolderType[];
   onCreateFolder: (name: string, parentId?: string) => Promise<void>;
   onCreateDocument: (
@@ -34,6 +35,7 @@ interface DocumentActionsProps {
 export default function DocumentActions({
   projectId,
   currentFolderId,
+  rootFolderId,
   folders,
   onCreateFolder,
   onCreateDocument,
@@ -126,6 +128,9 @@ export default function DocumentActions({
     try {
       setIsUploading(true);
       
+      // Determine target folder ID - use root folder as fallback if available
+      const targetFolderId = currentFolderId || rootFolderId;
+      
       if (files.length === 1) {
         // Single file upload
         const file = files[0];
@@ -140,11 +145,11 @@ export default function DocumentActions({
           fileType = "dwg";
         }
         
-        await onCreateDocument(fileName, fileType, file, currentFolderId);
+        await onCreateDocument(fileName, fileType, file, targetFolderId);
         showToast(`File "${fileName}" uploaded successfully`, "success");
       } else if (onCreateMultipleDocuments) {
         // Multiple files upload
-        await onCreateMultipleDocuments(Array.from(files), currentFolderId);
+        await onCreateMultipleDocuments(Array.from(files), targetFolderId);
         showToast(`${files.length} files uploaded successfully`, "success");
       }
       
@@ -156,13 +161,13 @@ export default function DocumentActions({
       const uploadSuccessEvent = new CustomEvent('document-upload-success', {
         bubbles: true,
         detail: {
-          folderId: currentFolderId,
+          folderId: targetFolderId,
           timestamp: Date.now(),
           fileCount: files.length
         }
       });
       document.dispatchEvent(uploadSuccessEvent);
-      console.log(`[Document Actions] Dispatched upload success event for folder: ${currentFolderId}`);
+      console.log(`[Document Actions] Dispatched upload success event for folder: ${targetFolderId}`);
       
       // Reset the input
       if (fileInputRef.current) {
@@ -316,7 +321,7 @@ export default function DocumentActions({
   // Get the current folder name for the token generation
   const currentFolderName = currentFolderId 
     ? folders.find(f => f.id === currentFolderId)?.name 
-    : "Root";
+    : "_root";
 
   // Only show actions if user has permission to upload
   if (!hasUploadPermission()) {
@@ -642,22 +647,6 @@ export default function DocumentActions({
               {/* Folder selection list */}
               <div className="max-h-60 overflow-y-auto border border-gray-200 rounded-md mb-4">
                 <ul className="divide-y divide-gray-200">
-                  {/* Root folder option */}
-                  <li 
-                    className={`px-4 py-2 hover:bg-gray-50 cursor-pointer flex items-center justify-between ${
-                      selectedDestinationFolderId === "" ? 'bg-blue-50' : ''
-                    }`}
-                    onClick={() => setSelectedDestinationFolderId("")}
-                  >
-                    <div className="flex items-center">
-                      <Folder className="w-5 h-5 text-gray-400 mr-2" />
-                      <span>Root</span>
-                    </div>
-                    {selectedDestinationFolderId === "" && (
-                      <div className="w-2 h-2 rounded-full bg-blue-600"></div>
-                    )}
-                  </li>
-                  
                   {/* Available folders */}
                   {folders.map(folder => (
                     <li 

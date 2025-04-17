@@ -167,8 +167,19 @@ export const projectService = {
 
       // Create default folder structure
       try {
-        await folderTemplateService.createFolderStructure(docRef.id);
-        console.log("Default folder structure created for project:", docRef.id);
+        // Check if we should create the default template structure
+        const useDefaultTemplate = project.metadata?.useDefaultTemplate !== undefined 
+          ? project.metadata.useDefaultTemplate 
+          : true; // Default to true if not specified
+        
+        if (useDefaultTemplate) {
+          await folderTemplateService.createFolderStructure(docRef.id);
+          console.log("Default folder structure created for project:", docRef.id);
+        } else {
+          // Still create the invisible root folder for organization
+          await folderTemplateService.createInvisibleRootFolder(docRef.id);
+          console.log("Created only root folder for project:", docRef.id);
+        }
       } catch (folderError) {
         console.error("Error creating folder structure:", folderError);
         // Continue even if folder creation fails

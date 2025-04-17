@@ -203,6 +203,39 @@ export default function DocumentList({
   // Use the local folders from state for rendering if available, otherwise use the prop folders
   const displayFolders = isSharedView ? sharedFolders || [] : (localFolders.length > 0 ? localFolders : folders);
 
+  // Identify the invisible root folder if present
+  const rootFolder = displayFolders.find(folder => folder.metadata?.isRootFolder);
+  
+  // Filter out invisible folders from display
+  const visibleFolders = displayFolders.filter(folder => !folder.metadata?.isHidden);
+
+  // When filtering folders by parent, if we're at the top level (currentFolder is undefined), 
+  // also include folders whose parent is the invisible root folder
+  const allFolders = isSharedView 
+    ? sharedFolders || [] 
+    : visibleFolders.filter(folder => {
+        if (!currentFolder) {
+          // At top level, include folders whose parent is undefined OR whose parent is the root folder
+          return folder.parentId === undefined || (rootFolder && folder.parentId === rootFolder.id);
+        } else {
+          // In a subfolder, normal filtering applies
+          return folder.parentId === currentFolder.id;
+        }
+      });
+
+  // When in the invisible root folder, show all files with that folder ID
+  const allDocs = isSharedView 
+    ? sharedDocuments || [] 
+    : localDocuments.filter(doc => {
+        if (!currentFolder && rootFolder) {
+          // At top level, include files that are in the invisible root folder
+          return doc.folderId === rootFolder.id;
+        } else {
+          // In a subfolder, normal filtering applies
+          return doc.folderId === currentFolder?.id;
+        }
+      });
+
   // Update local state when props change
   useEffect(() => {
     setLocalDocuments(documents);
@@ -249,14 +282,6 @@ export default function DocumentList({
 
     }
   }, [popupItem]); // Removed folders and documents dependencies as we fetch directly
-
-  const allDocs = isSharedView ? sharedDocuments || [] : localDocuments.filter(
-    (doc) => doc.folderId === currentFolder?.id
-  );
-  const allFolders = isSharedView ? sharedFolders || [] : localFolders.filter(
-    (folder) => folder.parentId === currentFolder?.id
-  );
-
 
   const isUserAdminOrStaff = (): boolean =>{
     if(!user || !user.role) {
@@ -1388,6 +1413,17 @@ export default function DocumentList({
     try {
       setIsUploading(true);
       setUploadProgress(0);
+
+      // Determine the target folder ID - if we're at the project level with no visible folder selected,
+      // use the invisible root folder ID if available
+      const targetFolderId = currentFolder?.id || (rootFolder?.id);
+      
+      if (!targetFolderId) {
+        console.error("No target folder ID available for file upload");
+        showToast("Upload failed: No valid upload location", "error");
+        setIsUploading(false);
+        return;
+      }
       
       if (files.length === 1) {
         // Single file upload - unchanged
@@ -1413,7 +1449,7 @@ export default function DocumentList({
         
         try {
           if (onCreateDocument) {
-            await onCreateDocument(fileName, fileType, file, currentFolder?.id);
+            await onCreateDocument(fileName, fileType, file, targetFolderId);
             setUploadedFiles(prev => ({...prev, success: prev.success + 1}));
             showToast(`File "${fileName}" uploaded successfully`, "success");
           } else {
@@ -1696,7 +1732,17 @@ export default function DocumentList({
       return;
     }
 
-    console.log(`Processing ${files.length} files individually`);
+    // Determine the target folder ID - if we're at the project level with no visible folder selected,
+    // use the invisible root folder ID if available
+    const targetFolderId = currentFolder?.id || (rootFolder?.id);
+    
+    if (!targetFolderId) {
+      console.error("No target folder ID available for file upload");
+      showToast("Upload failed: No valid upload location", "error");
+      return;
+    }
+
+    console.log(`Processing ${files.length} files individually to folder ${targetFolderId}`);
     setIsUploading(true);
     setUploadProgress(0);
     
@@ -1838,15 +1884,15 @@ export default function DocumentList({
           } else {
             // No folders in path, just upload the file
             if (onCreateDocument) {
-              await onCreateDocument(fileName, fileType, file, currentFolder?.id);
+              await onCreateDocument(fileName, fileType, file, targetFolderId);
             } else {
               throw new Error("Document creation is not available");
             }
           }
         } else {
-          // No path information, just upload the file to current folder
+          // No path information, just upload the file to current folder or root folder
           if (onCreateDocument) {
-            await onCreateDocument(fileName, fileType, file, currentFolder?.id);
+            await onCreateDocument(fileName, fileType, file, targetFolderId);
           } else {
             throw new Error("Document creation is not available");
           }
@@ -1909,6 +1955,7 @@ export default function DocumentList({
       <DocumentActions
         projectId={projectId}
         currentFolderId={currentFolder?.id}
+        rootFolderId={rootFolder?.id}
         folders={folders}
         onCreateFolder={onCreateFolder}
         onCreateDocument={createDocumentHandler}
@@ -2306,7 +2353,7 @@ export default function DocumentList({
   
   // Helper function to get folder name by ID
   const getFolderNameById = (folderId: string): string => {
-    if (!folderId) return "Root";
+    if (!folderId) return "_root";
     
     const folder = projectFolders[selectedDestinationProjectId]?.find(f => f.id === folderId);
     return folder ? folder.name : "Unknown folder";
@@ -2875,7 +2922,7 @@ export default function DocumentList({
             onDocumentClick={() => selectedDocument && onPreview(selectedDocument)}
           />
           
-          {/* Replace DocumentActions with the conditional rendering function */}
+          {/* Header actions */}
           {renderUploadButtons()}
         </div>
       )}
@@ -3536,7 +3583,7 @@ export default function DocumentList({
                   <span className="truncate">
                     {selectedDestinationFolderId 
                       ? getFolderNameById(selectedDestinationFolderId)
-                      : "Root folder"
+                      : "_root"
                     }
                   </span>
                   <ChevronDown className="w-4 h-4 text-gray-400" />
@@ -3559,22 +3606,8 @@ export default function DocumentList({
                       </div>
                     ) : (
                       <>
-                        {/* Root folder option */}
-                        <button
-                          className={`w-full text-left px-4 py-2 hover:bg-gray-100 flex items-center ${
-                            selectedDestinationFolderId === "" ? 'bg-blue-50 text-blue-600' : 'text-gray-900'
-                          }`}
-                          onClick={() => handleDestinationFolderSelect("")}
-                        >
-                          <Home className="w-4 h-4 mr-2 text-gray-400" />
-                          <span>Root folder</span>
-                          {selectedDestinationFolderId === "" && (
-                            <Check className="w-4 h-4 ml-2 text-blue-600" />
-                          )}
-                        </button>
-                        
-                        {/* Folder tree */}
-                        {renderFolderTree(projectFolders[selectedDestinationProjectId] || [])}
+                        {/* Folder tree - directly display folders */}
+                        {renderFolderTree(projectFolders[selectedDestinationProjectId] || [], undefined, 0)}
                         
                         {/* No folders message */}
                         {(projectFolders[selectedDestinationProjectId]?.length === 0) && (
@@ -3592,7 +3625,7 @@ export default function DocumentList({
             <div className="mt-2 text-xs text-gray-500">
               Selected destination: {selectedDestinationProjectId ? 
                 `${availableProjects.find(p => p.id === selectedDestinationProjectId)?.name || "Unknown"} / ${selectedDestinationFolderId ? 
-                  getFolderNameById(selectedDestinationFolderId) : "Root folder"}` 
+                  getFolderNameById(selectedDestinationFolderId) : "_root"}` 
                 : "Please select a destination"
               }
             </div>

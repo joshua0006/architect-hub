@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Route, Routes, useLocation, useNavigate, useSearchParams, useParams } from 'react-router-dom';
 import { OrganizationProvider } from '../contexts/OrganizationContext';
 import { AnimatePresence } from 'framer-motion';
@@ -203,6 +203,7 @@ const DocumentsPage: React.FC<{
           folders={folders || []}
           currentFolder={folders?.find(f => f.id === currentFolderId)}
           projectId={selectedProject.id}
+          selectedProject={selectedProject}
           onFolderSelect={handleFolderSelect}
           onPreview={handleFileSelect}
           onCreateFolder={createFolder}
@@ -576,6 +577,67 @@ export default function AppContent() {
       navigate(`/documents/projects/${selectedProject?.id}/folders/${folderParam}`, { replace: true });
     }
   }, [searchParams, currentFolderId, navigate, setDocumentManagerFolderId, selectedProject]);
+
+  // Redirect to _root folder when on documents page
+  useEffect(() => {
+    // Check if we're on the base documents page with no specific folder
+    // Or on a project's documents page without a folder
+    const isBaseDocumentsPage = location.pathname === '/documents';
+    const projectDocumentsPattern = /^\/documents\/projects\/([^\/]+)$/;
+    const projectMatch = location.pathname.match(projectDocumentsPattern);
+    
+    if ((isBaseDocumentsPage || projectMatch) && selectedProject) {
+      // If we're on a project page, make sure we're looking at the right project
+      const projectId = projectMatch ? projectMatch[1] : selectedProject.id;
+      
+      // Find the _root folder for the current project
+      const rootFolder = folders.find(f => 
+        f.projectId === projectId && 
+        f.metadata?.isRootFolder &&
+        f.name === '_root'
+      );
+      
+      if (rootFolder) {
+        console.log(`Found _root folder (${rootFolder.id}) for project ${projectId}, redirecting`);
+        // Navigate to the _root folder
+        navigate(`/documents/projects/${projectId}/folders/${rootFolder.id}`, { replace: true });
+      } else {
+        console.log(`No _root folder found for project ${projectId}, looking for alternative or creating one`);
+        
+        // Try to find any top-level folder in this project as a fallback
+        const topLevelFolder = folders.find(f => 
+          f.projectId === projectId && 
+          (!f.parentId || f.parentId === '') && 
+          !f.metadata?.isHidden
+        );
+        
+        if (topLevelFolder) {
+          console.log(`Found top-level folder ${topLevelFolder.id} as fallback, redirecting`);
+          navigate(`/documents/projects/${projectId}/folders/${topLevelFolder.id}`, { replace: true });
+        } else {
+          // As a last resort, attempt to create a _root folder
+          console.log(`No suitable folders found, creating _root folder for project ${projectId}`);
+          
+          // Import needed service
+          import('../services/folderTemplateService')
+            .then((module) => {
+              // Create the _root folder
+              module.folderTemplateService.createInvisibleRootFolder(projectId)
+                .then((newRootFolder: Folder) => {
+                  console.log(`Created new _root folder ${newRootFolder.id}, redirecting`);
+                  navigate(`/documents/projects/${projectId}/folders/${newRootFolder.id}`, { replace: true });
+                })
+                .catch((error: Error) => {
+                  console.error('Failed to create _root folder:', error);
+                });
+            })
+            .catch((error: Error) => {
+              console.error('Failed to import folderTemplateService:', error);
+            });
+        }
+      }
+    }
+  }, [location.pathname, selectedProject, folders, navigate]);
 
   // Handle project switching from navigation state
   useEffect(() => {
