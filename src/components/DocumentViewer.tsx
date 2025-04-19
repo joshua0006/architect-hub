@@ -66,6 +66,7 @@ import CommentText from './CommentText';
 import EnhancedCommentInput from './EnhancedCommentInput';
 import { DocumentVersion, DocumentComment } from "../types";
 import { NOTIFICATION_DOCUMENT_UPDATE_EVENT } from './NotificationIcon';
+import HeicConverter from './HeicConverter';
 
 interface Document {
   id: string;
@@ -416,6 +417,15 @@ const VersionHistoryModal = ({
       </div>
     </div>
   );
+};
+
+const isHeicFile = (filename: string, mimeType?: string): boolean => {
+  if (mimeType && mimeType.toLowerCase() === 'image/heic') {
+    return true;
+  }
+  
+  const extension = filename.toLowerCase().split('.').pop();
+  return extension === 'heic';
 };
 
 const DocumentViewer: React.FC<DocumentViewerProps> = ({
@@ -1723,6 +1733,22 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
             >
               <PDFViewer file={document.url} documentId={document.id} />
             </div>
+          </div>
+        ) : isHeicFile(document.name, document.metadata?.contentType) ? (
+          <div className="h-full flex items-center justify-center bg-white rounded-lg shadow-sm p-4 document-content"
+            style={{
+              height: screenWidth < 1600 ? '63vh' : '71vh',
+            }}>
+            <HeicConverter 
+              url={document.url} 
+              alt={document.name} 
+              className="max-w-full max-h-full object-contain" 
+              onError={(err) => {
+                console.error("HEIC conversion error:", err);
+                // You could add additional error handling here if needed
+              }}
+              onLoad={() => console.log("HEIC image successfully converted and loaded")}
+            />
           </div>
         ) : isImage(document.name, document.metadata?.contentType) ? (
           <div className="h-full flex items-center justify-center bg-white rounded-lg shadow-sm p-4 document-content"

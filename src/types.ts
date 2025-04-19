@@ -1,4 +1,5 @@
-import { FolderAccessPermission, UserRole } from "./contexts/AuthContext";
+import { UserRole, FolderAccessPermission } from "./contexts/AuthContext";
+import { FolderAccess } from "./constants/folderTemplates";
 
 // Document types
 export interface DocumentComment {
@@ -72,6 +73,7 @@ export interface Project {
     scope: string;
     archivedAt?: string;
     lastMilestoneUpdate?: string;
+    useDefaultTemplate?: boolean;
   };
 }
 
@@ -86,7 +88,9 @@ export interface Folder {
     level?: number;
     documentCount?: number;
     lastUpdated?: string;
-    access?: FolderAccessPermission
+    access?: FolderAccess;
+    isRootFolder?: boolean;
+    isHidden?: boolean;
   };
 }
 

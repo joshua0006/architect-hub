@@ -1,12 +1,14 @@
 import { 
   createUserWithEmailAndPassword,
   sendPasswordResetEmail,
-  updateProfile as firebaseUpdateProfile
+  updateProfile as firebaseUpdateProfile,
+  deleteUser
 } from 'firebase/auth';
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { auth, db, storage } from '../lib/firebase';
-import { User, UserRole } from '../types/auth';
+import { User } from '../types/auth';
+import { UserRole } from '../contexts/AuthContext';
 
 export const authService = {
   async createUser(
@@ -84,6 +86,64 @@ export const authService = {
       throw new Error('Failed to create user');
     }
   },
+  
+  async createUserWithoutSignIn(
+    email: string,
+    password: string,
+    displayName: string,
+    role: UserRole,
+    profilePicture?: File | null
+  ): Promise<User> {
+    try {
+      // This function requires Firebase Admin SDK to create users without logging in
+      // As a workaround for client-side only, we'll mock the user creation
+      // In a real production app, this would use the Admin SDK server-side
+      
+      // Generate a mock user ID
+      const userId = `mock-${Date.now()}-${Math.random().toString(36).substring(2, 10)}`;
+      
+      // Create user document in Firestore
+      const userData: Omit<User, 'id'> = {
+        email,
+        displayName,
+        role,
+        projectIds: [],
+        profile: {
+          photoURL: null, // We can't upload a profile picture without authentication
+          bio: '',
+          title: '',
+          phone: '',
+          location: '',
+          timezone: 'UTC',
+          notifications: {
+            email: true,
+            push: true
+          }
+        },
+        metadata: {
+          lastLogin: new Date().toISOString(),
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        }
+      };
+
+      // Create the user document with the generated ID
+      await setDoc(doc(db, 'users', userId), {
+        ...userData,
+        id: userId,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
+
+      return {
+        id: userId,
+        ...userData
+      };
+    } catch (error) {
+      console.error('Error creating user without sign in:', error);
+      throw new Error('Failed to create user');
+    }
+  },
 
   async resetPassword(email: string): Promise<void> {
     try {
@@ -91,6 +151,26 @@ export const authService = {
     } catch (error) {
       console.error('Error resetting password:', error);
       throw new Error('Failed to send password reset email');
+    }
+  },
+
+  async deleteUserAccount(uid: string): Promise<void> {
+    try {
+      // Note: This function can only delete the currently signed-in user
+      // For admin functionality, you would need to use Firebase Admin SDK
+      // This is a limitation of the client-side Firebase Auth
+      
+      // In a real implementation with Firebase Admin SDK, you would:
+      // 1. Delete the user from Firebase Auth
+      // 2. Then delete their data from Firestore
+      
+      // For now, we'll just throw an informative error
+      throw new Error(
+        'Client-side Firebase cannot delete other users. In production, use Firebase Admin SDK.'
+      );
+    } catch (error) {
+      console.error('Error deleting user account:', error);
+      throw error;
     }
   }
 };

@@ -134,8 +134,8 @@ export const DownloadDisplay: React.FC<MediaDisplayProps> = (props) => {
 export const MEDIA_TYPES: MediaTypeInfo[] = [
   {
     type: 'image',
-    mimeTypes: ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/bmp', 'image/webp', 'image/tiff'],
-    extensions: ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.tiff', '.tif'],
+    mimeTypes: ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/bmp', 'image/webp', 'image/tiff', 'image/heic'],
+    extensions: ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.tiff', '.tif', '.heic'],
     component: ImageDisplay,
     canPreview: true,
     description: 'Image'

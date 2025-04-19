@@ -11,6 +11,7 @@ import {
   ChevronUp,
   Filter,
   SlidersHorizontal,
+  Link,
 } from "lucide-react";
 import { Task, TeamMember, User } from "../types";
 import TaskActions from "./TaskActions";
@@ -21,6 +22,9 @@ import { userService } from "../services/userService";
 import { projectService } from "../services/projectService";
 import { taskService } from "../services/taskService";
 import { subtaskService, Subtask } from "../services/subtaskService";
+import { createSubtaskNotification, createTaskNotification } from "../services/notificationService";
+import { useLocation, useNavigate } from "react-router-dom";
+import toast from "react-hot-toast";
 
 interface TaskListProps {
   tasks: Task[];
@@ -82,6 +86,171 @@ export default function TaskList({
   // Add new state for loading states
   const [addingSubTask, setAddingSubTask] = useState<{[taskId: string]: boolean}>({});
   const [creatingTask, setCreatingTask] = useState(false);
+  
+  // Add new state for highlighted task
+  const [highlightedTaskId, setHighlightedTaskId] = useState<string | null>(null);
+  const [highlightedSubtaskId, setHighlightedSubtaskId] = useState<string | null>(null);
+  const location = useLocation();
+  const navigate = useNavigate();
+  
+  // Add new state to track if highlight came from notification
+  const [isHighlightFromNotification, setIsHighlightFromNotification] = useState<boolean>(false);
+  
+  // Add reference for highlighted task element
+  const highlightedTaskRef = useRef<HTMLDivElement>(null);
+  
+  // Get query params
+  function getSearchParams() {
+    return new URLSearchParams(location.search);
+  }
+  
+  // Check for taskId and subtaskId in URL or location state on component mount or update
+  useEffect(() => {
+    const state = location.state as any;
+    const isFromNotification = state?.fromNotification;
+    const highlightTask = state?.highlightTaskId;
+    const highlightSubtask = state?.highlightSubtaskId;
+    
+    console.log('TaskList location state check:', { 
+      state, 
+      isFromNotification, 
+      highlightTask, 
+      highlightSubtask,
+      pathname: location.pathname
+    });
+    
+    // If we have a task to highlight from navigation state
+    if (isFromNotification && highlightTask) {
+      console.log(`Highlighting task ${highlightTask} from navigation state`);
+      
+      // Set the highlighted task and expand it
+      setHighlightedTaskId(highlightTask);
+      setExpandedTask(highlightTask);
+      setIsHighlightFromNotification(true);
+      
+      // If we also have a subtask to highlight
+      if (highlightSubtask) {
+        console.log(`Also highlighting subtask ${highlightSubtask}`);
+        setHighlightedSubtaskId(highlightSubtask);
+        
+        // Load the subtasks for this parent task if not already loaded
+        subtaskService.getByParentTaskId(highlightTask).then(subtasks => {
+          setSubtasksMap(prev => ({
+            ...prev,
+            [highlightTask]: subtasks
+          }));
+        });
+      }
+      
+      // Set a timeout to scroll to the highlighted task
+      setTimeout(() => {
+        const taskElement = document.getElementById(`task-${highlightTask}`);
+        if (taskElement) {
+          taskElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        } else {
+          // Fallback to ref if id not found
+          highlightedTaskRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+        
+        // If we have a subtask, try to scroll to it after a delay
+        if (highlightSubtask) {
+          setTimeout(() => {
+            const subtaskElement = document.getElementById(`subtask-${highlightSubtask}`);
+            if (subtaskElement) {
+              subtaskElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+          }, 800);
+        }
+      }, 500);
+      
+      // Clear the highlights after a few seconds
+      setTimeout(() => {
+        setHighlightedTaskId(null);
+        setHighlightedSubtaskId(null);
+        setIsHighlightFromNotification(false);
+      }, 3000);
+    } else if (highlightTask) {
+      // For regular navigation, just expand the task without animation
+      setExpandedTask(highlightTask);
+      
+      // If we also have a subtask to highlight, load it
+      if (highlightSubtask) {
+        subtaskService.getByParentTaskId(highlightTask).then(subtasks => {
+          setSubtasksMap(prev => ({
+            ...prev,
+            [highlightTask]: subtasks
+          }));
+        });
+        
+        // Scroll to the task without highlight animation
+        setTimeout(() => {
+          const taskElement = document.getElementById(`task-${highlightTask}`);
+          if (taskElement) {
+            taskElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+        }, 300);
+      }
+    }
+  }, [location.state, location.pathname]);
+  
+  // Listen for task notification update events
+  useEffect(() => {
+    const handleTaskNotificationUpdate = (event: CustomEvent) => {
+      const { taskId, projectId: notificationProjectId, subtaskId, isSubtaskAssignment } = event.detail;
+      
+      // Check if this is for the current project
+      if (notificationProjectId === projectId) {
+        // Highlight the task
+        setHighlightedTaskId(taskId);
+        setExpandedTask(taskId);
+        setIsHighlightFromNotification(true);
+        
+        // If this is a subtask notification, also highlight the subtask
+        if (subtaskId) {
+          // Set highlighted subtask ID
+          setHighlightedSubtaskId(subtaskId);
+          
+          // Load the subtasks for this parent task if not already loaded
+          subtaskService.getByParentTaskId(taskId).then(subtasks => {
+            setSubtasksMap(prev => ({
+              ...prev,
+              [taskId]: subtasks
+            }));
+          });
+        }
+        
+        // Scroll to the task
+        setTimeout(() => {
+          highlightedTaskRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          
+          // If this is a subtask notification, try to scroll to the subtask after a delay
+          if (subtaskId) {
+            setTimeout(() => {
+              const subtaskElement = document.getElementById(`subtask-${subtaskId}`);
+              if (subtaskElement) {
+                subtaskElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              }
+            }, 800);
+          }
+        }, 500);
+        
+        // Clear the highlights after 3 seconds
+        setTimeout(() => {
+          setHighlightedTaskId(null);
+          setHighlightedSubtaskId(null);
+          setIsHighlightFromNotification(false);
+        }, 3000);
+      }
+    };
+    
+    // Add event listener for task notification updates
+    document.addEventListener('task-notification-update', handleTaskNotificationUpdate as EventListener);
+    
+    // Clean up
+    return () => {
+      document.removeEventListener('task-notification-update', handleTaskNotificationUpdate as EventListener);
+    };
+  }, [projectId]);
   
   useEffect(() => {
     loadUsers();
@@ -258,6 +427,13 @@ export default function TaskList({
     e.preventDefault();
     if (editingTask) {
       try {
+        // Find the original task to compare assigned users
+        const originalTask = tasks.find(t => t.id === editingTask.id);
+        // Find newly assigned users (users in editingTask.assignedTo but not in originalTask.assignedTo)
+        const newlyAssignedUsers = editingTask.assignedTo.filter(
+          userId => !originalTask?.assignedTo.includes(userId)
+        );
+        
         // Check if assigned user has project access
         const assignedUsers = allUsers.filter(
           (u) => editingTask.assignedTo.includes(u.id)
@@ -285,9 +461,30 @@ export default function TaskList({
           priority: editingTask.priority,
         });
         
+        // If there are newly assigned users, send notifications
+        if (newlyAssignedUsers.length > 0) {
+          // Generate the task link
+          const taskLink = `${window.location.origin}/projects/${projectId}?task_id=${editingTask.id}`;
+          
+          const creatorName = user?.displayName || "A team member";
+          
+          await createTaskNotification(
+            editingTask.id,
+            editingTask.title,
+            projectId,
+            settings?.name || "Project",
+            creatorName,
+            newlyAssignedUsers,
+            taskLink
+          );
+          
+          toast.success(`Notifications sent to ${newlyAssignedUsers.length} newly assigned team member${newlyAssignedUsers.length > 1 ? 's' : ''}`);
+        }
+        
         setEditingTask(null);
       } catch (err) {
         console.error("Error updating task:", err);
+        toast.error("Failed to update task");
       }
     }
   };
@@ -324,7 +521,28 @@ export default function TaskList({
       }
       
       // Create new subtask in the dedicated subtasks collection
-      await subtaskService.create(subtaskData);
+      const newSubtaskId = await subtaskService.create(subtaskData);
+      
+      // Find the parent task to get its title and assigned users
+      const parentTask = tasks.find(t => t.id === parentTaskId);
+      
+      // Send notifications to users assigned to the parent task
+      if (parentTask && parentTask.assignedTo.length > 0) {
+        // Get the current user's name for notification
+        const creatorName = user?.displayName || "A team member";
+        
+        // Send notifications to all users assigned to the parent task
+        await createSubtaskNotification(
+          parentTaskId,
+          parentTask.title,
+          newSubtaskId,
+          title,
+          projectId,
+          settings?.name || "Project",
+          creatorName,
+          parentTask.assignedTo
+        );
+      }
       
       // Clear input
       setNewSubTaskTitle(prev => ({
@@ -390,9 +608,30 @@ export default function TaskList({
         taskData.parentTaskId = parentTaskId;
       }
       
-      await taskService.create(taskData);
+      const newTaskId = await taskService.create(taskData);
+      
+      // Generate the task link
+      const taskLink = `${window.location.origin}/projects/${projectId}?task_id=${newTaskId}`;
+      
+      // If users are assigned, send notifications
+      if (assignedTo.length > 0) {
+        const creatorName = user?.displayName || "A team member";
+        
+        await createTaskNotification(
+          newTaskId,
+          title,
+          projectId,
+          settings?.name || "Project",
+          creatorName,
+          assignedTo,
+          taskLink
+        );
+        
+        toast.success(`Task created and notifications sent to ${assignedTo.length} team member${assignedTo.length > 1 ? 's' : ''}`);
+      }
     } catch (err) {
       console.error("Error creating task:", err);
+      toast.error("Failed to create task");
     } finally {
       setCreatingTask(false);
     }
@@ -403,6 +642,50 @@ export default function TaskList({
     const category = settings?.taskCategories?.find(cat => cat.id === categoryId);
     return category?.color || '#3b82f6'; // Default to blue-500 if category not found
   };
+
+  // Add function to copy task link
+  const copyTaskLink = async (e: React.MouseEvent, taskId: string) => {
+    e.stopPropagation(); // Prevent card expansion
+    const taskLink = `${window.location.origin}/tasks/${projectId}/${taskId}`;
+    
+    try {
+      await navigator.clipboard.writeText(taskLink);
+      toast.success("Task link copied to clipboard");
+    } catch (err) {
+      console.error("Failed to copy link:", err);
+      toast.error("Failed to copy link");
+    }
+  };
+
+  // Also check the URL path for task parameters - needed for direct navigation
+  useEffect(() => {
+    // Parse the task ID from the URL path if available
+    const pathParts = location.pathname.split('/');
+    if (pathParts.length >= 4 && pathParts[1] === 'tasks') {
+      const urlProjectId = pathParts[2];
+      const urlTaskId = pathParts[3];
+      
+      console.log('Path parsing found task:', { 
+        urlProjectId, 
+        urlTaskId, 
+        isCurrentProject: urlProjectId === projectId
+      });
+      
+      // Only process if this is for the current project
+      if (urlProjectId === projectId && urlTaskId) {
+        // For direct URL navigation, don't highlight but do expand
+        setExpandedTask(urlTaskId);
+        
+        // Set a timeout to scroll to the task without animation
+        setTimeout(() => {
+          const taskElement = document.getElementById(`task-${urlTaskId}`);
+          if (taskElement) {
+            taskElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+        }, 500);
+      }
+    }
+  }, [location.pathname, projectId]);
 
   if (isLoading) {
     return (
@@ -661,12 +944,17 @@ export default function TaskList({
         {mainTasks.map((task) => (
           <div
             key={task.id}
+            id={`task-${task.id}`}
+            ref={task.id === highlightedTaskId ? highlightedTaskRef : null}
             className={`p-4 bg-white border border-gray-200 rounded-lg shadow-sm relative ${
               subtasksMap[task.id]?.length > 0 
                 ? 'hover:shadow-md transition-all duration-200' 
                 : 'hover:shadow-sm transition-shadow'
+            } ${
+              task.id === highlightedTaskId && isHighlightFromNotification
+                ? 'ring-2 ring-blue-500 animate-pulse' 
+                : ''
             }`}
-            
           >
             {editingTask?.id === task.id ? (
               <form onSubmit={handleUpdateTask} className="space-y-4">
@@ -793,9 +1081,9 @@ export default function TaskList({
                       return;
                     }
                     
-                    // Toggle expanded state
+                    // Navigate to task detail page with custom slug
                     const taskIdString = String(task.id);
-                    setExpandedTask(expandedTask === taskIdString ? null : taskIdString);
+                    navigate(`/tasks/${projectId}/${taskIdString}`);
                   }}
                 >
                   <div className="flex-1">
@@ -925,14 +1213,20 @@ export default function TaskList({
                           {/* Sub-tasks list */}
                           <div className="space-y-2 mb-3 ">
                             {(subtasksMap[task.id] || []).map(subtask => (
-                               
-                              <div key={subtask.id} className="flex items-center group">
+                              <div 
+                                key={subtask.id} 
+                                id={`subtask-${subtask.id}`}
+                                className={`flex items-center group p-1 rounded ${
+                                  highlightedSubtaskId === subtask.id && isHighlightFromNotification
+                                    ? 'bg-blue-100 animate-pulse-light border border-blue-300' 
+                                    : 'hover:bg-gray-50'
+                                }`}
+                              >
                                 <button 
                                   onClick={(e) => {
                                     e.stopPropagation(); // Prevent card expansion
                                     toggleSubTaskCompletion(subtask);
                                   }}
-                                  className="p-1 mr-2"
                                 >
                                   {subtask.status === 'completed' ? (
                                     <CheckCircle2 className="w-4 h-4 text-green-500" />
@@ -1067,6 +1361,7 @@ export default function TaskList({
                         )}
                       </div>
                       <div className="flex items-center space-x-2">
+                        
                         {canEditTask() && (
                           <button
                             onClick={(e) => {

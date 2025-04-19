@@ -261,7 +261,7 @@ export default function TeamList({
           </div>
         </div>
         {selectedProject && (
-          user?.role === 'Staff' && (
+          (user?.role === 'Staff' || user?.role === 'Admin') && (
             <button
               onClick={() => setShowUserSelection(true)}
               className="flex items-center space-x-2 px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors"
@@ -429,7 +429,7 @@ export default function TeamList({
                         >
                           <div className="absolute top-4 right-4">
                             {/* Only show menu for staff users */}
-                            {user?.role === 'Staff' && (
+                            {(user?.role === 'Staff' || user?.role === 'Admin') && (
                               <div className="relative">
                                 <button
                                   onClick={(e) => {

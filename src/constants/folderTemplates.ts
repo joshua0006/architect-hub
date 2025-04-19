@@ -40,16 +40,16 @@ export const PROJECT_FOLDER_TEMPLATE: FolderTemplate[] = [
 
 /**
  * Check if a user with given role has access to a folder with specified access level
- * @param role User role (Staff or Client)
+ * @param role User role (Staff, Client, or Admin)
  * @param folderAccess Folder access level
  * @returns Boolean indicating whether the user has access
  */
 export const hasAccessToFolder = (
-  role: 'Staff' | 'Client',
+  role: 'Staff' | 'Client' | 'Admin',
   folderAccess: FolderAccess
 ): boolean => {
-  // Staff can access everything
-  if (role === 'Staff') {
+  // Staff and Admin can access everything
+  if (role === 'Staff' || role === 'Admin') {
     return true;
   }
   

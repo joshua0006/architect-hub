@@ -180,7 +180,7 @@ export default function TaskSummary({ projectId, tasks: initialTasks }: TaskSumm
 
   // Navigate to task detail 
   const navigateToTask = (taskId: string) => {
-    navigate(`/projects/${projectId}/tasks/${taskId}`);
+    navigate(`/tasks/${projectId}/${taskId}`);
   };
 
   // Render subtask in a simplified format
@@ -241,7 +241,7 @@ export default function TaskSummary({ projectId, tasks: initialTasks }: TaskSumm
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: index * 0.1 }}
                   className="p-4 bg-white border border-gray-200 rounded-t-lg cursor-pointer"
-                  onClick={() => navigate(`/tasks`)}
+                  onClick={() => navigateToTask(task.id)}
                 >
                   <div className="flex items-start justify-between">
                     <div className="flex items-start space-x-3">
