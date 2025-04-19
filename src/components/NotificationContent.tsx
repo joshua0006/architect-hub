@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Folder, ExternalLink, File, User, MessageSquare, AtSign, CheckSquare } from 'lucide-react';
 import { Notification } from '../services/notificationService';
 
@@ -33,11 +33,33 @@ interface NotificationContentProps {
   getIconClass: (type: string) => string;
 }
 
-const NotificationContent: React.FC<NotificationContentProps> = ({ 
+// Helper function to log rendering for debugging purposes
+const debugNotificationRendering = (props: NotificationContentProps) => {
+  if (process.env.NODE_ENV !== 'production') {
+    // Log only on initial render or significant props changes
+    if (props.notification?.iconType === 'file-upload' || props.notification?.iconType === 'comment-mention') {
+      console.log('[NotificationContent] Rendering important notification:', {
+        id: props.notification?.id,
+        type: props.notification?.type,
+        iconType: props.notification?.iconType,
+        read: props.notification?.read
+      });
+    }
+  }
+};
+
+const NotificationContent: React.FC<NotificationContentProps> = React.memo(({ 
   notification, 
   formatTime, 
   getIconClass 
 }) => {
+  // Add debugging effect only in development
+  useEffect(() => {
+    if (process.env.NODE_ENV !== 'production') {
+      debugNotificationRendering({ notification, formatTime, getIconClass });
+    }
+  }, [notification.id, notification.read]); // Only re-run if ID or read status changes
+  
   // Determine notification type/icon
   const getNotificationIcon = () => {
     const iconType = notification.iconType || notification.type || 'info';
@@ -250,6 +272,15 @@ const NotificationContent: React.FC<NotificationContentProps> = ({
       </div>
     </div>
   );
-};
+}, (prevProps, nextProps) => {
+  // Custom comparison function for memo
+  // Only re-render if important properties have changed
+  const prevNote = prevProps.notification;
+  const nextNote = nextProps.notification;
+  
+  return prevNote.id === nextNote.id && 
+         prevNote.read === nextNote.read &&
+         prevNote.message === nextNote.message;
+});
 
 export default NotificationContent; 

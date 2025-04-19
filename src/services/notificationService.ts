@@ -59,6 +59,18 @@ const notificationCache = new Map<string, {
 // Maximum cache age (1 minute)
 const MAX_CACHE_AGE = 60000;
 
+// Add this at the top with other constants
+const lastResetTime = {
+  timestamp: 0,
+  inProgress: false
+};
+
+// Track active subscriptions to avoid duplicates
+const activeSubscriptions = new Map<string, {
+  unsubscribe: () => void;
+  lastUsed: number;
+}>();
+
 /**
  * Wrapper function to prevent duplicate notifications from being created
  * @param cacheKey A unique key representing this notification operation
@@ -607,12 +619,12 @@ export const getRecentNotifications = async (
   }
 };
 
-// Improved subscription function with more aggressive caching
+// Improved subscription function with more aggressive caching and subscription reuse
 export const subscribeToNotifications = (
   userId: string,
   callback: (notifications: Notification[]) => void
 ): (() => void) => {
-  // Use very aggressive caching to prevent excessive Firestore queries
+  // Cache durations and throttling settings
   const CACHE_DURATION_MS = 60000; // 1 minute
   const MIN_CALLBACK_INTERVAL = 10000; // 10 seconds minimum between callbacks
   const FILE_UPLOAD_CALLBACK_INTERVAL = 2000; // 2 seconds for file uploads
@@ -623,6 +635,38 @@ export const subscribeToNotifications = (
   
   // Generate a unique subscription ID for tracking
   const subscriptionId = `${userId}-${Date.now()}`;
+  
+  // Check if we already have an active subscription for this user
+  const existingSubscription = Array.from(activeSubscriptions.entries())
+    .find(([key]) => key.startsWith(`${userId}-`));
+  
+  if (existingSubscription) {
+    const [existingId, subInfo] = existingSubscription;
+    console.log(`[Notification] Reusing existing subscription ${existingId} for user ${userId}`);
+    // Update the last used timestamp
+    subInfo.lastUsed = Date.now();
+    
+    // Send cached data immediately if available
+    const cacheKey = `notifications-${userId}`;
+    const cachedData = notificationCache.get(cacheKey);
+    if (cachedData && (Date.now() - cachedData.timestamp) < CACHE_DURATION_MS) {
+      setTimeout(() => {
+        callback(cachedData.notifications);
+      }, 100);
+    }
+    
+    // Return the existing unsubscribe function
+    return () => {
+      console.log(`[Notification] Releasing subscription ${existingId}`);
+      // Don't actually unsubscribe, just mark it as not in use
+      subInfo.lastUsed = 0;
+      
+      // Clean up old subscriptions periodically
+      cleanupOldSubscriptions();
+    };
+  }
+  
+  console.log(`[Notification] Setting up subscription ${subscriptionId} for user ${userId}`);
   
   // Create a query for this user's notifications
   const notificationsRef = collection(db, 'notifications');
@@ -636,6 +680,7 @@ export const subscribeToNotifications = (
     // Use setTimeout to ensure this is asynchronous
     setTimeout(() => {
       callback(cachedData.notifications);
+      console.log(`[Notification] Used cached data for subscription ${subscriptionId}`);
     }, 100);
   }
   
@@ -651,6 +696,7 @@ export const subscribeToNotifications = (
   let pendingSnapshot: any = null;
   let debounceTimer: NodeJS.Timeout | null = null;
   
+  // Process snapshots with debouncing to prevent excessive callbacks
   const processSnapshot = (snapshot: any) => {
     pendingSnapshot = snapshot;
     
@@ -659,22 +705,32 @@ export const subscribeToNotifications = (
       clearTimeout(debounceTimer);
     }
     
+    // Check for high-priority notifications that need immediate processing
+    const hasUrgentNotifications = snapshot?.docs?.some((doc: any) => {
+      const data = doc.data();
+      return data && !data.read && 
+        (data.iconType === 'file-upload' || data.iconType === 'comment-mention');
+    });
+    
     // Set a new timer to process this snapshot after a delay
+    // Use a shorter delay for first callback or if there are urgent unread notifications
+    const debounceDelay = isFirstCallback || hasUrgentNotifications ? 100 : 1000;
+    
     debounceTimer = setTimeout(() => {
       if (!pendingSnapshot) return;
       
       try {
         processSnapshotImmediately(pendingSnapshot);
       } catch (error) {
-        console.error('[Notification Subscription] Error processing debounced snapshot:', error);
+        console.error(`[Notification Subscription] Error processing debounced snapshot for ${subscriptionId}:`, error);
       }
       
       // Clear the pending snapshot
       pendingSnapshot = null;
-    }, isFirstCallback ? 100 : 2000); // Process first callback quickly, then use longer debounce
+    }, debounceDelay);
   };
   
-  // Function to check if snapshot contains file upload notifications
+  // Check if snapshot contains file upload notifications
   const containsFileUploadNotifications = (snapshot: any): boolean => {
     if (!snapshot || !snapshot.docs || snapshot.docs.length === 0) return false;
     
@@ -685,16 +741,42 @@ export const subscribeToNotifications = (
     });
   };
   
-  // Actual snapshot processing function
+  // Main function to process snapshot data
   const processSnapshotImmediately = (snapshot: any) => {
     try {
       // Check for file upload notifications to determine throttling
       const hasFileUploads = containsFileUploadNotifications(snapshot);
-      const throttleInterval = hasFileUploads ? FILE_UPLOAD_CALLBACK_INTERVAL : MIN_CALLBACK_INTERVAL;
+      const hasMentions = snapshot?.docs?.some((doc: any) => {
+        const data = doc.data();
+        return data && data.iconType === 'comment-mention' && data.read === false;
+      });
       
-      // Throttle callbacks based on time (except for first callback)
+      // Use shorter throttle interval for important notifications
+      const throttleInterval = hasFileUploads || hasMentions ? 1000 : 5000;
+      
+      // Check for new unread notifications not seen before
       const now = Date.now();
-      if (!isFirstCallback && now - lastCallbackTime < throttleInterval) {
+      const cachedData = notificationCache.get(cacheKey);
+      const hasNewUnread = snapshot?.docs?.some((doc: any) => {
+        const data = doc.data();
+        // Skip if not for this user
+        if (!data || data.userId !== userId) return false;
+        
+        // Check if this is an unread notification
+        if (data.read === false) {
+          // If we have no cache yet, consider it new
+          if (!cachedData) return true;
+          
+          // Check if this notification exists in our cache
+          const existsInCache = cachedData.notifications.some(n => n.id === doc.id);
+          return !existsInCache;
+        }
+        return false;
+      });
+      
+      // Always process first callback, otherwise throttle unless there are new unread notifications
+      if (!isFirstCallback && now - lastCallbackTime < throttleInterval && !hasNewUnread) {
+        console.log(`[Notification] Throttling subscription ${subscriptionId} update (${now - lastCallbackTime}ms < ${throttleInterval}ms)`);
         return;
       }
       
@@ -707,6 +789,7 @@ export const subscribeToNotifications = (
         });
         
         callback([]); // Always call callback with empty array
+        console.log(`[Notification] Empty snapshot for subscription ${subscriptionId}`);
         return;
       }
       
@@ -720,6 +803,7 @@ export const subscribeToNotifications = (
       
       if (notifications.length === 0) {
         callback([]); // Always call callback with empty array
+        console.log(`[Notification] No matching notifications for user ${userId} in subscription ${subscriptionId}`);
         return;
       }
       
@@ -734,20 +818,37 @@ export const subscribeToNotifications = (
         return timeB - timeA;
       });
       
-      // Update cache for future use
-      notificationCache.set(cacheKey, {
-        timestamp: now,
-        notifications
-      });
+      // Check if we have new notifications by comparing with cache
+      let hasChanges = true;
+      if (cachedData) {
+        // Compare IDs and read status
+        const currentIds = notifications.map(n => `${n.id}:${n.read}`).sort().join(',');
+        const cachedIds = cachedData.notifications.map(n => `${n.id}:${n.read}`).sort().join(',');
+        hasChanges = currentIds !== cachedIds;
+      }
       
-      // Update timing variables
-      lastCallbackTime = now;
-      isFirstCallback = false;
-      
-      // Call the callback with notifications
-      callback(notifications);
+      // Only update if we have changes or it's the first callback
+      if (hasChanges || isFirstCallback || hasNewUnread) {
+        // Update cache for future use
+        notificationCache.set(cacheKey, {
+          timestamp: now,
+          notifications
+        });
+        
+        // Log the update with more details
+        console.log(`[Notification] Sending ${notifications.length} notifications to subscription ${subscriptionId} (${hasFileUploads ? 'with file uploads' : 'standard update'})`);
+        
+        // Update timing variables
+        lastCallbackTime = now;
+        isFirstCallback = false;
+        
+        // Call the callback with notifications
+        callback(notifications);
+      } else {
+        console.log(`[Notification] No changes detected for subscription ${subscriptionId}, skipping callback`);
+      }
     } catch (error) {
-      console.error('[Notification Subscription] Error processing snapshot:', error);
+      console.error(`[Notification Subscription] Error processing snapshot for ${subscriptionId}:`, error);
     }
   };
   
@@ -761,15 +862,76 @@ export const subscribeToNotifications = (
     }
   );
   
-  // Return unsubscribe function
-  return () => {
+  // Store this subscription in our active subscriptions map
+  activeSubscriptions.set(subscriptionId, {
+    unsubscribe,
+    lastUsed: Date.now()
+  });
+  
+  // Log successful subscription setup
+  console.log(`[Notification] Successfully set up subscription ${subscriptionId} for user ${userId}`);
+  
+  // Clean up function
+  const cleanupFunction = () => {
+    console.log(`[Notification] Unsubscribing from ${subscriptionId}`);
+    
+    // Get the subscription info
+    const sub = activeSubscriptions.get(subscriptionId);
+    if (sub) {
+      // Mark as not in use
+      sub.lastUsed = 0;
+    }
+    
+    // Clean debounce timer if exists
     if (debounceTimer) {
       clearTimeout(debounceTimer);
       debounceTimer = null;
     }
-    unsubscribe();
+    
+    // Clean up old subscriptions
+    cleanupOldSubscriptions();
   };
+  
+  // Return function to unsubscribe
+  return cleanupFunction;
 };
+
+// Helper to clean up old subscriptions
+function cleanupOldSubscriptions(maxAge: number = 180000) { // 3 minutes default
+  const now = Date.now();
+  let cleaned = 0;
+  
+  activeSubscriptions.forEach((sub, id) => {
+    // If lastUsed is 0 or older than maxAge, clean it up
+    if (sub.lastUsed === 0 || (now - sub.lastUsed > maxAge)) {
+      sub.unsubscribe();
+      activeSubscriptions.delete(id);
+      cleaned++;
+      console.log(`[Notification] Cleaned up unused subscription: ${id}`);
+    }
+  });
+  
+  // Periodically clean the notification cache to prevent memory issues
+  if (activeSubscriptions.size > 0 && Math.random() < 0.2) { // 20% chance 
+    let cacheCount = 0;
+    const cacheMaxAge = 1800000; // 30 minutes for cache cleanup
+    
+    for (const [key, value] of notificationCache.entries()) {
+      if (now - value.timestamp > cacheMaxAge) {
+        notificationCache.delete(key);
+        cacheCount++;
+      }
+    }
+    
+    if (cacheCount > 0) {
+      console.log(`[Notification] Cleaned up ${cacheCount} old cache entries`);
+    }
+  }
+  
+  if (cleaned > 0) {
+    console.log(`[Notification] Cleaned up ${cleaned} unused subscriptions. Remaining: ${activeSubscriptions.size}`);
+  }
+}
 
 /**
  * Gets the count of unread notifications for a specific user
@@ -1307,6 +1469,22 @@ export const fixNotificationStructure = async (userId: string): Promise<number> 
  */
 export const resetNotificationSystem = async (): Promise<void> => {
   try {
+    // Prevent multiple concurrent resets
+    if (lastResetTime.inProgress) {
+      console.log('[Notification System] Reset already in progress, skipping');
+      return;
+    }
+    
+    // Throttle resets to at most once every 60 seconds
+    const now = Date.now();
+    if (now - lastResetTime.timestamp < 60000) {
+      console.log('[Notification System] Reset performed recently, skipping');
+      return;
+    }
+    
+    lastResetTime.inProgress = true;
+    lastResetTime.timestamp = now;
+    
     console.log('[Notification System] Resetting notification system');
     
     // Clear all local caches
@@ -1321,6 +1499,8 @@ export const resetNotificationSystem = async (): Promise<void> => {
     console.log('[Notification System] Notification system reset complete');
   } catch (error) {
     console.error('[Notification Error] Error resetting notification system:', error);
+  } finally {
+    lastResetTime.inProgress = false;
   }
 };
 

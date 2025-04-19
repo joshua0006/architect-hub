@@ -53,6 +53,9 @@ export const NotificationIcon: React.FC = () => {
   // Count of read notifications
   const readCount = notifications.filter(n => n.read).length;
   
+  // Add a new state to track which notification is being deleted by ID
+  const [deletingNotificationId, setDeletingNotificationId] = useState<string | null>(null);
+  
   // Function to handle navigation for task and subtask notifications
   const handleTaskNotificationNavigation = (notification: ExtendedNotification) => {
     // Extract task ID and project ID from metadata
@@ -261,7 +264,10 @@ export const NotificationIcon: React.FC = () => {
   
   // Fetch notifications manually - memoized for stability
   const fetchNotifications = useCallback(async (forceFetch = false, skipLoadingState = false) => {
-    if (!user) return;
+    if (!user || hasActiveSubscription.current) {
+      // Skip manual fetching if we have active subscription
+      return;
+    }
     
     try {
       // Increase throttle time from 30s to 2 minutes
@@ -298,125 +304,171 @@ export const NotificationIcon: React.FC = () => {
     }
   }, [user, showToast, deduplicateNotifications]);
   
-  // Throttled update function for subscription updates - increased from 30s to 2 minutes
+  // Throttled update function for subscription updates - less aggressive throttling for faster updates
   const updateNotificationsThrottled = useCallback((newNotifications: Notification[]) => {
     const now = Date.now();
     
     // For file upload notifications, decrease throttle time to make them appear faster
     const fileUploadNotifications = newNotifications.filter(n => n.iconType === 'file-upload' && !n.read);
+    const mentionNotifications = newNotifications.filter(n => n.iconType === 'comment-mention' && !n.read);
     const hasFileUploads = fileUploadNotifications.length > 0;
+    const hasMentions = mentionNotifications.length > 0;
     
-    // Standard throttle time is 2 minutes, but only 10 seconds for file uploads
-    const throttleTime = hasFileUploads ? 10000 : 120000;
+    // Reduce the default throttle time for faster updates
+    // Default: 10 seconds, file uploads and mentions: 2 seconds
+    const throttleTime = hasFileUploads || hasMentions ? 2000 : 10000;
     
-    // Increase throttle time from 30s to 2 minutes for subscription updates
-    if (now - lastSubscriptionUpdate.current < throttleTime) {
+    // If there's any unread notification, reduce throttle time to ensure timely updates
+    if (now - lastSubscriptionUpdate.current < throttleTime && 
+        !newNotifications.some(n => !n.read && n.id && !notifications.some(existing => existing.id === n.id))) {
       return;
     }
     
     if (newNotifications.length === 0) return;
     
-    // Check if notifications array has actually changed to avoid unnecessary renders
-    const currentIds = newNotifications.map(n => n.id).sort().join(',');
-    const existingIds = notifications.map(n => n.id).sort().join(',');
+    // Compare current and new notifications to detect any changes
+    // Focus on detecting new notifications that don't exist in current state
+    const existingIds = new Set(notifications.map(n => n.id));
+    const hasNewNotifications = newNotifications.some(n => !existingIds.has(n.id));
     
-    if (currentIds === existingIds) {
+    // Check if read status has changed for any notifications
+    const readStatusChanged = newNotifications.some(newNote => {
+      const existing = notifications.find(n => n.id === newNote.id);
+      return existing && existing.read !== newNote.read;
+    });
+    
+    // Update if we have new notifications or read status has changed
+    if (hasNewNotifications || readStatusChanged) {
+      console.log(`[Notification] Detected changes - New: ${hasNewNotifications}, Read status changed: ${readStatusChanged}`);
+      
+      // Single state update to reduce renders
+      setNotifications(prev => {
+        const updated = deduplicateNotifications(newNotifications);
+        const newUnreadCount = updated.filter(n => !n.read).length;
+        
+        // Only update unread count if it changed
+        if (newUnreadCount !== unreadCount) {
+          // Use setTimeout to separate state updates
+          setTimeout(() => {
+            setUnreadCount(newUnreadCount);
+            
+            // Only show toast for new notifications if there are more than before
+            if (newUnreadCount > unreadCount) {
+              // Check for file upload notifications specifically
+              const fileUploadNotifications = updated.filter(
+                n => n.iconType === 'file-upload' && !n.read
+              );
+              
+              // Check for mention notifications specifically
+              const mentionNotifications = updated.filter(
+                n => n.iconType === 'comment-mention' && !n.read
+              );
+              
+              if (fileUploadNotifications.length > 0) {
+                // Show a toast for file uploads
+                const latestUpload = fileUploadNotifications.sort((a, b) => {
+                  const timeA = a.createdAt?.toMillis?.() || new Date(a.createdAtISO || Date.now()).getTime();
+                  const timeB = b.createdAt?.toMillis?.() || new Date(b.createdAtISO || Date.now()).getTime();
+                  return timeB - timeA;
+                })[0];
+                
+                if (latestUpload && latestUpload.metadata) {
+                  const guestName = latestUpload.metadata.guestName || 'A guest';
+                  showToast(`${guestName} uploaded a file`, 'success');
+                } else {
+                  showToast('New file uploaded', 'success');
+                }
+              } else if (mentionNotifications.length > 0) {
+                showToast(`You were mentioned in a comment`, 'success');
+              } else if (newUnreadCount - unreadCount > 0) {
+                showToast('You have new notifications', 'success');
+              }
+            }
+          }, 100);
+        }
+        
+        return updated;
+      });
+      
+      lastSubscriptionUpdate.current = now;
+      lastNotificationUpdate.current = now;
+    }
+  }, [notifications, unreadCount, deduplicateNotifications, showToast]);
+  
+  // Update the setupUserSubscription implementation to properly handle errors
+  const setupUserSubscription = (userId: string) => {
+    // Make sure to clean up any existing subscription first
+    if (unsubscribeRef.current) {
+      console.log('[Notification] Cleaning up existing subscription');
+      unsubscribeRef.current();
+      unsubscribeRef.current = null;
+    }
+    
+    // If we already have an active subscription, don't create another one
+    if (hasActiveSubscription.current) {
+      console.log('[Notification] Subscription already active, skipping setup');
       return;
     }
     
-    // Single state update to reduce renders
-    setNotifications(prev => {
-      const updated = deduplicateNotifications(newNotifications);
-      const newUnreadCount = updated.filter(n => !n.read).length;
+    // Set up new subscription
+    try {
+      console.log(`[Notification] Setting up subscription for user ${userId}`);
+      // Set up real-time updates with throttled callback
+      const unsubscribe = subscribeToNotifications(userId, updateNotificationsThrottled);
       
-      // Only update unread count if it changed
-      if (newUnreadCount !== unreadCount) {
-        // Use setTimeout to separate state updates
-        setTimeout(() => {
-          setUnreadCount(newUnreadCount);
-          
-          // Only show toast for new notifications if there are more than before
-          if (newUnreadCount > unreadCount) {
-            // Check for file upload notifications specifically
-            const fileUploadNotifications = updated.filter(
-              n => n.iconType === 'file-upload' && !n.read
-            );
-            
-            // Check for mention notifications specifically
-            const mentionNotifications = updated.filter(
-              n => n.iconType === 'comment-mention' && !n.read
-            );
-            
-            if (fileUploadNotifications.length > 0) {
-              // Show a toast for file uploads
-              const latestUpload = fileUploadNotifications.sort((a, b) => {
-                const timeA = a.createdAt?.toMillis?.() || new Date(a.createdAtISO || Date.now()).getTime();
-                const timeB = b.createdAt?.toMillis?.() || new Date(b.createdAtISO || Date.now()).getTime();
-                return timeB - timeA;
-              })[0];
-              
-              if (latestUpload && latestUpload.metadata) {
-                const guestName = latestUpload.metadata.guestName || 'A guest';
-                showToast(`${guestName} uploaded a file`, 'success');
-              } else {
-                showToast('New file uploaded', 'success');
-              }
-            } else if (mentionNotifications.length > 0) {
-              showToast(`You were mentioned in a comment`, 'success');
-            } else if (newUnreadCount - unreadCount > 0) {
-              showToast('You have new notifications', 'success');
-            }
-          }
-        }, 100);
-      }
+      // Store the unsubscribe function
+      unsubscribeRef.current = unsubscribe;
+      hasActiveSubscription.current = true;
       
-      return updated;
-    });
-    
-    lastSubscriptionUpdate.current = now;
-    lastNotificationUpdate.current = now;
-  }, [notifications, unreadCount, deduplicateNotifications, showToast]);
+      // Initial fetch to populate state without triggering a reset
+      getRecentNotifications(userId, 20).then(notifications => {
+        if (notifications.length > 0) {
+          setNotifications(deduplicateNotifications(notifications));
+          setUnreadCount(notifications.filter(n => !n.read).length);
+        }
+      }).catch(error => {
+        console.error('[Notification] Initial fetch error:', error);
+      });
+    } catch (error) {
+      console.error('[Notification Error] Error setting up user subscription:', error);
+      hasActiveSubscription.current = false;
+    }
+  };
   
-  // Setup notification subscription only once
+  // Update the useEffect that was previously optimized
   useEffect(() => {
-    if (!user) return;
+    if (!user || !user.id) return;
+    
+    // Reference to user ID for cleanup
+    const userId = user.id;
     
     // Prevent multiple setups for the same user
     if (setupInProgress.current) {
+      console.log('[Notification] Setup already in progress, skipping');
       return;
     }
     
-    // Only set up subscription if not already active
+    // Only set up subscription if not already active for this user
     if (hasActiveSubscription.current || GLOBAL_SUBSCRIPTION_ACTIVE) {
+      console.log('[Notification] Subscription already active, skipping setup');
       return;
     }
     
-    // Prevent multiple components from setting up subscriptions
+    console.log(`[Notification] Starting subscription setup for user ${userId}`);
+    
+    // Set flags to prevent concurrent setup
     GLOBAL_SUBSCRIPTION_ACTIVE = true;
     setupInProgress.current = true;
-    hasActiveSubscription.current = false;
     
-    // Reset notification system first
-    resetNotificationSystem().then(() => {
-      // Fetch initial notifications
-      fetchNotifications(true).then(() => {
-        // Set up subscription only after initial fetch completes
-        if (!hasActiveSubscription.current) {
-          // Set up real-time updates with throttled callback
-          const unsubscribe = subscribeToNotifications(user.id, updateNotificationsThrottled);
-          
-          // Store the unsubscribe function
-          unsubscribeRef.current = unsubscribe;
-          hasActiveSubscription.current = true;
-          setupInProgress.current = false;
-        }
-      });
-    });
+    // Direct setup without resetting notification system
+    setupUserSubscription(userId);
+    setupInProgress.current = false;
     
     // Clean up function
     return () => {
+      console.log(`[Notification] Cleaning up subscription for user ${userId}`);
+      
       if (unsubscribeRef.current) {
-        // Call the unsubscribe function from Firebase
         unsubscribeRef.current();
         unsubscribeRef.current = null;
       }
@@ -425,7 +477,7 @@ export const NotificationIcon: React.FC = () => {
       GLOBAL_SUBSCRIPTION_ACTIVE = false;
       setupInProgress.current = false;
     };
-  }, [user, fetchNotifications, updateNotificationsThrottled]);
+  }, [user]); // Only depend on user to prevent unnecessary re-runs
   
   // Setup a less frequent refresh mechanism - increased from 10 minutes to 30 minutes
   useEffect(() => {
@@ -756,6 +808,9 @@ export const NotificationIcon: React.FC = () => {
     event.stopPropagation();
     
     try {
+      // Set the deleting state for this specific notification
+      setDeletingNotificationId(notificationId);
+      
       await deleteNotification(notificationId);
       
       // Remove the deleted notification from state
@@ -770,6 +825,9 @@ export const NotificationIcon: React.FC = () => {
     } catch (error) {
       console.error('Error deleting notification:', error);
       showToast('Failed to delete notification', 'error');
+    } finally {
+      // Clear the deleting state
+      setDeletingNotificationId(null);
     }
   };
   
@@ -831,9 +889,6 @@ export const NotificationIcon: React.FC = () => {
       <button
         onClick={() => {
           setShowNotifications(!showNotifications);
-          if (!showNotifications) {
-            fetchNotifications();
-          }
         }}
         className="relative p-2 rounded-full transition-colors hover:bg-gray-100"
         aria-label="Notifications"
@@ -986,8 +1041,13 @@ export const NotificationIcon: React.FC = () => {
                             }}
                             className="absolute top-2 right-2 p-1 rounded-full text-gray-400 hover:text-red-600 hover:bg-gray-100 opacity-0 group-hover:opacity-100 transition-opacity"
                             aria-label="Delete notification"
+                            disabled={deletingNotificationId === notification.id}
                           >
-                            <Trash2 className="w-4 h-4" />
+                            {deletingNotificationId === notification.id ? (
+                              <span className="w-4 h-4 block animate-spin rounded-full border-2 border-red-400 border-t-transparent" />
+                            ) : (
+                              <Trash2 className="w-4 h-4" />
+                            )}
                           </button>
                         </li>
                       );
