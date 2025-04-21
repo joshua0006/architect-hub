@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { ChevronRight, FolderOpen, Home, MoreHorizontal, FileText } from 'lucide-react';
+import { ChevronRight, FolderOpen, Home, MoreHorizontal, FileText, Image } from 'lucide-react';
 import { Folder, Document } from '../types';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { db } from '../lib/firebase';
@@ -111,7 +111,10 @@ export default function DocumentBreadcrumbs({
     let current = currentFolder;
 
     while (current) {
-      path.unshift(current);
+      // Skip _root folder from the breadcrumb path
+      if (!current.metadata?.isRootFolder && current.name !== '_root') {
+        path.unshift(current);
+      }
       current = current.parentId ? folderMap.get(current.parentId) : undefined;
     }
 
@@ -127,9 +130,17 @@ export default function DocumentBreadcrumbs({
       // If a document is selected, navigate to its containing folder
       onNavigate(currentFolder);
     } else if (currentFolder) {
-      // If in a folder, navigate to parent folder
+      // Get parent folder
       const parentFolder = currentFolder.parentId ? folderMap.get(currentFolder.parentId) : undefined;
-      onNavigate(parentFolder);
+      
+      // Check if parent folder is _root or has isRootFolder flag
+      if (parentFolder && (parentFolder.metadata?.isRootFolder || parentFolder.name === '_root')) {
+        // Navigate to the _root folder but it will be hidden in UI
+        onNavigate(parentFolder);
+      } else {
+        // Standard parent navigation
+        onNavigate(parentFolder);
+      }
     }
   };
   
@@ -162,6 +173,11 @@ export default function DocumentBreadcrumbs({
 
   // Get appropriate icon for document type
   const getDocumentIcon = (type: string) => {
+    if (type === 'pdf') {
+      return <FileText className="w-4 h-4 text-red-400" />;
+    } else if (type === 'heic' || type === 'image/heic') {
+      return <Image className="w-4 h-4 text-blue-400" />;
+    }
     return <FileText className="w-4 h-4 text-gray-400" />;
   };
 
@@ -174,7 +190,16 @@ export default function DocumentBreadcrumbs({
         {/* Home button - always shown */}
         <div className="flex items-center my-1">
           <button
-            onClick={() => onNavigate(undefined)}
+            onClick={() => {
+              // If current folder is _root or has isRootFolder flag, treat it as a 'home' navigation
+              if (currentFolder?.metadata?.isRootFolder || currentFolder?.name === '_root') {
+                // Navigate to the same folder, but we'll hide it in the UI
+                onNavigate(currentFolder);
+              } else {
+                // Regular home navigation
+                onNavigate(undefined);
+              }
+            }}
             className="flex items-center space-x-1.5 px-2 py-1 rounded-md transition-colors whitespace-nowrap hover:text-gray-900 hover:bg-gray-100"
           >
             <Home className="w-4 h-4" />

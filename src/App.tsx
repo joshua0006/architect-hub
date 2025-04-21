@@ -14,6 +14,8 @@ import SharedContent from './components/SharedContent';
 import { Toolbar } from './components/Toolbar';
 import TokenUpload from './components/TokenUpload';
 import UserGroupManagement from './components/UserGroupManagement';
+import AdminPage from './pages/AdminPage';
+import ErrorBoundary from './components/ErrorBoundary';
 
 
 // Protected Route Component
@@ -32,11 +34,11 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
     return <Navigate to="/signin" />;
   }
 
-  return <>{children}</>;
+  return <ErrorBoundary>{children}</ErrorBoundary>;
 }
 
 // Admin-only route component
-function AdminRoute({ children }: { children: React.ReactNode }) {
+function AdminRoute({ children, staffAllowed = false }: { children: React.ReactNode, staffAllowed?: boolean }) {
   const { user, loading } = useAuth();
 
   if (loading) {
@@ -51,11 +53,11 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
     return <Navigate to="/signin" />;
   }
 
-  if (user.role !== 'Admin' && user.role !== 'Staff') {
+  if (user.role !== 'Admin' && (!staffAllowed || user.role !== 'Staff')) {
     return <Navigate to="/" />;
   }
 
-  return <>{children}</>;
+  return <ErrorBoundary>{children}</ErrorBoundary>;
 }
 
 // Wrapper for the UserGroupManagement component
@@ -79,50 +81,60 @@ export const App: React.FC = () => {
     useKeyboardShortcutGuide();
 
   return (
-    <BrowserRouter>
-      <AuthProvider>
-        <OrganizationProvider>
-          <ToastProvider>
-            {/* Main application layout wrapper */}
-            
-              <Routes>
-                <Route path="/signin" element={<SignIn />} />
-                <Route path="/signup" element={<SignUp />} />
-                <Route
-                  path="/admin/user-groups"
-                  element={
-                    <AdminRoute>
-                      <UserGroupManagementWrapper />
-                    </AdminRoute>
-                  }
+    <ErrorBoundary>
+      <BrowserRouter>
+        <AuthProvider>
+          <OrganizationProvider>
+            <ToastProvider>
+              {/* Main application layout wrapper */}
+              
+                <Routes>
+                  <Route path="/signin" element={<SignIn />} />
+                  <Route path="/signup" element={<SignUp />} />
+                  <Route
+                    path="/admin/user-groups"
+                    element={
+                      <AdminRoute staffAllowed={true}>
+                        <UserGroupManagementWrapper />
+                      </AdminRoute>
+                    }
+                  />
+                  <Route
+                    path="/admin"
+                    element={
+                      <AdminRoute>
+                        <AdminPage />
+                      </AdminRoute>
+                    }
+                  />
+                  <Route
+                    path="/*"
+                    element={
+                      <ProtectedRoute>
+                        <AppContent />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/shared/:token"
+                    element={<SharedContent />}
+                  />
+                  <Route
+                    path="/upload"
+                    element={<TokenUpload />}
+                  />
+                </Routes>
+              
+              {isShortcutGuideOpen && (
+                <KeyboardShortcutGuide
+                  onClose={() => setIsShortcutGuideOpen(false)}
                 />
-                <Route
-                  path="/*"
-                  element={
-                    <ProtectedRoute>
-                      <AppContent />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="/shared/:token"
-                  element={<SharedContent />}
-                />
-                <Route
-                  path="/upload"
-                  element={<TokenUpload />}
-                />
-              </Routes>
-            
-            {isShortcutGuideOpen && (
-              <KeyboardShortcutGuide
-                onClose={() => setIsShortcutGuideOpen(false)}
-              />
-            )}
-          </ToastProvider>
-        </OrganizationProvider>
-      </AuthProvider>
-    </BrowserRouter>
+              )}
+            </ToastProvider>
+          </OrganizationProvider>
+        </AuthProvider>
+      </BrowserRouter>
+    </ErrorBoundary>
   );
 };
 

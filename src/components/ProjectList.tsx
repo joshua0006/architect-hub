@@ -180,7 +180,7 @@ const ProjectItem = ({
 
   const renderStatusMenu = () => {
     // For non-staff users, just show the status without dropdown
-    if (user?.role !== 'Staff') {
+    if (user?.role !== 'Staff' && user?.role !== 'Admin'	) {
       return (
         <div className="status-menu">
           <button
@@ -424,7 +424,7 @@ export default function ProjectList({
       });
     
     setFilteredProjects(filtered);
-  }, [searchQuery, projectOrder, isOrderLoaded]);
+  }, [searchQuery, projectOrder, isOrderLoaded, projects]);
 
   const handleDragEnd = (result: DropResult) => {
     const { destination, source } = result;
@@ -435,15 +435,36 @@ export default function ProjectList({
     }
 
     // Reorder the list
-    const newOrder = Array.from(projectOrder);
+    const newOrder = Array.from(filteredProjects);
     const [removed] = newOrder.splice(source.index, 1);
     newOrder.splice(destination.index, 0, removed);
 
-    setProjectOrder(newOrder);
+    setFilteredProjects(newOrder);
+    
+    // Also update the master project order (including archived projects)
+    const updatedProjectOrder = Array.from(projectOrder);
+    // Find the indices in the full project order
+    const sourceIdx = updatedProjectOrder.findIndex(p => p.id === removed.id);
+    if (sourceIdx !== -1) {
+      updatedProjectOrder.splice(sourceIdx, 1);
+      // Find where to insert in the master list (approximate position)
+      let targetIdx;
+      if (destination.index === 0) {
+        targetIdx = 0;
+      } else if (destination.index >= newOrder.length - 1) {
+        targetIdx = updatedProjectOrder.length;
+      } else {
+        // Find the project that would be before this one in the filtered list
+        const beforeProject = newOrder[destination.index - 1];
+        targetIdx = updatedProjectOrder.findIndex(p => p.id === beforeProject.id) + 1;
+      }
+      updatedProjectOrder.splice(targetIdx, 0, removed);
+      setProjectOrder(updatedProjectOrder);
+    }
     
     // Save the new order to user preferences
     if (user?.id) {
-      const projectIds = newOrder.map(project => project.id);
+      const projectIds = updatedProjectOrder.map(project => project.id);
       userService.saveProjectOrder(user.id, projectIds)
         .then(() => {
           console.log('Project order saved to user preferences');
@@ -567,7 +588,7 @@ export default function ProjectList({
         </div>
         
         <div className="flex w-full">
-          {user?.role === "Staff" && (
+          {user?.role === "Staff" || user?.role === "Admin" && (
             <button
               onClick={() => setShowAddProject(true)}
               className="w-full px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 transition-all duration-300 flex items-center justify-center space-x-2"
@@ -593,7 +614,7 @@ export default function ProjectList({
       <motion.div className="p-4 space-y-4">
         <DragDropContext onDragEnd={handleDragEnd}>
           <AnimatePresence mode="wait">
-            {projectOrder.length > 0 ? (
+            {filteredProjects.length > 0 ? (
               <Droppable droppableId="projects-list">
                 {(provided) => (
                   <div
@@ -601,7 +622,7 @@ export default function ProjectList({
                     {...provided.droppableProps}
                     className="space-y-2"
                   >
-                    {projectOrder.map((project, index) => (
+                    {filteredProjects.map((project, index) => (
                       <ProjectItem
                         key={project.id}
                         project={project}

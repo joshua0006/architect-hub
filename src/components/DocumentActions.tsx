@@ -10,6 +10,7 @@ import { folderService } from "../services";
 interface DocumentActionsProps {
   projectId: string;
   currentFolderId?: string;
+  rootFolderId?: string; // The invisible root folder ID if available
   folders: FolderType[];
   onCreateFolder: (name: string, parentId?: string) => Promise<void>;
   onCreateDocument: (
@@ -34,6 +35,7 @@ interface DocumentActionsProps {
 export default function DocumentActions({
   projectId,
   currentFolderId,
+  rootFolderId,
   folders,
   onCreateFolder,
   onCreateDocument,
@@ -126,6 +128,9 @@ export default function DocumentActions({
     try {
       setIsUploading(true);
       
+      // Determine target folder ID - use root folder as fallback if available
+      const targetFolderId = currentFolderId || rootFolderId;
+      
       if (files.length === 1) {
         // Single file upload
         const file = files[0];
@@ -140,14 +145,13 @@ export default function DocumentActions({
           fileType = "dwg";
         }
         
-        await onCreateDocument(fileName, fileType, file, currentFolderId);
+        await onCreateDocument(fileName, fileType, file, targetFolderId);
         showToast(`File "${fileName}" uploaded successfully`, "success");
       } else if (onCreateMultipleDocuments) {
         // Multiple files upload
-        await onCreateMultipleDocuments(Array.from(files), currentFolderId);
+        await onCreateMultipleDocuments(Array.from(files), targetFolderId);
         showToast(`${files.length} files uploaded successfully`, "success");
       }
-      
       if (onRefresh) {
         await onRefresh();
       }
@@ -156,13 +160,13 @@ export default function DocumentActions({
       const uploadSuccessEvent = new CustomEvent('document-upload-success', {
         bubbles: true,
         detail: {
-          folderId: currentFolderId,
+          folderId: targetFolderId,
           timestamp: Date.now(),
           fileCount: files.length
         }
       });
       document.dispatchEvent(uploadSuccessEvent);
-      console.log(`[Document Actions] Dispatched upload success event for folder: ${currentFolderId}`);
+      console.log(`[Document Actions] Dispatched upload success event for folder: ${targetFolderId}`);
       
       // Reset the input
       if (fileInputRef.current) {
@@ -316,7 +320,7 @@ export default function DocumentActions({
   // Get the current folder name for the token generation
   const currentFolderName = currentFolderId 
     ? folders.find(f => f.id === currentFolderId)?.name 
-    : "Root";
+    : "_root";
 
   // Only show actions if user has permission to upload
   if (!hasUploadPermission()) {
@@ -408,66 +412,7 @@ export default function DocumentActions({
           </div>
         </div>
 
-        {/* File operation buttons - Only visible if we're in a folder with files */}
-        {currentFolderId && hasFolderWritePermission() && (
-          <>
-            {/* Copy Files Button */}
-            <div className="group relative">
-              <button
-                onClick={() => {
-                  setFileOperation('copy');
-                  // Only open the selection UI if the callback is available
-                  if (onCopyOrMoveFile) {
-                    // Dispatch event to document list to initiate file selection
-                    const selectFilesEvent = new CustomEvent('select-files-for-operation', {
-                      bubbles: true,
-                      detail: { operation: 'copy' }
-                    });
-                    document.dispatchEvent(selectFilesEvent);
-                  } else {
-                    showToast("File copy functionality is not available", "error");
-                  }
-                }}
-                className="px-3 py-2 flex items-center space-x-2 bg-slate-300 text-gray-700 rounded-md hover:bg-gray-200 transition-colors"
-                title="Copy files to another folder"
-              >
-                <Copy className="w-5 h-5" />
-                <span className="hidden sm:inline">Copy Files</span>
-              </button>
-              <div className="absolute top-full mb-2 left-1/2 transform -translate-x-1/2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap">
-                Copy files to another folder
-              </div>
-            </div>
-
-            {/* Move Files Button */}
-            <div className="group relative">
-              <button 
-                onClick={() => {
-                  setFileOperation('move');
-                  // Only open the selection UI if the callback is available
-                  if (onCopyOrMoveFile) {
-                    // Dispatch event to document list to initiate file selection
-                    const selectFilesEvent = new CustomEvent('select-files-for-operation', {
-                      bubbles: true,
-                      detail: { operation: 'move' }
-                    });
-                    document.dispatchEvent(selectFilesEvent);
-                  } else {
-                    showToast("File move functionality is not available", "error");
-                  }
-                }}
-                className="px-3 py-2 flex items-center space-x-2 bg-slate-300 text-gray-700 rounded-md hover:bg-gray-200 transition-colors"
-                title="Move files to another folder"
-              >
-                <Move className="w-5 h-5" />
-                <span className="hidden sm:inline">Move Files</span>
-              </button>
-              <div className="absolute top-full mb-2 left-1/2 transform -translate-x-1/2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap">
-                Move files to another folder
-              </div>
-            </div>
-          </>
-        )}
+       
       </div>
 
       {/* File input (hidden) */}
@@ -701,22 +646,6 @@ export default function DocumentActions({
               {/* Folder selection list */}
               <div className="max-h-60 overflow-y-auto border border-gray-200 rounded-md mb-4">
                 <ul className="divide-y divide-gray-200">
-                  {/* Root folder option */}
-                  <li 
-                    className={`px-4 py-2 hover:bg-gray-50 cursor-pointer flex items-center justify-between ${
-                      selectedDestinationFolderId === "" ? 'bg-blue-50' : ''
-                    }`}
-                    onClick={() => setSelectedDestinationFolderId("")}
-                  >
-                    <div className="flex items-center">
-                      <Folder className="w-5 h-5 text-gray-400 mr-2" />
-                      <span>Root</span>
-                    </div>
-                    {selectedDestinationFolderId === "" && (
-                      <div className="w-2 h-2 rounded-full bg-blue-600"></div>
-                    )}
-                  </li>
-                  
                   {/* Available folders */}
                   {folders.map(folder => (
                     <li 

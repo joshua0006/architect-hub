@@ -24,6 +24,7 @@ import {
   FolderPlus,
   ChevronUp,
   FolderInput,
+  Image,
 } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { Document, Folder, Project } from "../types";
@@ -50,6 +51,7 @@ import { folderService } from '../services/folderService';
 import { User } from '../types/auth';
 import { useNavigate } from 'react-router-dom';
 import { USER_UPDATE_EVENT } from '../services/userSubscriptionService';
+import { documentService } from '../services/documentService';
 
 // Local type definition for the DocumentViewer's Folder type
 interface ViewerFolder {
@@ -201,6 +203,39 @@ export default function DocumentList({
   // Use the local folders from state for rendering if available, otherwise use the prop folders
   const displayFolders = isSharedView ? sharedFolders || [] : (localFolders.length > 0 ? localFolders : folders);
 
+  // Identify the invisible root folder if present
+  const rootFolder = displayFolders.find(folder => folder.metadata?.isRootFolder);
+  
+  // Filter out invisible folders from display
+  const visibleFolders = displayFolders.filter(folder => !folder.metadata?.isHidden);
+
+  // When filtering folders by parent, if we're at the top level (currentFolder is undefined), 
+  // also include folders whose parent is the invisible root folder
+  const allFolders = isSharedView 
+    ? sharedFolders || [] 
+    : visibleFolders.filter(folder => {
+        if (!currentFolder) {
+          // At top level, include folders whose parent is undefined OR whose parent is the root folder
+          return folder.parentId === undefined || (rootFolder && folder.parentId === rootFolder.id);
+        } else {
+          // In a subfolder, normal filtering applies
+          return folder.parentId === currentFolder.id;
+        }
+      });
+
+  // When in the invisible root folder, show all files with that folder ID
+  const allDocs = isSharedView 
+    ? sharedDocuments || [] 
+    : localDocuments.filter(doc => {
+        if (!currentFolder && rootFolder) {
+          // At top level, include files that are in the invisible root folder
+          return doc.folderId === rootFolder.id;
+        } else {
+          // In a subfolder, normal filtering applies
+          return doc.folderId === currentFolder?.id;
+        }
+      });
+
   // Update local state when props change
   useEffect(() => {
     setLocalDocuments(documents);
@@ -247,14 +282,6 @@ export default function DocumentList({
 
     }
   }, [popupItem]); // Removed folders and documents dependencies as we fetch directly
-
-  const allDocs = isSharedView ? sharedDocuments || [] : localDocuments.filter(
-    (doc) => doc.folderId === currentFolder?.id
-  );
-  const allFolders = isSharedView ? sharedFolders || [] : localFolders.filter(
-    (folder) => folder.parentId === currentFolder?.id
-  );
-
 
   const isUserAdminOrStaff = (): boolean =>{
     if(!user || !user.role) {
@@ -378,11 +405,11 @@ export default function DocumentList({
     // }
 
     // Apply view filter
-    // if (viewFilter === 'files') {
-    //   filteredFolders = [];
-    // } else if (viewFilter === 'folders') {
-    //   filteredDocs = [];
-    // }
+    if (viewFilter === 'files') {
+      filteredFolders = [];
+    } else if (viewFilter === 'folders') {
+      filteredDocs = [];
+    }
 
     // Sort documents and folders based on sortBy and sortOrder
     const sortFunction = (a: any, b: any) => {
@@ -1386,6 +1413,17 @@ export default function DocumentList({
     try {
       setIsUploading(true);
       setUploadProgress(0);
+
+      // Determine the target folder ID - if we're at the project level with no visible folder selected,
+      // use the invisible root folder ID if available
+      const targetFolderId = currentFolder?.id || (rootFolder?.id);
+      
+      if (!targetFolderId) {
+        console.error("No target folder ID available for file upload");
+        showToast("Upload failed: No valid upload location", "error");
+        setIsUploading(false);
+        return;
+      }
       
       if (files.length === 1) {
         // Single file upload - unchanged
@@ -1411,7 +1449,7 @@ export default function DocumentList({
         
         try {
           if (onCreateDocument) {
-            await onCreateDocument(fileName, fileType, file, currentFolder?.id);
+            await onCreateDocument(fileName, fileType, file, targetFolderId);
             setUploadedFiles(prev => ({...prev, success: prev.success + 1}));
             showToast(`File "${fileName}" uploaded successfully`, "success");
           } else {
@@ -1694,7 +1732,17 @@ export default function DocumentList({
       return;
     }
 
-    console.log(`Processing ${files.length} files individually`);
+    // Determine the target folder ID - if we're at the project level with no visible folder selected,
+    // use the invisible root folder ID if available
+    const targetFolderId = currentFolder?.id || (rootFolder?.id);
+    
+    if (!targetFolderId) {
+      console.error("No target folder ID available for file upload");
+      showToast("Upload failed: No valid upload location", "error");
+      return;
+    }
+
+    console.log(`Processing ${files.length} files individually to folder ${targetFolderId}`);
     setIsUploading(true);
     setUploadProgress(0);
     
@@ -1836,15 +1884,15 @@ export default function DocumentList({
           } else {
             // No folders in path, just upload the file
             if (onCreateDocument) {
-              await onCreateDocument(fileName, fileType, file, currentFolder?.id);
+              await onCreateDocument(fileName, fileType, file, targetFolderId);
             } else {
               throw new Error("Document creation is not available");
             }
           }
         } else {
-          // No path information, just upload the file to current folder
+          // No path information, just upload the file to current folder or root folder
           if (onCreateDocument) {
-            await onCreateDocument(fileName, fileType, file, currentFolder?.id);
+            await onCreateDocument(fileName, fileType, file, targetFolderId);
           } else {
             throw new Error("Document creation is not available");
           }
@@ -1907,6 +1955,7 @@ export default function DocumentList({
       <DocumentActions
         projectId={projectId}
         currentFolderId={currentFolder?.id}
+        rootFolderId={rootFolder?.id}
         folders={folders}
         onCreateFolder={onCreateFolder}
         onCreateDocument={createDocumentHandler}
@@ -2154,10 +2203,14 @@ export default function DocumentList({
   // Simple function to check if the document is a PDF
   const isPdf = (doc?: Document) => {
     if (!doc) return false;
-    if (doc.type === "pdf") return true;
-    
-    // Check by extension if type not explicitly set
-    return doc.name.toLowerCase().endsWith(".pdf");
+    const extension = doc.name.split('.').pop()?.toLowerCase();
+    return extension === 'pdf' || (doc.metadata?.contentType === 'application/pdf');
+  };
+  
+  const isHeic = (doc?: Document) => {
+    if (!doc) return false;
+    const extension = doc.name.split('.').pop()?.toLowerCase();
+    return extension === 'heic' || (doc.metadata?.contentType === 'image/heic');
   };
   
   // Find the Layout component ref or context to update its state when fullscreen changes
@@ -2176,6 +2229,7 @@ export default function DocumentList({
   // Update state for copy/move dialog
   const [showCopyMoveDialog, setShowCopyMoveDialog] = useState(false);
   const [folderToCopyOrMove, setFolderToCopyOrMove] = useState<{id: string, name: string} | null>(null);
+  const [documentToCopyOrMove, setDocumentToCopyOrMove] = useState<{id: string, name: string} | null>(null);
   const [copyMoveAction, setCopyMoveAction] = useState<'copy' | 'move'>('copy');
   const [destinationFolder, setDestinationFolder] = useState("");
   const [isLoadingFolders, setIsLoadingFolders] = useState(false);
@@ -2299,7 +2353,7 @@ export default function DocumentList({
   
   // Helper function to get folder name by ID
   const getFolderNameById = (folderId: string): string => {
-    if (!folderId) return "Root";
+    if (!folderId) return "_root";
     
     const folder = projectFolders[selectedDestinationProjectId]?.find(f => f.id === folderId);
     return folder ? folder.name : "Unknown folder";
@@ -2724,6 +2778,130 @@ export default function DocumentList({
     };
   }, [showProjectDropdown, showFolderDropdown]);
 
+  // Function to copy or move a document
+  const copyOrMoveDocument = async (source_document: string, destination_project_id: string, destination_folder: string, action: 'move' | 'copy') => {
+    try {
+      // Set loading state to true when operation starts
+      setIsCopyingOrMoving(true);
+      
+      // First, get the source document details for toast notification
+      const sourceDocumentDetails = documents.find(d => d.id === source_document);
+      
+      if (!sourceDocumentDetails) {
+        throw new Error('Source document not found');
+      }
+      
+      const sourceDocumentName = sourceDocumentDetails.name;
+      const sourceProjectId = sourceDocumentDetails.projectId;
+      const sourceFolderId = sourceDocumentDetails.folderId;
+
+      if (action === 'copy') {
+        // First get the document file to re-upload
+        const response = await fetch(sourceDocumentDetails.url);
+        const blob = await response.blob();
+        const file = new File([blob], sourceDocumentDetails.name, { type: blob.type });
+        
+        // Create a new document in the destination folder
+        const newDocData = {
+          projectId: destination_project_id,
+          name: sourceDocumentDetails.name,
+          type: sourceDocumentDetails.type,
+          dateModified: new Date().toISOString(),
+          folderId: destination_folder, // Ensure it's not undefined
+          version: 1,
+          metadata: {
+            ...sourceDocumentDetails.metadata,
+            copiedFrom: source_document
+          }
+        };
+
+        // Use document service to create the new document
+        await documentService.create(destination_folder, newDocData, file);
+        
+        // Show success message
+        showToast(`Document ${sourceDocumentName} copied successfully`, 'success');
+        
+      } else {
+        // action is 'move'
+        // Get the document file to re-upload
+        const response = await fetch(sourceDocumentDetails.url);
+        const blob = await response.blob();
+        const file = new File([blob], sourceDocumentDetails.name, { type: blob.type });
+        
+        // Create a new document in the destination folder
+        const newDocData = {
+          projectId: destination_project_id,
+          name: sourceDocumentDetails.name,
+          type: sourceDocumentDetails.type,
+          dateModified: new Date().toISOString(),
+          folderId: destination_folder, // Ensure it's not undefined
+          version: sourceDocumentDetails.version,
+          metadata: sourceDocumentDetails.metadata
+        };
+
+        // Use document service to create the new document in destination
+        await documentService.create(destination_folder, newDocData, file);
+        
+        // Delete the original document after successful move
+        await documentService.delete(sourceFolderId, source_document);
+        
+        // If the moved document was selected, deselect it
+        if (selectedDocument && selectedDocument.id === source_document) {
+          setSelectedDocument(undefined);
+        }
+        
+        // Show success message
+        showToast(`Document ${sourceDocumentName} moved successfully`, 'success');
+      }
+      
+      // Force immediate refresh of destination project folders
+      if (onRefresh) {
+        console.log(`[DocumentList] Calling parent refresh`);
+        await onRefresh();
+      }
+      
+      // Force immediate UI update
+      setLocalFolders(prev => [...prev]);
+      setLocalDocuments(prev => [...prev]);
+      
+      // Close the dialog and reset states
+      setShowCopyMoveDialog(false);
+      setDocumentToCopyOrMove(null);
+      setCopyMoveAction('copy');
+      setDestinationFolder("");
+      setSelectedDestinationProjectId("");
+      setSelectedDestinationFolderId("");
+    } catch (error) {
+      console.error(`Error ${action === 'copy' ? 'copying' : 'moving'} document:`, error);
+      showToast(`Failed to ${action} document: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
+    } finally {
+      // Set loading state to false regardless of success or failure
+      setIsCopyingOrMoving(false);
+    }
+  };
+
+  // Function to handle document copy button click
+  const handleDocumentCopyClick = (id: string, name: string) => {
+    setDocumentToCopyOrMove({id, name});
+    setCopyMoveAction('copy');
+    setShowCopyMoveDialog(true);
+    setSelectedDestinationProjectId(projectId || "");
+    if (projectId) {
+      loadProjectFolders(projectId);
+    }
+  };
+
+  // Function to handle document move button click
+  const handleDocumentMoveClick = (id: string, name: string) => {
+    setDocumentToCopyOrMove({id, name});
+    setCopyMoveAction('move');
+    setShowCopyMoveDialog(true);
+    setSelectedDestinationProjectId(projectId || "");
+    if (projectId) {
+      loadProjectFolders(projectId);
+    }
+  };
+
   return (
     <div 
       ref={dropZoneRef}
@@ -2744,7 +2922,7 @@ export default function DocumentList({
             onDocumentClick={() => selectedDocument && onPreview(selectedDocument)}
           />
           
-          {/* Replace DocumentActions with the conditional rendering function */}
+          {/* Header actions */}
           {renderUploadButtons()}
         </div>
       )}
@@ -3104,7 +3282,13 @@ export default function DocumentList({
                       }}
                       className="flex items-center space-x-3 flex-1"
                     >
-                      <FileText className="w-6 h-6 text-gray-400" />
+                      {isHeic(doc) ? (
+                        <Image className="w-6 h-6 text-blue-400" />
+                      ) : isPdf(doc) ? (
+                        <FileText className="w-6 h-6 text-red-400" />
+                      ) : (
+                        <FileText className="w-6 h-6 text-gray-400" />
+                      )}
                       <div>
                         <div className="text-left">
                           <span className="font-medium text-gray-900">
@@ -3129,8 +3313,7 @@ export default function DocumentList({
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                // Logic to copy the document
-                                showToast(`Copying document functionality not implemented yet`, 'error');
+                                handleDocumentCopyClick(doc.id, typeof doc.name === 'string' ? doc.name : 'Unnamed document');
                               }}
                               className="p-1 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100"
                               aria-label="Copy document"
@@ -3142,7 +3325,25 @@ export default function DocumentList({
                             </div>
                           </div>
                         )}
-                      
+                        
+                        {/* Move button for documents */}
+                        {canEditDocuments() && (
+                          <div className="group relative">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDocumentMoveClick(doc.id, typeof doc.name === 'string' ? doc.name : 'Unnamed document');
+                              }}
+                              className="p-1 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100"
+                              aria-label="Move document"
+                            >
+                              <FolderInput className="w-5 h-5" />
+                            </button>
+                            <div className="absolute bottom-full mb-2 left-1/2 transform -translate-x-1/2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap">
+                              Move
+                            </div>
+                          </div>
+                        )}
                         
                         {/* Download button always shown for all users */}
                         <div className="group relative">
@@ -3162,8 +3363,8 @@ export default function DocumentList({
                           </div>
                         </div>
                         
-                         {/* Only show share button if user can share documents */}
-                         {canShareDocuments() && (
+                        {/* Only show share button if user can share documents */}
+                        {canShareDocuments() && (
                           <div className="group relative">
                             <button
                               onClick={() => handleShare(doc.id, false)}
@@ -3262,6 +3463,7 @@ export default function DocumentList({
           onClick={() => {
             setShowCopyMoveDialog(false);
             setFolderToCopyOrMove(null);
+            setDocumentToCopyOrMove(null);
             setDestinationFolder("");
             setSelectedDestinationProjectId("");
             setSelectedDestinationFolderId("");
@@ -3274,12 +3476,13 @@ export default function DocumentList({
           {/* Header */}
           <div className="flex items-center justify-between p-4 border-b border-gray-200/80 flex-shrink-0">
             <h3 className="text-lg font-semibold text-gray-900">
-              {copyMoveAction === 'copy' ? 'Copy' : 'Move'} Folder
+              {copyMoveAction === 'copy' ? 'Copy' : 'Move'} {folderToCopyOrMove ? 'Folder' : 'Document'}
             </h3>
             <button
               onClick={() => {
                 setShowCopyMoveDialog(false);
                 setFolderToCopyOrMove(null);
+                setDocumentToCopyOrMove(null);
                 setDestinationFolder("");
                 setSelectedDestinationProjectId("");
                 setSelectedDestinationFolderId("");
@@ -3294,7 +3497,7 @@ export default function DocumentList({
           {/* Content */}
           <div className="p-6 overflow-y-auto flex-grow">
             <p className="text-gray-600 mb-4">
-              {copyMoveAction === 'copy' ? 'Copy' : 'Move'} "{folderToCopyOrMove?.name || 'this folder'}" to:
+              {copyMoveAction === 'copy' ? 'Copy' : 'Move'} "{folderToCopyOrMove?.name || documentToCopyOrMove?.name || 'this item'}" to:
             </p>
             
             {/* Project selection dropdown */}
@@ -3380,7 +3583,7 @@ export default function DocumentList({
                   <span className="truncate">
                     {selectedDestinationFolderId 
                       ? getFolderNameById(selectedDestinationFolderId)
-                      : "Root folder"
+                      : "_root"
                     }
                   </span>
                   <ChevronDown className="w-4 h-4 text-gray-400" />
@@ -3403,22 +3606,8 @@ export default function DocumentList({
                       </div>
                     ) : (
                       <>
-                        {/* Root folder option */}
-                        <button
-                          className={`w-full text-left px-4 py-2 hover:bg-gray-100 flex items-center ${
-                            selectedDestinationFolderId === "" ? 'bg-blue-50 text-blue-600' : 'text-gray-900'
-                          }`}
-                          onClick={() => handleDestinationFolderSelect("")}
-                        >
-                          <Home className="w-4 h-4 mr-2 text-gray-400" />
-                          <span>Root folder</span>
-                          {selectedDestinationFolderId === "" && (
-                            <Check className="w-4 h-4 ml-2 text-blue-600" />
-                          )}
-                        </button>
-                        
-                        {/* Folder tree */}
-                        {renderFolderTree(projectFolders[selectedDestinationProjectId] || [])}
+                        {/* Folder tree - directly display folders */}
+                        {renderFolderTree(projectFolders[selectedDestinationProjectId] || [], undefined, 0)}
                         
                         {/* No folders message */}
                         {(projectFolders[selectedDestinationProjectId]?.length === 0) && (
@@ -3436,7 +3625,7 @@ export default function DocumentList({
             <div className="mt-2 text-xs text-gray-500">
               Selected destination: {selectedDestinationProjectId ? 
                 `${availableProjects.find(p => p.id === selectedDestinationProjectId)?.name || "Unknown"} / ${selectedDestinationFolderId ? 
-                  getFolderNameById(selectedDestinationFolderId) : "Root folder"}` 
+                  getFolderNameById(selectedDestinationFolderId) : "_root"}` 
                 : "Please select a destination"
               }
             </div>
@@ -3448,6 +3637,7 @@ export default function DocumentList({
               onClick={() => {
                 setShowCopyMoveDialog(false);
                 setFolderToCopyOrMove(null);
+                setDocumentToCopyOrMove(null);
                 setDestinationFolder("");
                 setSelectedDestinationProjectId("");
                 setSelectedDestinationFolderId("");
@@ -3464,6 +3654,13 @@ export default function DocumentList({
                 if (folderToCopyOrMove && selectedDestinationProjectId && !isCopyingOrMoving) {
                   copyOrMoveFolder(
                     folderToCopyOrMove.id, 
+                    selectedDestinationProjectId,
+                    selectedDestinationFolderId,
+                    copyMoveAction
+                  );
+                } else if (documentToCopyOrMove && selectedDestinationProjectId && !isCopyingOrMoving) {
+                  copyOrMoveDocument(
+                    documentToCopyOrMove.id,
                     selectedDestinationProjectId,
                     selectedDestinationFolderId,
                     copyMoveAction

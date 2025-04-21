@@ -491,19 +491,6 @@ const Settings = ({ projects, onUpdateProject }: SettingsProps) => {
           )}
 
           <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Organization Name
-              </label>
-              <input
-                type="text"
-                value={formValues.name}
-                onChange={(e) =>
-                  setFormValues({ ...formValues, name: e.target.value })
-                }
-                className="w-full max-w-md px-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">

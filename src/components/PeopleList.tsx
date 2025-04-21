@@ -356,7 +356,10 @@ export default function PeopleList({ projects, teamMembers, onCreateMember, onUp
                           Last active:{" "}
                           {user.metadata?.lastLogin
                             ? formatDateToTimezone(
-                                new Date(user.metadata.lastLogin),
+                                typeof user.metadata.lastLogin === 'object' && 
+                                'seconds' in user.metadata.lastLogin ? 
+                                  new Date((user.metadata.lastLogin as {seconds: number}).seconds * 1000) : 
+                                  new Date(user.metadata.lastLogin),
                                 settings.timezone
                               )
                             : "Never"}

@@ -1,4 +1,4 @@
-import { collection, getDocs, query, where, doc, getDoc, updateDoc, arrayUnion, arrayRemove, setDoc, serverTimestamp, addDoc, writeBatch, onSnapshot } from 'firebase/firestore';
+import { collection, getDocs, query, where, doc, getDoc, updateDoc, arrayUnion, arrayRemove, setDoc, serverTimestamp, addDoc, writeBatch, onSnapshot, deleteDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { User, UserGroup } from '../types';
 
@@ -323,7 +323,7 @@ export const userService = {
   },
 
   // Update a user's role (Staff or Client)
-  async updateUserRole(userId: string, role: 'Staff' | 'Client'): Promise<void> {
+  async updateUserRole(userId: string, role: string): Promise<void> {
     try {
       if (!userId) {
         throw new Error('User ID is required');
@@ -385,6 +385,16 @@ export const userService = {
     } catch (error) {
       console.error('Error getting project order:', error);
       return null;
+    }
+  },
+
+  async deleteUser(userId: string): Promise<void> {
+    try {
+      const userRef = doc(db, 'users', userId);
+      await deleteDoc(userRef);
+    } catch (error) {
+      console.error('Error deleting user:', error);
+      throw new Error('Failed to delete user');
     }
   }
 };

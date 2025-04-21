@@ -4,6 +4,13 @@ import App from './App.tsx';
 import './index.css';
 import { initializeUploads } from './utils/uploadMiddleware';
 
+// Global error handlers
+window.addEventListener('unhandledrejection', (event) => {
+  console.error('Unhandled Promise Rejection:', event.reason);
+  // Prevent the default browser behavior 
+  event.preventDefault();
+});
+
 // Initialize upload utilities
 initializeUploads()
   .then(() => console.log('Upload utilities initialized'))

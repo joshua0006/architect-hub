@@ -1,5 +1,5 @@
 import { folderService } from './folderService';
-import { FolderTemplate, PROJECT_FOLDER_TEMPLATE } from '../constants/folderTemplates';
+import { FolderTemplate, PROJECT_FOLDER_TEMPLATE, FolderAccess } from '../constants/folderTemplates';
 import { Folder } from '../types';
 
 export const folderTemplateService = {
@@ -19,11 +19,46 @@ export const folderTemplateService = {
 
     try {
       console.log(`Creating folder structure for project ${projectId}`);
-      await this.createFoldersRecursively(projectId, template);
+      
+      // First create the invisible root folder for the project
+      const rootFolder = await this.createInvisibleRootFolder(projectId);
+      
+      // Then create the template folders under this root folder
+      await this.createFoldersRecursively(projectId, template, rootFolder.id);
+      
       console.log(`Folder structure created successfully for project ${projectId}`);
     } catch (error) {
       console.error('Error creating folder structure:', error);
       throw new Error('Failed to create folder structure');
+    }
+  },
+  
+  /**
+   * Create an invisible root folder for a project
+   * This folder acts as a container for all project files but isn't shown in the UI
+   * @param projectId The ID of the project
+   * @returns Promise that resolves to the created root folder
+   */
+  async createInvisibleRootFolder(projectId: string): Promise<Folder> {
+    try {
+      console.log(`Creating invisible root folder for project ${projectId}`);
+      
+      const rootFolder = await folderService.create({
+        projectId,
+        name: '_root', // Name it with a prefix that indicates it's a special folder
+        parentId: undefined, // No parent - it's a top-level folder
+        metadata: {
+          isRootFolder: true, // Flag to identify this as a special root folder
+          isHidden: true, // Flag to hide this folder in the UI
+          access: 'ALL' as FolderAccess // Everyone can access the root folder
+        }
+      });
+      
+      console.log(`Created invisible root folder: ${rootFolder.id}`);
+      return rootFolder;
+    } catch (error) {
+      console.error('Error creating invisible root folder:', error);
+      throw new Error('Failed to create invisible root folder');
     }
   },
 

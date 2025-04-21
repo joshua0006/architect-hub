@@ -22,6 +22,10 @@ export interface Notification {
     fileId?: string; // Add fileId to metadata for file upload notifications
     taskId?: string; // Add taskId to metadata for task notifications
     dueDate?: string; // Add dueDate to metadata for task notifications
+    subtaskId?: string; // Add subtaskId to metadata for subtask notifications
+    parentTaskId?: string; // Add parentTaskId to metadata for subtask notifications
+    parentTaskTitle?: string; // Add parentTaskTitle for context
+    projectName?: string; // Add projectName for better display
   };
   raw?: {
     userId: string;
@@ -54,6 +58,18 @@ const notificationCache = new Map<string, {
 
 // Maximum cache age (1 minute)
 const MAX_CACHE_AGE = 60000;
+
+// Add this at the top with other constants
+const lastResetTime = {
+  timestamp: 0,
+  inProgress: false
+};
+
+// Track active subscriptions to avoid duplicates
+const activeSubscriptions = new Map<string, {
+  unsubscribe: () => void;
+  lastUsed: number;
+}>();
 
 /**
  * Wrapper function to prevent duplicate notifications from being created
@@ -603,12 +619,12 @@ export const getRecentNotifications = async (
   }
 };
 
-// Improved subscription function with more aggressive caching
+// Improved subscription function with more aggressive caching and subscription reuse
 export const subscribeToNotifications = (
   userId: string,
   callback: (notifications: Notification[]) => void
 ): (() => void) => {
-  // Use very aggressive caching to prevent excessive Firestore queries
+  // Cache durations and throttling settings
   const CACHE_DURATION_MS = 60000; // 1 minute
   const MIN_CALLBACK_INTERVAL = 10000; // 10 seconds minimum between callbacks
   const FILE_UPLOAD_CALLBACK_INTERVAL = 2000; // 2 seconds for file uploads
@@ -619,6 +635,38 @@ export const subscribeToNotifications = (
   
   // Generate a unique subscription ID for tracking
   const subscriptionId = `${userId}-${Date.now()}`;
+  
+  // Check if we already have an active subscription for this user
+  const existingSubscription = Array.from(activeSubscriptions.entries())
+    .find(([key]) => key.startsWith(`${userId}-`));
+  
+  if (existingSubscription) {
+    const [existingId, subInfo] = existingSubscription;
+    console.log(`[Notification] Reusing existing subscription ${existingId} for user ${userId}`);
+    // Update the last used timestamp
+    subInfo.lastUsed = Date.now();
+    
+    // Send cached data immediately if available
+    const cacheKey = `notifications-${userId}`;
+    const cachedData = notificationCache.get(cacheKey);
+    if (cachedData && (Date.now() - cachedData.timestamp) < CACHE_DURATION_MS) {
+      setTimeout(() => {
+        callback(cachedData.notifications);
+      }, 100);
+    }
+    
+    // Return the existing unsubscribe function
+    return () => {
+      console.log(`[Notification] Releasing subscription ${existingId}`);
+      // Don't actually unsubscribe, just mark it as not in use
+      subInfo.lastUsed = 0;
+      
+      // Clean up old subscriptions periodically
+      cleanupOldSubscriptions();
+    };
+  }
+  
+  console.log(`[Notification] Setting up subscription ${subscriptionId} for user ${userId}`);
   
   // Create a query for this user's notifications
   const notificationsRef = collection(db, 'notifications');
@@ -632,6 +680,7 @@ export const subscribeToNotifications = (
     // Use setTimeout to ensure this is asynchronous
     setTimeout(() => {
       callback(cachedData.notifications);
+      console.log(`[Notification] Used cached data for subscription ${subscriptionId}`);
     }, 100);
   }
   
@@ -647,6 +696,7 @@ export const subscribeToNotifications = (
   let pendingSnapshot: any = null;
   let debounceTimer: NodeJS.Timeout | null = null;
   
+  // Process snapshots with debouncing to prevent excessive callbacks
   const processSnapshot = (snapshot: any) => {
     pendingSnapshot = snapshot;
     
@@ -655,22 +705,32 @@ export const subscribeToNotifications = (
       clearTimeout(debounceTimer);
     }
     
+    // Check for high-priority notifications that need immediate processing
+    const hasUrgentNotifications = snapshot?.docs?.some((doc: any) => {
+      const data = doc.data();
+      return data && !data.read && 
+        (data.iconType === 'file-upload' || data.iconType === 'comment-mention');
+    });
+    
     // Set a new timer to process this snapshot after a delay
+    // Use a shorter delay for first callback or if there are urgent unread notifications
+    const debounceDelay = isFirstCallback || hasUrgentNotifications ? 100 : 1000;
+    
     debounceTimer = setTimeout(() => {
       if (!pendingSnapshot) return;
       
       try {
         processSnapshotImmediately(pendingSnapshot);
       } catch (error) {
-        console.error('[Notification Subscription] Error processing debounced snapshot:', error);
+        console.error(`[Notification Subscription] Error processing debounced snapshot for ${subscriptionId}:`, error);
       }
       
       // Clear the pending snapshot
       pendingSnapshot = null;
-    }, isFirstCallback ? 100 : 2000); // Process first callback quickly, then use longer debounce
+    }, debounceDelay);
   };
   
-  // Function to check if snapshot contains file upload notifications
+  // Check if snapshot contains file upload notifications
   const containsFileUploadNotifications = (snapshot: any): boolean => {
     if (!snapshot || !snapshot.docs || snapshot.docs.length === 0) return false;
     
@@ -681,16 +741,42 @@ export const subscribeToNotifications = (
     });
   };
   
-  // Actual snapshot processing function
+  // Main function to process snapshot data
   const processSnapshotImmediately = (snapshot: any) => {
     try {
       // Check for file upload notifications to determine throttling
       const hasFileUploads = containsFileUploadNotifications(snapshot);
-      const throttleInterval = hasFileUploads ? FILE_UPLOAD_CALLBACK_INTERVAL : MIN_CALLBACK_INTERVAL;
+      const hasMentions = snapshot?.docs?.some((doc: any) => {
+        const data = doc.data();
+        return data && data.iconType === 'comment-mention' && data.read === false;
+      });
       
-      // Throttle callbacks based on time (except for first callback)
+      // Use shorter throttle interval for important notifications
+      const throttleInterval = hasFileUploads || hasMentions ? 1000 : 5000;
+      
+      // Check for new unread notifications not seen before
       const now = Date.now();
-      if (!isFirstCallback && now - lastCallbackTime < throttleInterval) {
+      const cachedData = notificationCache.get(cacheKey);
+      const hasNewUnread = snapshot?.docs?.some((doc: any) => {
+        const data = doc.data();
+        // Skip if not for this user
+        if (!data || data.userId !== userId) return false;
+        
+        // Check if this is an unread notification
+        if (data.read === false) {
+          // If we have no cache yet, consider it new
+          if (!cachedData) return true;
+          
+          // Check if this notification exists in our cache
+          const existsInCache = cachedData.notifications.some(n => n.id === doc.id);
+          return !existsInCache;
+        }
+        return false;
+      });
+      
+      // Always process first callback, otherwise throttle unless there are new unread notifications
+      if (!isFirstCallback && now - lastCallbackTime < throttleInterval && !hasNewUnread) {
+        console.log(`[Notification] Throttling subscription ${subscriptionId} update (${now - lastCallbackTime}ms < ${throttleInterval}ms)`);
         return;
       }
       
@@ -703,6 +789,7 @@ export const subscribeToNotifications = (
         });
         
         callback([]); // Always call callback with empty array
+        console.log(`[Notification] Empty snapshot for subscription ${subscriptionId}`);
         return;
       }
       
@@ -716,6 +803,7 @@ export const subscribeToNotifications = (
       
       if (notifications.length === 0) {
         callback([]); // Always call callback with empty array
+        console.log(`[Notification] No matching notifications for user ${userId} in subscription ${subscriptionId}`);
         return;
       }
       
@@ -730,20 +818,37 @@ export const subscribeToNotifications = (
         return timeB - timeA;
       });
       
-      // Update cache for future use
-      notificationCache.set(cacheKey, {
-        timestamp: now,
-        notifications
-      });
+      // Check if we have new notifications by comparing with cache
+      let hasChanges = true;
+      if (cachedData) {
+        // Compare IDs and read status
+        const currentIds = notifications.map(n => `${n.id}:${n.read}`).sort().join(',');
+        const cachedIds = cachedData.notifications.map(n => `${n.id}:${n.read}`).sort().join(',');
+        hasChanges = currentIds !== cachedIds;
+      }
       
-      // Update timing variables
-      lastCallbackTime = now;
-      isFirstCallback = false;
-      
-      // Call the callback with notifications
-      callback(notifications);
+      // Only update if we have changes or it's the first callback
+      if (hasChanges || isFirstCallback || hasNewUnread) {
+        // Update cache for future use
+        notificationCache.set(cacheKey, {
+          timestamp: now,
+          notifications
+        });
+        
+        // Log the update with more details
+        console.log(`[Notification] Sending ${notifications.length} notifications to subscription ${subscriptionId} (${hasFileUploads ? 'with file uploads' : 'standard update'})`);
+        
+        // Update timing variables
+        lastCallbackTime = now;
+        isFirstCallback = false;
+        
+        // Call the callback with notifications
+        callback(notifications);
+      } else {
+        console.log(`[Notification] No changes detected for subscription ${subscriptionId}, skipping callback`);
+      }
     } catch (error) {
-      console.error('[Notification Subscription] Error processing snapshot:', error);
+      console.error(`[Notification Subscription] Error processing snapshot for ${subscriptionId}:`, error);
     }
   };
   
@@ -757,15 +862,76 @@ export const subscribeToNotifications = (
     }
   );
   
-  // Return unsubscribe function
-  return () => {
+  // Store this subscription in our active subscriptions map
+  activeSubscriptions.set(subscriptionId, {
+    unsubscribe,
+    lastUsed: Date.now()
+  });
+  
+  // Log successful subscription setup
+  console.log(`[Notification] Successfully set up subscription ${subscriptionId} for user ${userId}`);
+  
+  // Clean up function
+  const cleanupFunction = () => {
+    console.log(`[Notification] Unsubscribing from ${subscriptionId}`);
+    
+    // Get the subscription info
+    const sub = activeSubscriptions.get(subscriptionId);
+    if (sub) {
+      // Mark as not in use
+      sub.lastUsed = 0;
+    }
+    
+    // Clean debounce timer if exists
     if (debounceTimer) {
       clearTimeout(debounceTimer);
       debounceTimer = null;
     }
-    unsubscribe();
+    
+    // Clean up old subscriptions
+    cleanupOldSubscriptions();
   };
+  
+  // Return function to unsubscribe
+  return cleanupFunction;
 };
+
+// Helper to clean up old subscriptions
+function cleanupOldSubscriptions(maxAge: number = 180000) { // 3 minutes default
+  const now = Date.now();
+  let cleaned = 0;
+  
+  activeSubscriptions.forEach((sub, id) => {
+    // If lastUsed is 0 or older than maxAge, clean it up
+    if (sub.lastUsed === 0 || (now - sub.lastUsed > maxAge)) {
+      sub.unsubscribe();
+      activeSubscriptions.delete(id);
+      cleaned++;
+      console.log(`[Notification] Cleaned up unused subscription: ${id}`);
+    }
+  });
+  
+  // Periodically clean the notification cache to prevent memory issues
+  if (activeSubscriptions.size > 0 && Math.random() < 0.2) { // 20% chance 
+    let cacheCount = 0;
+    const cacheMaxAge = 1800000; // 30 minutes for cache cleanup
+    
+    for (const [key, value] of notificationCache.entries()) {
+      if (now - value.timestamp > cacheMaxAge) {
+        notificationCache.delete(key);
+        cacheCount++;
+      }
+    }
+    
+    if (cacheCount > 0) {
+      console.log(`[Notification] Cleaned up ${cacheCount} old cache entries`);
+    }
+  }
+  
+  if (cleaned > 0) {
+    console.log(`[Notification] Cleaned up ${cleaned} unused subscriptions. Remaining: ${activeSubscriptions.size}`);
+  }
+}
 
 /**
  * Gets the count of unread notifications for a specific user
@@ -1299,19 +1465,129 @@ export const fixNotificationStructure = async (userId: string): Promise<number> 
 };
 
 /**
- * Reset the notification system cache and active transactions
- * Call this function when experiencing issues with notifications
- * @returns A promise that resolves when the reset is complete
+ * Reset the notification system by cleaning caches and checking database structure
  */
 export const resetNotificationSystem = async (): Promise<void> => {
-  // Clear all cache maps
-  recentNotificationOperations.clear();
-  activeTransactions.clear();
-  existingNotificationCache.clear();
-  
-  // Wait a moment to ensure any in-progress operations have time to complete
-  await new Promise(resolve => setTimeout(resolve, 1000));
+  try {
+    // Prevent multiple concurrent resets
+    if (lastResetTime.inProgress) {
+      console.log('[Notification System] Reset already in progress, skipping');
+      return;
+    }
+    
+    // Throttle resets to at most once every 60 seconds
+    const now = Date.now();
+    if (now - lastResetTime.timestamp < 60000) {
+      console.log('[Notification System] Reset performed recently, skipping');
+      return;
+    }
+    
+    lastResetTime.inProgress = true;
+    lastResetTime.timestamp = now;
+    
+    console.log('[Notification System] Resetting notification system');
+    
+    // Clear all local caches
+    notificationCache.clear();
+    recentNotificationOperations.clear();
+    activeTransactions.clear();
+    existingNotificationCache.clear();
+    
+    // Perform validation and cleanup of subtask notifications
+    await fixSubtaskNotifications();
+    
+    console.log('[Notification System] Notification system reset complete');
+  } catch (error) {
+    console.error('[Notification Error] Error resetting notification system:', error);
+  } finally {
+    lastResetTime.inProgress = false;
+  }
 };
+
+/**
+ * Fixes issues with subtask notifications by ensuring they have the correct metadata
+ */
+async function fixSubtaskNotifications(): Promise<void> {
+  try {
+    // Query for all subtask notifications that might have issues
+    const notificationsRef = collection(db, 'notifications');
+    const q = query(
+      notificationsRef,
+      where('iconType', '==', 'task-subtask')
+    );
+    
+    const snapshot = await getDocs(q);
+    
+    if (snapshot.empty) {
+      console.log('[Notification System] No subtask notifications found to fix');
+      return;
+    }
+    
+    console.log(`[Notification System] Found ${snapshot.size} subtask notifications to check`);
+    let fixCount = 0;
+    
+    const updatePromises = snapshot.docs.map(async (docSnapshot) => {
+      const notification = docSnapshot.data() as Notification;
+      const needsUpdate = validateAndFixSubtaskNotification(notification);
+      
+      if (needsUpdate) {
+        fixCount++;
+        await updateDoc(doc(db, 'notifications', docSnapshot.id), {
+          metadata: notification.metadata,
+          link: notification.link
+        });
+      }
+    });
+    
+    await Promise.all(updatePromises);
+    console.log(`[Notification System] Fixed ${fixCount} subtask notifications`);
+  } catch (error) {
+    console.error('[Notification Error] Error fixing subtask notifications:', error);
+  }
+}
+
+/**
+ * Validates a subtask notification and fixes any issues with the metadata or link
+ * @param notification The notification to validate and fix
+ * @returns true if the notification was updated, false otherwise
+ */
+function validateAndFixSubtaskNotification(notification: Notification): boolean {
+  let updated = false;
+  const metadata = notification.metadata;
+  
+  // If there's no subtaskId, try to extract it from other fields
+  if (!metadata.subtaskId) {
+    // Look for subtask ID in any other field that might contain it
+    console.warn(`[Notification Warning] Subtask notification ${notification.id} missing subtaskId`);
+    // No way to recover this value if missing
+  }
+  
+  // Fix missing parentTaskId by using taskId
+  if (!metadata.parentTaskId && metadata.taskId) {
+    metadata.parentTaskId = metadata.taskId;
+    updated = true;
+    console.log(`[Notification System] Added parentTaskId from taskId for notification ${notification.id}`);
+  }
+  
+  // Fix missing taskId by using parentTaskId
+  if (!metadata.taskId && metadata.parentTaskId) {
+    metadata.taskId = metadata.parentTaskId;
+    updated = true;
+    console.log(`[Notification System] Added taskId from parentTaskId for notification ${notification.id}`);
+  }
+  
+  // Fix incorrect link format
+  if (metadata.projectId && metadata.taskId) {
+    const correctLink = `/tasks/${metadata.projectId}/${metadata.taskId}`;
+    if (notification.link !== correctLink) {
+      notification.link = correctLink;
+      updated = true;
+      console.log(`[Notification System] Fixed link for notification ${notification.id}`);
+    }
+  }
+  
+  return updated;
+}
 
 /**
  * Handles notifications for users who have been mentioned in a comment
@@ -1533,6 +1809,7 @@ async function checkForExistingMentionNotification(
  * @param projectName The name of the project
  * @param creatorName The name of the user who created or updated the task
  * @param assignedUserIds Array of user IDs assigned to the task
+ * @param taskLink The link to the task
  * @param dueDate The due date of the task
  * @param isUpdate Whether this is a task update (true) or new task creation (false)
  * @returns Array of created notification IDs
@@ -1544,7 +1821,8 @@ export const createTaskNotification = async (
   projectName: string,
   creatorName: string,
   assignedUserIds: string[],
-  dueDate: string,
+  taskLink?: string,
+  dueDate?: string,
   isUpdate: boolean = false
 ): Promise<string[]> => {
   try {
@@ -1557,7 +1835,7 @@ export const createTaskNotification = async (
     }
     
     // Create the link to the task
-    const link = `/projects/${projectId}/tasks?task=${taskId}`;
+    const link = taskLink || `/tasks/${projectId}/${taskId}`;
     
     // Create a notification for each assigned user
     const notificationPromises = assignedUserIds.map(userId => {
@@ -1579,7 +1857,8 @@ export const createTaskNotification = async (
           uploadDate: new Date().toISOString(),
           projectId,
           taskId,
-          dueDate
+          dueDate: dueDate || '',
+          projectName: projectName || ''
         }
       };
       
@@ -1597,6 +1876,160 @@ export const createTaskNotification = async (
     }
   } catch (error) {
     console.error('[Notification Error] Error in createTaskNotification:', error);
+    return [];
+  }
+};
+
+/**
+ * Creates notifications for task assignees when a new subtask is added
+ * @param parentTaskId The ID of the parent task
+ * @param parentTaskTitle The title of the parent task
+ * @param subtaskId The ID of the subtask
+ * @param subtaskTitle The title of the subtask
+ * @param projectId The ID of the project
+ * @param projectName The name of the project
+ * @param creatorName The name of the user who created the subtask
+ * @param assignedUserIds Array of user IDs assigned to the parent task
+ * @returns Array of created notification IDs
+ */
+export const createSubtaskNotification = async (
+  parentTaskId: string,
+  parentTaskTitle: string,
+  subtaskId: string,
+  subtaskTitle: string,
+  projectId: string,
+  projectName: string,
+  creatorName: string,
+  assignedUserIds: string[]
+): Promise<string[]> => {
+  try {
+    console.log(`[Notification Info] Creating subtask notifications for ${assignedUserIds.length} users`);
+    
+    // If no target users provided, return empty array
+    if (!assignedUserIds || assignedUserIds.length === 0) {
+      console.warn('[Notification Warning] No target users provided for subtask notification');
+      return [];
+    }
+    
+    // Create the link to the task with task ID as query parameter to highlight it
+    const link = `/tasks/${projectId}/${parentTaskId}`;
+    
+    // Create a notification for each assigned user
+    const notificationPromises = assignedUserIds.map(userId => {
+      const notification = {
+        iconType: 'task-subtask',
+        type: 'info' as const,
+        message: `${creatorName} added subtask "${subtaskTitle}" to "${parentTaskTitle}"`,
+        link,
+        read: false,
+        userId, // Set the target user ID
+        metadata: {
+          contentType: 'subtask',
+          fileName: '', // Using subtask title in message instead
+          folderId: '',
+          folderName: '',
+          guestName: creatorName,
+          uploadDate: new Date().toISOString(),
+          projectId,
+          taskId: parentTaskId,
+          parentTaskId,
+          parentTaskTitle,
+          subtaskId,
+          projectName: projectName || ''
+        }
+      };
+      
+      return createNotification(notification);
+    });
+    
+    try {
+      // Wait for all notifications to be created
+      const notificationIds = await Promise.all(notificationPromises);
+      console.log(`[Notification Success] Created ${notificationIds.length} subtask notifications`);
+      return notificationIds;
+    } catch (error) {
+      console.error('[Notification Error] Error creating subtask notifications:', error);
+      return [];
+    }
+  } catch (error) {
+    console.error('[Notification Error] Error in createSubtaskNotification:', error);
+    return [];
+  }
+};
+
+/**
+ * Creates notifications when users are assigned to a subtask
+ * @param parentTaskId The ID of the parent task
+ * @param parentTaskTitle The title of the parent task
+ * @param subtaskId The ID of the subtask
+ * @param subtaskTitle The title of the subtask
+ * @param projectId The ID of the project
+ * @param projectName The name of the project
+ * @param creatorName The name of the user who assigned the subtask
+ * @param assignedUserIds Array of user IDs assigned to the subtask
+ * @returns Array of created notification IDs
+ */
+export const createSubtaskAssignmentNotification = async (
+  parentTaskId: string,
+  parentTaskTitle: string,
+  subtaskId: string,
+  subtaskTitle: string,
+  projectId: string,
+  projectName: string,
+  creatorName: string,
+  assignedUserIds: string[]
+): Promise<string[]> => {
+  try {
+    console.log(`[Notification Info] Creating subtask assignment notifications for ${assignedUserIds.length} users`);
+    
+    // If no target users provided, return empty array
+    if (!assignedUserIds || assignedUserIds.length === 0) {
+      console.warn('[Notification Warning] No target users provided for subtask assignment notification');
+      return [];
+    }
+    
+    // Create the link to the task page with the correct URL format
+    const link = `/tasks/${projectId}/${parentTaskId}`;
+    
+    // Create a notification for each assigned user
+    const notificationPromises = assignedUserIds.map(userId => {
+      const notification = {
+        iconType: 'task-subtask',
+        type: 'info' as const,
+        message: `${creatorName} assigned you to subtask "${subtaskTitle}"`,
+        link,
+        read: false,
+        userId,
+        metadata: {
+          contentType: 'subtask-assignment',
+          fileName: '',
+          folderId: '',
+          folderName: '',
+          guestName: creatorName,
+          uploadDate: new Date().toISOString(),
+          projectId,
+          taskId: parentTaskId,
+          subtaskId,
+          projectName: projectName || '',
+          parentTaskTitle,
+          parentTaskId
+        }
+      };
+      
+      return createNotification(notification);
+    });
+    
+    try {
+      // Wait for all notifications to be created
+      const notificationIds = await Promise.all(notificationPromises);
+      console.log(`[Notification Success] Created ${notificationIds.length} subtask assignment notifications`);
+      return notificationIds;
+    } catch (error) {
+      console.error('[Notification Error] Error creating subtask assignment notifications:', error);
+      return [];
+    }
+  } catch (error) {
+    console.error('[Notification Error] Error in createSubtaskAssignmentNotification:', error);
     return [];
   }
 };

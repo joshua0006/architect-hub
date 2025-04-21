@@ -131,10 +131,10 @@ export const folderPermissionService = {
   /**
    * Check if a user has access to a folder based on role and custom permissions
    */
-  async hasAccess(folderId: string, userId: string, userRole: 'Staff' | 'Client'): Promise<boolean> {
+  async hasAccess(folderId: string, userId: string, userRole: 'Staff' | 'Client' | 'Admin'): Promise<boolean> {
     try {
-      // Staff always has access to all folders
-      if (userRole === 'Staff') {
+      // Staff and Admin always have access to all folders
+      if (userRole === 'Staff' || userRole === 'Admin') {
         return true;
       }
       

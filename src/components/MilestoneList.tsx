@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Milestone } from '../types';
-import { Flag, Calendar, Pencil, Trash2, Plus, X, ChevronDown, GripVertical } from 'lucide-react';
+import { Flag, Calendar, Pencil, Trash2, Plus, X, ChevronDown, GripVertical, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence, Reorder, useDragControls } from 'framer-motion';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -26,6 +26,7 @@ export default function MilestoneList({
   const [editingMilestone, setEditingMilestone] = useState<Milestone | null>(null);
   const [showStatusMenu, setShowStatusMenu] = useState<string | null>(null);
   const [orderedMilestones, setOrderedMilestones] = useState<Milestone[]>(milestones);
+  const [loadingStatus, setLoadingStatus] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     title: '',
     description: '',
@@ -105,9 +106,14 @@ export default function MilestoneList({
     }
   };
 
-  const handleStatusChange = (milestone: Milestone, newStatus: Milestone['status']) => {
-    onUpdateMilestone(milestone.id, { status: newStatus });
-    setShowStatusMenu(null);
+  const handleStatusChange = async (milestone: Milestone, newStatus: Milestone['status']) => {
+    setLoadingStatus(milestone.id);
+    try {
+      await onUpdateMilestone(milestone.id, { status: newStatus });
+    } finally {
+      setLoadingStatus(null);
+      setShowStatusMenu(null);
+    }
   };
 
   const statusOptions: { value: Milestone['status']; label: string; color: string }[] = [
@@ -282,10 +288,20 @@ export default function MilestoneList({
                     <div className="relative">
                       <button
                         onClick={() => setShowStatusMenu(showStatusMenu === milestone.id ? null : milestone.id)}
+                        disabled={loadingStatus === milestone.id}
                         className={`flex items-center space-x-2 px-3 py-1.5 rounded-md text-sm ${getMilestoneStatusColor(milestone.status)}`}
                       >
-                        <span className="capitalize">{milestone.status}</span>
-                        <ChevronDown className="w-4 h-4" />
+                        {loadingStatus === milestone.id ? (
+                          <>
+                            <Loader2 className="w-4 h-4 animate-spin mr-1" />
+                            <span>Updating...</span>
+                          </>
+                        ) : (
+                          <>
+                            <span className="capitalize">{milestone.status}</span>
+                            <ChevronDown className="w-4 h-4" />
+                          </>
+                        )}
                       </button>
 
                       <AnimatePresence>
