@@ -152,7 +152,6 @@ export default function DocumentActions({
         await onCreateMultipleDocuments(Array.from(files), targetFolderId);
         showToast(`${files.length} files uploaded successfully`, "success");
       }
-      
       if (onRefresh) {
         await onRefresh();
       }
