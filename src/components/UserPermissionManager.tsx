@@ -12,7 +12,7 @@ export default function UserPermissionManager({ showOnlyStaffEditable = false }:
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
-  const [editedRole, setEditedRole] = useState<'Staff' | 'Client'>('Client');
+  const [editedRole, setEditedRole] = useState<'Admin' | 'Staff' | 'Client'>('Client');
 
   useEffect(() => {
     loadUsers();
@@ -34,7 +34,7 @@ export default function UserPermissionManager({ showOnlyStaffEditable = false }:
 
   const handleEditStart = (user: UserType) => {
     setEditingUserId(user.id);
-    setEditedRole(user.role as 'Staff' | 'Client');
+    setEditedRole(user.role as 'Admin' | 'Staff' | 'Client');
   };
 
   const handleEditCancel = () => {
@@ -72,7 +72,7 @@ export default function UserPermissionManager({ showOnlyStaffEditable = false }:
     );
   }
 
-  // If showing only staff-editable users, filter out existing staff users
+  // If showing only staff-editable users, filter to show only Client users (hiding Staff and Admin)
   const displayedUsers = showOnlyStaffEditable 
     ? users.filter(user => user.role === 'Client')
     : users;
@@ -113,9 +113,10 @@ export default function UserPermissionManager({ showOnlyStaffEditable = false }:
                 <>
                   <select
                     value={editedRole}
-                    onChange={(e) => setEditedRole(e.target.value as 'Staff' | 'Client')}
+                    onChange={(e) => setEditedRole(e.target.value as 'Admin' | 'Staff' | 'Client')}
                     className="block w-32 border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
                   >
+                    <option value="Admin">Admin</option>
                     <option value="Staff">Staff</option>
                     <option value="Client">Client</option>
                   </select>
@@ -141,7 +142,9 @@ export default function UserPermissionManager({ showOnlyStaffEditable = false }:
                   <span className={`px-3 py-1 rounded-full text-xs font-medium ${
                     user.role === 'Staff' 
                       ? 'bg-blue-100 text-blue-800' 
-                      : 'bg-green-100 text-green-800'
+                      : user.role === 'Admin' 
+                        ? 'bg-purple-100 text-purple-800'
+                        : 'bg-green-100 text-green-800'
                   }`}>
                     {user.role}
                   </span>

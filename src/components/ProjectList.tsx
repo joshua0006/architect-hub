@@ -161,7 +161,7 @@ const ProjectItem = ({
 
   const renderStatusMenu = () => {
     // For non-staff users, just show the status without dropdown
-    if (user?.role !== 'Staff' && user?.role !== 'Admin'	) {
+    if (user?.role !== 'Staff' && user?.role !== 'Admin') {
       return (
         <div className="status-menu">
           <button
@@ -175,7 +175,7 @@ const ProjectItem = ({
       );
     }
 
-    // For staff users, show the status button with dropdown
+    // For staff and admin users, show the status button with dropdown
     return (
       <div className="relative status-menu">
         <button
@@ -563,7 +563,7 @@ function ProjectListComponent({
         </div>
         
         <div className="flex w-full">
-          {user?.role === "Staff" || user?.role === "Admin" && (
+          {(user?.role === "Staff" || user?.role === "Admin") && (
             <button
               onClick={() => setShowAddProject(true)}
               className="w-full px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 transition-all duration-300 flex items-center justify-center space-x-2"
