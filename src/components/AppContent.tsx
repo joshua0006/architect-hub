@@ -424,8 +424,8 @@ export default function AppContent() {
   // Setup Firebase real-time subscription
   useEffect(() => {
     if (user) {
-      if (user.role === 'Staff') {
-        // Staff can see all projects
+      if (user.role === 'Staff' || user.role === 'Admin') {
+        // Staff and Admin can see all projects
         console.log('Setting up real-time subscription for all projects');
         setupProjectSubscription();
       } else {
@@ -448,7 +448,7 @@ export default function AppContent() {
       let fetchedProjects: Project[] = [];
       
       if (user) {
-        if (user.role === 'Staff') {
+        if (user.role === 'Staff' || user.role === 'Admin') {
           fetchedProjects = await projectService.getAll();
         } else {
           fetchedProjects = await projectService.getUserProjects(user.id);
