@@ -49,8 +49,8 @@ export default function ProjectSettingsPage() {
     navigate(`/projects/${projectId}`);
   };
 
-  // Check if user is staff 
-  const isStaff = user && user.role === 'Staff';
+  // Check if user is staff or admin
+  const isStaffOrAdmin = user && (user.role === 'Staff' || user.role === 'Admin');
 
   if (loading) {
     return (
@@ -77,13 +77,13 @@ export default function ProjectSettingsPage() {
     );
   }
 
-  // Non-staff users should not access this page
-  if (!isStaff) {
+  // Non-staff/non-admin users should not access this page
+  if (!isStaffOrAdmin) {
     return (
       <div className="container mx-auto px-4 py-8">
         <div className="bg-yellow-50 text-yellow-700 p-6 rounded-lg">
           <h2 className="text-xl font-semibold mb-2">Permission Denied</h2>
-          <p>Only staff members can access project settings.</p>
+          <p>Only staff and admin members can access project settings.</p>
           <button 
             onClick={() => navigate(`/projects/${projectId}`)}
             className="mt-4 px-4 py-2 bg-yellow-600 text-white rounded-md hover:bg-yellow-700 transition-colors"

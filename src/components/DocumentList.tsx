@@ -2238,7 +2238,7 @@ export default function DocumentList({
           // Fetch projects from Firebase based on user role
           let fetchedProjects: Project[] = [];
           if (user) {
-            if (user.role === 'Staff') {
+            if (user.role === 'Staff' || user.role === 'Admin') {
               fetchedProjects = await projectService.getAll();
             } else {
               fetchedProjects = await projectService.getUserProjects(user.id);

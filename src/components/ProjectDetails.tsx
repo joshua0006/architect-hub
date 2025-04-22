@@ -121,23 +121,6 @@ export default function ProjectDetails({
         )}
       </motion.div>
 
-      {/* Access information - Display if user is not in project */}
-      {!isCurrentUserInProject && user?.role !== 'Staff' && (
-        <motion.div
-          initial={{ opacity: 0, scale: 0.95 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="bg-yellow-50 border border-yellow-200 rounded-md p-4 mb-6 flex items-start"
-        >
-          <Shield className="w-5 h-5 text-yellow-500 mr-3 mt-0.5 flex-shrink-0" />
-          <div>
-            <h3 className="font-medium text-yellow-800">Limited Access</h3>
-            <p className="text-yellow-700 text-sm mt-1">
-              You don't have full access to this project. Contact a staff member to request access.
-            </p>
-          </div>
-        </motion.div>
-      )}
-
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Progress Section with Milestones */}
         <motion.div

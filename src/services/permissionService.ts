@@ -213,8 +213,8 @@ export const permissionService = {
         return true;
       }
       
-      // Staff have more permissions than clients and contractors
-      if (user.role === 'Staff') {
+      // Staff and Admin have more permissions than clients and contractors
+      if (user.role === 'Staff' || user.role === 'Admin') {
         // Staff can access projects they're part of
         if (resource === 'project' && user.projectIds.includes(resourceId)) {
           return true;
