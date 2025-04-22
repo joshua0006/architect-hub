@@ -1,7 +1,6 @@
 import { Search, Plus, Archive, CheckCircle2, Clock, Trash2, AlertCircle, ArrowUpDown, Loader2, MoreVertical } from "lucide-react";
-import { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { motion, AnimatePresence } from "framer-motion";
 import { DragDropContext, Droppable, Draggable, DropResult } from 'react-beautiful-dnd';
 import { Project, Task } from "../types";
 import AddProject from "./AddProject";
@@ -18,18 +17,8 @@ interface DeleteConfirmationProps {
 }
 
 const DeleteConfirmationPopup = ({ projectName, onConfirm, onCancel }: DeleteConfirmationProps) => (
-  <motion.div
-    initial={{ opacity: 0 }}
-    animate={{ opacity: 1 }}
-    exit={{ opacity: 0 }}
-    className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
-  >
-    <motion.div
-      initial={{ opacity: 0, scale: 0.95 }}
-      animate={{ opacity: 1, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.95 }}
-      className="bg-white rounded-lg p-6 max-w-md w-full m-4"
-    >
+  <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+    <div className="bg-white rounded-lg p-6 max-w-md w-full m-4">
       <h3 className="text-lg font-semibold text-gray-900 mb-4">Delete Project</h3>
       <p className="text-gray-600 mb-6">
         Are you sure you want to delete "{projectName}"? This action cannot be undone.
@@ -49,8 +38,8 @@ const DeleteConfirmationPopup = ({ projectName, onConfirm, onCancel }: DeleteCon
           <span>Delete Project</span>
         </button>
       </div>
-    </motion.div>
-  </motion.div>
+    </div>
+  </div>
 );
 
 interface ProjectItemProps {
@@ -158,14 +147,6 @@ const ProjectItem = ({
     return "bg-green-500";
   }, []);
 
-  const getAnimationDuration = useCallback(
-    (currentProgress: number, previousProgress: number) => {
-      const delta = Math.abs(currentProgress - previousProgress);
-      return Math.max(0.5, Math.min(1.5, delta / 100));
-    },
-    []
-  );
-
   const handleCardClick = (e: React.MouseEvent) => {
     if (e.target instanceof Element && e.target.closest(".status-menu")) {
       return;
@@ -208,41 +189,34 @@ const ProjectItem = ({
           <span className="text-sm capitalize">{project.status}</span>
         </button>
 
-        <AnimatePresence>
-          {showStatusMenu && (
-            <motion.div
-              initial={{ opacity: 0, y: -10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg z-10 border border-gray-200"
-            >
-              <div className="py-1">
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onStatusChange(project.id, "archived");
-                    setShowStatusMenu(false);
-                  }}
-                  className="flex items-center space-x-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 w-full"
-                >
-                  <Archive className="w-4 h-4" />
-                  <span>Archive</span>
-                </button>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setShowStatusMenu(false);
-                    setShowDeleteConfirm(true);
-                  }}
-                  className="flex items-center space-x-2 px-4 py-2 text-sm text-red-600 hover:bg-red-50 w-full"
-                >
-                  <Trash2 className="w-4 h-4" />
-                  <span>Delete</span>
-                </button>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+        {showStatusMenu && (
+          <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg z-10 border border-gray-200">
+            <div className="py-1">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onStatusChange(project.id, "archived");
+                  setShowStatusMenu(false);
+                }}
+                className="flex items-center space-x-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 w-full"
+              >
+                <Archive className="w-4 h-4" />
+                <span>Archive</span>
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowStatusMenu(false);
+                  setShowDeleteConfirm(true);
+                }}
+                className="flex items-center space-x-2 px-4 py-2 text-sm text-red-600 hover:bg-red-50 w-full"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>Delete</span>
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     );
   };
@@ -257,16 +231,13 @@ const ProjectItem = ({
             {...provided.dragHandleProps}
             className="mb-2"
           >
-            <motion.div
+            <div
               onClick={handleCardClick}
               className={`w-full p-4 text-left rounded-lg transition-all duration-300 hover:scale-[1.01] cursor-pointer ${
                 selectedId === project.id
                   ? "bg-primary-50 border-primary-200"
                   : "bg-white border-gray-200 hover:bg-gray-50"
               } border card-shadow relative ${isDeletingProject === project.id ? 'opacity-70' : ''}`}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -20 }}
             >
               {isDeletingProject === project.id && (
                 <div className="absolute inset-0 flex items-center justify-center bg-white bg-opacity-70 rounded-lg z-10">
@@ -293,44 +264,31 @@ const ProjectItem = ({
               <div className="mt-4 space-y-2">
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-gray-600">Progress</span>
-                  <motion.span
-                    key={`progress-text-${progress}`}
-                    initial={{ opacity: 0, y: -10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="font-medium"
-                  >
+                  <span className="font-medium">
                     {progress}%
-                  </motion.span>
+                  </span>
                 </div>
                 <div className="relative h-2 bg-gray-100 rounded-full overflow-hidden">
-                  <motion.div
-                    key={`progress-bar-${project.id}-${progress}`}
+                  <div
                     className={`absolute left-0 top-0 h-full rounded-full ${getProgressColor(
                       progress
                     )}`}
-                    initial={{ width: `${prevProgressRef.current}%` }}
-                    animate={{ width: `${progress}%` }}
-                    transition={{
-                      duration: getAnimationDuration(progress, prevProgressRef.current),
-                      ease: [0.4, 0, 0.2, 1],
-                    }}
+                    style={{ width: `${progress}%` }}
                   />
                 </div>
               </div>
-            </motion.div>
+            </div>
           </div>
         )}
       </Draggable>
 
-      <AnimatePresence>
-        {showDeleteConfirm && (
-          <DeleteConfirmationPopup
-            projectName={project.name}
-            onConfirm={handleDeleteConfirm}
-            onCancel={() => setShowDeleteConfirm(false)}
-          />
-        )}
-      </AnimatePresence>
+      {showDeleteConfirm && (
+        <DeleteConfirmationPopup
+          projectName={project.name}
+          onConfirm={handleDeleteConfirm}
+          onCancel={() => setShowDeleteConfirm(false)}
+        />
+      )}
     </>
   );
 };
@@ -344,7 +302,7 @@ interface ProjectListProps {
   tasks: Task[];
 }
 
-export default function ProjectList({
+function ProjectListComponent({
   projects,
   selectedId,
   onSelect,
@@ -354,7 +312,7 @@ export default function ProjectList({
 }: ProjectListProps) {
   const [showAddProject, setShowAddProject] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const [filteredProjects, setFilteredProjects] = useState(projects);
+  const [filteredProjects, setFilteredProjects] = useState<Project[]>([]);
   const [projectOrder, setProjectOrder] = useState<Project[]>([]);
   const [isOrderLoaded, setIsOrderLoaded] = useState(false);
   const location = useLocation();
@@ -379,7 +337,7 @@ export default function ProjectList({
           // Create ordered array from saved IDs, only including projects that exist
           const orderedProjects = savedOrder
             .map(id => projectMap.get(id))
-            .filter(p => p !== undefined) as Project[];
+            .filter(Boolean) as Project[];
           
           // Add any projects that aren't in saved order at the end
           projects.forEach(project => {
@@ -402,11 +360,23 @@ export default function ProjectList({
     };
     
     loadSavedOrder();
-  }, [user, projects]);
+  }, [user?.id, projects]);
+  
+  // Initialize filtered projects once when component mounts or when projects change significantly
+  const projectsHash = useMemo(() => projects.map(p => p.id).join(','), [projects]);
+  
+  useEffect(() => {
+    // Only initialize filtered projects when projects change significantly
+    // This prevents reinitialization on tab switches
+    if (projects.length > 0) {
+      const nonArchivedProjects = projects.filter(p => p.status !== "archived");
+      setFilteredProjects(nonArchivedProjects);
+    }
+  }, [projectsHash]);
 
   useEffect(() => {
     // Only apply filtering after the custom order is loaded
-    if (!isOrderLoaded) return;
+    if (!isOrderLoaded || projectOrder.length === 0) return;
     
     // Filter projects without sorting by name
     const filtered = projectOrder
@@ -423,10 +393,13 @@ export default function ProjectList({
         );
       });
     
-    setFilteredProjects(filtered);
-  }, [searchQuery, projectOrder, isOrderLoaded, projects]);
+    // Only update state if filtered results have actually changed
+    if (JSON.stringify(filtered.map(p => p.id)) !== JSON.stringify(filteredProjects.map(p => p.id))) {
+      setFilteredProjects(filtered);
+    }
+  }, [searchQuery, projectOrder, isOrderLoaded, filteredProjects]);
 
-  const handleDragEnd = (result: DropResult) => {
+  const handleDragEnd = useCallback((result: DropResult) => {
     const { destination, source } = result;
 
     // If dropped outside the list or didn't move
@@ -459,7 +432,11 @@ export default function ProjectList({
         targetIdx = updatedProjectOrder.findIndex(p => p.id === beforeProject.id) + 1;
       }
       updatedProjectOrder.splice(targetIdx, 0, removed);
-      setProjectOrder(updatedProjectOrder);
+      
+      // Only update if the order actually changed
+      if (JSON.stringify(updatedProjectOrder.map(p => p.id)) !== JSON.stringify(projectOrder.map(p => p.id))) {
+        setProjectOrder(updatedProjectOrder);
+      }
     }
     
     // Save the new order to user preferences
@@ -473,9 +450,10 @@ export default function ProjectList({
           console.error('Error saving project order:', error);
         });
     }
-  };
+  }, [filteredProjects, projectOrder, user?.id]);
 
-  const handleProjectSelect = (project: Project) => {
+  // Memoize all handler functions to prevent recreating them on re-renders
+  const handleProjectSelect = useCallback((project: Project) => {
     onSelect(project);
 
     if (!isProjectTab) {
@@ -487,9 +465,9 @@ export default function ProjectList({
         },
       });
     }
-  };
+  }, [onSelect, isProjectTab, navigate, location.pathname]);
 
-  const handleStatusChange = (
+  const handleStatusChange = useCallback((
     projectId: string,
     newStatus: Project["status"]
   ) => {
@@ -526,9 +504,9 @@ export default function ProjectList({
     }
 
     onUpdateProject(projectId, updates);
-  };
+  }, [projects, onUpdateProject]);
 
-  const handleDeleteProject = async (projectId: string) => {
+  const handleDeleteProject = useCallback(async (projectId: string) => {
     try {
       setIsDeletingProject(projectId);
       
@@ -558,7 +536,7 @@ export default function ProjectList({
       showToast('Failed to delete project', 'error');
       setIsDeletingProject(null);
     }
-  };
+  }, [projects, selectedId, onSelect, showToast]);
 
   return (
     <>
@@ -574,15 +552,12 @@ export default function ProjectList({
             />
             <Search className="absolute left-3 top-2.5 w-5 h-5 text-gray-400" />
             {searchQuery && (
-              <motion.button
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
+              <button
                 className="absolute right-3 top-2.5 text-xs text-gray-500 hover:text-gray-700"
                 onClick={() => setSearchQuery("")}
               >
                 Clear
-              </motion.button>
+              </button>
             )}
           </div>
         </div>
@@ -600,63 +575,52 @@ export default function ProjectList({
         </div>
 
         {searchQuery && (
-          <motion.div
-            initial={{ opacity: 0, y: -10 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="text-sm text-gray-500"
-          >
+          <div className="text-sm text-gray-500">
             Found {filteredProjects.length}{" "}
             {filteredProjects.length === 1 ? "project" : "projects"}
-          </motion.div>
+          </div>
         )}
       </div>
 
-      <motion.div className="p-4 space-y-4">
+      <div className="p-4 space-y-4">
         <DragDropContext onDragEnd={handleDragEnd}>
-          <AnimatePresence mode="wait">
-            {filteredProjects.length > 0 ? (
-              <Droppable droppableId="projects-list">
-                {(provided) => (
-                  <div
-                    ref={provided.innerRef}
-                    {...provided.droppableProps}
-                    className="space-y-2"
-                  >
-                    {filteredProjects.map((project, index) => (
-                      <ProjectItem
-                        key={project.id}
-                        project={project}
-                        selectedId={selectedId}
-                        onSelect={handleProjectSelect}
-                        onStatusChange={handleStatusChange}
-                        onDeleteProject={handleDeleteProject}
-                        tasks={tasks}
-                        isDeletingProject={isDeletingProject}
-                        index={index}
-                      />
-                    ))}
-                    {provided.placeholder}
-                  </div>
-                )}
-              </Droppable>
-            ) : (
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                className="text-center py-8"
-              >
-                <p className="text-gray-500">No projects found</p>
-                {searchQuery && (
-                  <p className="text-sm text-gray-400 mt-2">
-                    Try adjusting your search terms
-                  </p>
-                )}
-              </motion.div>
-            )}
-          </AnimatePresence>
+          {filteredProjects.length > 0 ? (
+            <Droppable droppableId="projects-list">
+              {(provided) => (
+                <div
+                  ref={provided.innerRef}
+                  {...provided.droppableProps}
+                  className="space-y-2"
+                >
+                  {filteredProjects.map((project, index) => (
+                    <ProjectItem
+                      key={project.id}
+                      project={project}
+                      selectedId={selectedId}
+                      onSelect={handleProjectSelect}
+                      onStatusChange={handleStatusChange}
+                      onDeleteProject={handleDeleteProject}
+                      tasks={tasks}
+                      isDeletingProject={isDeletingProject}
+                      index={index}
+                    />
+                  ))}
+                  {provided.placeholder}
+                </div>
+              )}
+            </Droppable>
+          ) : (
+            <div className="text-center py-8">
+              <p className="text-gray-500">No projects found</p>
+              {searchQuery && (
+                <p className="text-sm text-gray-400 mt-2">
+                  Try adjusting your search terms
+                </p>
+              )}
+            </div>
+          )}
         </DragDropContext>
-      </motion.div>
+      </div>
 
       {showAddProject && (
         <AddProject
@@ -670,3 +634,7 @@ export default function ProjectList({
     </>
   );
 }
+
+// Wrap component with React.memo to prevent unnecessary rerenders
+const ProjectList = React.memo(ProjectListComponent);
+export default ProjectList;
