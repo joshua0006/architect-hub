@@ -173,10 +173,7 @@ export default function SharedContent() {
             animate={{ opacity: 1, x: 0 }}
             className="flex items-center space-x-2"
           >
-            <Building2 className="w-8 h-8 text-primary-600" />
-            <span className="text-xl font-semibold text-gradient">
-              {settings?.name || 'Structify'}
-            </span>
+            <img src="/assets/images/logo.jpg" alt="CHRIS COLE ARCHITECT" className="h-10" />
           </motion.div>
         </div>
       </header>
