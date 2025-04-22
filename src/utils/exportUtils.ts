@@ -130,6 +130,7 @@ export const saveAnnotations = (documentId: string) => {
   if (!document) return;
 
   try {
+    // Save to localStorage
     const data = JSON.stringify({
       annotations: document.annotations,
       timestamp: Date.now(),
@@ -137,14 +138,29 @@ export const saveAnnotations = (documentId: string) => {
     });
 
     localStorage.setItem(`annotations-${documentId}`, data);
+    
+    // Also save to Firebase
+    state.saveToFirebase(documentId)
+      .then(() => console.log('Annotations saved to Firebase'))
+      .catch(error => console.error('Error saving to Firebase:', error));
   } catch (error) {
     console.error('Error saving annotations:', error);
   }
 };
 
 // Add function to load annotations
-export const loadAnnotations = (documentId: string) => {
+export const loadAnnotations = async (documentId: string): Promise<Annotation[] | null> => {
   try {
+    // Try to load from Firebase first
+    const state = useAnnotationStore.getState();
+    await state.loadFromFirebase(documentId);
+    
+    // After the Firebase load, check if we got annotations
+    if (state.documents[documentId]?.annotations?.length > 0) {
+      return state.documents[documentId].annotations;
+    }
+    
+    // If no annotations from Firebase, try localStorage as fallback
     const data = localStorage.getItem(`annotations-${documentId}`);
     if (!data) return null;
 

@@ -235,5 +235,49 @@ service cloud.firestore {
       // Allow deleting a notification if you own it
       allow delete: if isSignedIn() && request.auth.uid == resource.data.userId;
     }
+
+    // Documents collection
+    match /documents/{documentId} {
+      allow read: if isSignedIn() && (
+        isProjectMember(resource.data.projectId) ||
+        hasPermission('file', 'view')
+      );
+      allow create: if isSignedIn() && (
+        isProjectMember(request.resource.data.projectId) ||
+        hasPermission('file', 'edit')
+      );
+      allow update: if isSignedIn() && (
+        hasRole(resource.data.projectId, 'admin') ||
+        hasRole(resource.data.projectId, 'manager') ||
+        request.auth.uid == resource.data.createdBy ||
+        hasPermission('file', 'edit')
+      );
+      allow delete: if isSignedIn() && (
+        hasRole(resource.data.projectId, 'admin') ||
+        hasPermission('file', 'delete')
+      );
+
+      // Comments subcollection for document
+      match /comments/{commentId} {
+        allow read: if isSignedIn() && exists(/databases/$(database)/documents/documents/$(documentId));
+        allow create: if isSignedIn() && exists(/databases/$(database)/documents/documents/$(documentId));
+        allow update, delete: if isSignedIn() && request.auth.uid == resource.data.userId;
+      }
+    }
+
+    // Document Annotations collection
+    match /documentAnnotations/{documentId} {
+      // Allow read access to any user who can view the document
+      allow read: if isSignedIn() && exists(/databases/$(database)/documents/documents/$(documentId)) &&
+        (isProjectMember(get(/databases/$(database)/documents/documents/$(documentId)).data.projectId) ||
+         hasPermission('file', 'view'));
+      
+      // Allow write access to users who can edit the document
+      allow write: if isSignedIn() && exists(/databases/$(database)/documents/documents/$(documentId)) && 
+        (hasRole(get(/databases/$(database)/documents/documents/$(documentId)).data.projectId, 'admin') ||
+         hasRole(get(/databases/$(database)/documents/documents/$(documentId)).data.projectId, 'manager') ||
+         request.auth.uid == get(/databases/$(database)/documents/documents/$(documentId)).data.createdBy ||
+         hasPermission('file', 'edit'));
+    }
   }
 }

@@ -2996,4 +2996,64 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
       window.removeEventListener('error', handleRenderingCancelled);
     };
   }, [pageChangeInProgress, isRendering]);
+
+  // Add saveAnnotationsToFirebase function after the handleExportAnnotations function
+  
+  // Save annotations to Firebase
+  const saveAnnotationsToFirebase = useCallback(() => {
+    try {
+      // Use our new saveToFirebase method from the store
+      useAnnotationStore.getState().saveToFirebase(documentId);
+      console.log("Annotations saved to Firebase successfully");
+    } catch (error) {
+      console.error("Error saving annotations to Firebase:", error);
+    }
+  }, [documentId]);
+  
+  // Auto-save annotations every 60 seconds
+  useEffect(() => {
+    if (!documentId) return;
+    
+    // Initial load from Firebase when component mounts
+    useAnnotationStore.getState().loadFromFirebase(documentId);
+    
+    // Set up auto-save interval
+    const autoSaveInterval = setInterval(() => {
+      saveAnnotationsToFirebase();
+    }, 60000); // Save every 60 seconds
+    
+    // Clean up interval when component unmounts
+    return () => {
+      clearInterval(autoSaveInterval);
+      // Save one final time when leaving the page
+      saveAnnotationsToFirebase();
+    };
+  }, [documentId, saveAnnotationsToFirebase]);
+  
+  // Save to Firebase when annotations change
+  useEffect(() => {
+    const annotations = getAnnotationsForPage(documentId, currentPage);
+    const debouncedSave = debounce(() => {
+      saveAnnotationsToFirebase();
+    }, 2000); // Debounce to avoid too many saves
+    
+    if (annotations.length > 0) {
+      debouncedSave();
+    }
+  }, [documentId, currentPage, getAnnotationsForPage, saveAnnotationsToFirebase]);
+  
+  // Add keyboard shortcut for manually saving annotations (Ctrl+S)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Check if Ctrl+S or Cmd+S is pressed
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault(); // Prevent browser save
+        saveAnnotationsToFirebase();
+        showToast("Annotations saved to Firebase", "success");
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [saveAnnotationsToFirebase, showToast]);
 };
