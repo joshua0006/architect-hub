@@ -116,6 +116,18 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
   const ACCELERATION = 0.2; // Reduced acceleration for smoother ramping
   const DECELERATION = 0.92; // Smooth deceleration factor
 
+  // Add state for save button UI feedback
+  const [showSaveButton, setShowSaveButton] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  
+  // Function to mark changes as unsaved and show save button
+  const markUnsavedChanges = useCallback(() => {
+    setHasUnsavedChanges(true);
+    setShowSaveButton(true);
+  }, []);
+
   // Effect to focus the text input when editing starts
   useEffect(() => {
     if (isEditingText && textInputRef.current) {
@@ -913,6 +925,11 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
 
         store.updateAnnotation(documentId, updatedAnnotation);
         setSelectedAnnotations([updatedAnnotation]);
+        
+        // Mark changes as unsaved
+        markUnsavedChanges();
+        
+        render();
         return;
       }
 
@@ -921,20 +938,31 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
         const dx = point.x - moveOffset.x;
         const dy = point.y - moveOffset.y;
 
-        const updatedAnnotations = selectedAnnotations.map((annotation) => ({
-          ...annotation,
-          points: annotation.points.map((p) => ({
-            x: p.x + dx,
-            y: p.y + dy,
-          })),
-        }));
-
-        updatedAnnotations.forEach((annotation) => {
-          store.updateAnnotation(documentId, annotation);
+        // Update selected annotations positions
+        const updatedAnnotations = selectedAnnotations.map(annotation => {
+          // Create a new object with modified points
+          return {
+            ...annotation,
+            points: annotation.points.map(p => ({
+              x: p.x + dx,
+              y: p.y + dy,
+            })),
+          };
         });
 
+        // Update store and selection state
+        updatedAnnotations.forEach(annotation => {
+          store.updateAnnotation(documentId, annotation);
+        });
         setSelectedAnnotations(updatedAnnotations);
         setMoveOffset(point);
+        
+        // Mark changes as unsaved
+        markUnsavedChanges();
+        
+        // Force render for visual feedback
+        render();
+        dispatchAnnotationChangeEvent("move");
         return;
       }
 
@@ -1079,6 +1107,9 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
 
       // Dispatch event to notify about the change
       dispatchAnnotationChangeEvent("userDrawing", true); // Dispatch event *after* state changes
+
+      // Mark changes as unsaved
+      markUnsavedChanges();
     }
 
     // Removed text dragging completion logic
@@ -1094,7 +1125,7 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
 
     // Force render to ensure clean state
     render();
-  }, [isDrawing, currentPoints, currentTool, currentStyle, pageNumber, documentId, store, scale, dispatchAnnotationChangeEvent, render]); // Removed text dragging dependencies
+  }, [isDrawing, currentPoints, currentTool, currentStyle, pageNumber, documentId, store, scale, dispatchAnnotationChangeEvent, render, markUnsavedChanges]); // Removed text dragging dependencies
 
   const handleMouseLeave = () => {
     if (isDrawing && currentTool === "freehand" && currentPoints.length >= 2) {
@@ -1151,7 +1182,7 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
     
     if (editingAnnotation) {
       // Handle editing existing text annotation
-      const updatedAnnotation = {
+      const updatedAnnotation = { 
         ...editingAnnotation,
         text,
         style: {
@@ -1186,11 +1217,15 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
       store.setCurrentTool("select");
     }
     
+    // Mark changes as unsaved
+    markUnsavedChanges();
+    
     setTextInputPosition(null);
     setEditingAnnotation(null);
     // Removed setTextDimensions call again
     store.clearSelection(); // Deselect annotation after completion
     dispatchAnnotationChangeEvent("textComplete");
+    setStickyNoteScale(0);
   };
 
   const handleTextCancel = () => {
@@ -1339,6 +1374,14 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
       store.clearSelection();
       setContextMenu(null);
     }
+
+    // When deleting annotations from context menu
+    const deleteAnnotation = (annotationId: string) => {
+      store.deleteAnnotation(documentId, annotationId);
+      markUnsavedChanges();
+      setContextMenu(null);
+      dispatchAnnotationChangeEvent("delete");
+    };
   };
 
   // Effect to handle immediate editing requested from toolbar
@@ -1446,35 +1489,30 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
   // Update the keyboard event handlers
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Track shift key state for uniform scaling
-      if (e.key === 'Shift') {
+      // Track shift key state for constrained drawing/moving
+      if (e.key === "Shift") {
         setIsShiftPressed(true);
       }
       
-      // Existing key handler code...
-      if (e.key === "Delete" || e.key === "Backspace") {
-        console.log('[AnnotationCanvas] Delete/Backspace key pressed');
-        console.log('[AnnotationCanvas] Selected annotations:', selectedAnnotations);
+      // Handle delete/backspace key for selected annotations
+      if ((e.key === "Delete" || e.key === "Backspace") && selectedAnnotations.length > 0) {
+        e.preventDefault();
         
-        if (selectedAnnotations.length > 0) {
-          console.log(`[AnnotationCanvas] Deleting ${selectedAnnotations.length} annotations`);
-          // Delete all selected annotations one by one
-          selectedAnnotations.forEach((annotation) => {
-            console.log(`[AnnotationCanvas] Deleting annotation:`, {
-              id: annotation.id,
-              type: annotation.type,
-              pageNumber: annotation.pageNumber
-            });
-            store.deleteAnnotation(documentId, annotation.id);
-          });
-          setSelectedAnnotations([]);
-          console.log('[AnnotationCanvas] Deletion complete, cleared selection');
-        } else {
-          console.log('[AnnotationCanvas] No annotations selected to delete');
-        }
+        // Delete all selected annotations
+        selectedAnnotations.forEach(annotation => {
+          store.deleteAnnotation(documentId, annotation.id);
+        });
+        
+        // Mark changes as unsaved
+        markUnsavedChanges();
+        
+        // Clear selection and update UI
+        store.clearSelection();
+        setSelectedAnnotations([]);
+        dispatchAnnotationChangeEvent("delete");
       }
       
-      // ... rest of key handlers ...
+      // ... rest of the function ...
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
@@ -1491,7 +1529,7 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
       document.removeEventListener("keydown", handleKeyDown);
       document.addEventListener("keyup", handleKeyUp);
     };
-  }, [documentId, selectedAnnotations, store, currentTool]);
+  }, [documentId, selectedAnnotations, store, markUnsavedChanges]);
 
   // Add function to detect circle resize handles specifically
   const getResizeHandleForCircle = (point: Point, annotation: Annotation): ResizeHandle => {
@@ -1944,6 +1982,73 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
     };
   }, []);
 
+  // Function to save annotations to Firebase
+  const saveAnnotations = useCallback(() => {
+    if (!hasUnsavedChanges) return;
+    
+    setIsSaving(true);
+    setSaveSuccess(false);
+    
+    try {
+      // Save to Firebase
+      store.saveToFirebase(documentId)
+        .then(() => {
+          // Show success state
+          setIsSaving(false);
+          setSaveSuccess(true);
+          setHasUnsavedChanges(false); // Clear unsaved changes flag
+          
+          // Hide button after success message shown
+          setTimeout(() => {
+            setSaveSuccess(false);
+            setShowSaveButton(false);
+          }, 1500);
+          
+          // Dispatch events
+          dispatchAnnotationChangeEvent("save", true);
+          
+          // Optional success event
+          const saveSuccessEvent = new CustomEvent("annotationSaved", {
+            detail: {
+              success: true,
+              documentId,
+              timestamp: Date.now(),
+            },
+          });
+          document.dispatchEvent(saveSuccessEvent);
+        })
+        .catch((error) => {
+          console.error("Error saving annotations:", error);
+          setIsSaving(false);
+          
+          // Optional error event
+          const saveErrorEvent = new CustomEvent("annotationSaved", {
+            detail: {
+              success: false,
+              error,
+              documentId,
+              timestamp: Date.now(),
+            },
+          });
+          document.dispatchEvent(saveErrorEvent);
+        });
+    } catch (error) {
+      console.error("Error initiating save:", error);
+      setIsSaving(false);
+    }
+  }, [documentId, dispatchAnnotationChangeEvent, store, hasUnsavedChanges]);
+  
+  // Show save button when annotations change
+  useEffect(() => {
+    const annotations = documentState.annotations.filter(
+      (a) => a.pageNumber === pageNumber
+    );
+    
+    if (annotations.length > 0) {
+      markUnsavedChanges();
+    }
+  }, [documentState.annotations, pageNumber, markUnsavedChanges]);
+
   return (
     <>
       <canvas
@@ -1987,6 +2092,45 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
           position={contextMenu.position}
           onClose={() => setContextMenu(null)}
         />
+      )}
+      {showSaveButton && hasUnsavedChanges && (
+        <button
+          className={`absolute top-4 right-4 z-20 font-medium py-2 px-4 rounded-md shadow-md transition-all duration-200 flex items-center
+            ${isSaving 
+              ? 'bg-gray-500 cursor-wait' 
+              : saveSuccess 
+                ? 'bg-green-600 hover:bg-green-700' 
+                : 'bg-indigo-600 hover:bg-indigo-700'
+            } text-white`}
+          onClick={saveAnnotations}
+          disabled={isSaving || saveSuccess}
+          aria-label={isSaving ? "Saving annotations" : saveSuccess ? "Annotations saved" : "Save annotations"}
+          title={isSaving ? "Saving annotations to cloud" : saveSuccess ? "Annotations saved to cloud" : "Save annotations to cloud"}
+        >
+          {isSaving ? (
+            <>
+              <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              Saving...
+            </>
+          ) : saveSuccess ? (
+            <>
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+              </svg>
+              Saved!
+            </>
+          ) : (
+            <>
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
+                <path d="M7.707 10.293a1 1 0 10-1.414 1.414l3 3a1 1 0 001.414 0l3-3a1 1 0 00-1.414-1.414L11 11.586V6h5a2 2 0 012 2v7a2 2 0 01-2 2H4a2 2 0 01-2-2V8a2 2 0 012-2h5v5.586l-1.293-1.293z" />
+              </svg>
+              Save
+            </>
+          )}
+        </button>
       )}
     </>
   );

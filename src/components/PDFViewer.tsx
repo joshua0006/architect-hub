@@ -2654,40 +2654,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
               </div>
             )}
 
-            {/* Loading indicator during rendering or page change */}
-            {(isRendering || pageChangeInProgress) && !showForcedLoadingOverlay && (
-               <div className="absolute top-0 left-0 z-30 w-full h-full flex items-center justify-center bg-white bg-opacity-80 backdrop-blur-[1px]">
-                 <div className="flex flex-col items-center bg-white p-5 rounded-xl shadow-lg">
-                   <div className="relative w-16 h-16 mb-3">
-                     {/* Rotating rings */}
-                     <div className="absolute inset-0 rounded-full border-4 border-blue-100 border-t-blue-600 animate-spin" style={{ animationDuration: "1s" }}></div>
-                     <div className="absolute inset-1 rounded-full border-4 border-transparent border-r-blue-400 animate-spin" style={{ animationDuration: "1.5s", animationDirection: "reverse" }}></div>
-                     {/* Page icon */}
-                     <div className="absolute inset-0 flex items-center justify-center">
-                       <svg xmlns="http://www.w3.org/2000/svg" className="h-7 w-7 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                         <path
-                           strokeLinecap="round"
-                           strokeLinejoin="round"
-                           strokeWidth={1.5}
-                           d={pageChangeInProgress ? "M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" : "M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"}
-                         />
-                       </svg>
-                     </div>
-                   </div>
-                   <div className="text-gray-800 font-medium text-base">
-                     {pageChangeInProgress ? `Loading page ${currentPage}...` : 'Rendering content...'}
-                   </div>
-                   {renderAttempts > 0 && (
-                     <div className="text-amber-600 text-xs mt-1 flex items-center">
-                       <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                       </svg>
-                       Attempt {renderAttempts + 1}/3
-                     </div>
-                   )}
-                 </div>
-               </div>
-             )}
+           
             
         
             

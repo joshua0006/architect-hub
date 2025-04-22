@@ -100,12 +100,14 @@ export const useAnnotationStore = create<AnnotationState>()(
           
           if (!document) {
             console.warn('No annotations found for document:', documentId);
-            return;
+            return Promise.resolve(); // Return resolved promise for consistency
           }
           
-          await annotationService.saveAnnotationsToFirebase(documentId, document.annotations);
+          // Return the promise for chaining
+          return annotationService.saveAnnotationsToFirebase(documentId, document.annotations);
         } catch (error) {
           console.error('Error saving annotations to Firebase:', error);
+          return Promise.reject(error); // Return rejected promise for error handling
         }
       },
       
@@ -153,9 +155,9 @@ export const useAnnotationStore = create<AnnotationState>()(
             })
           );
           
-          // Save to Firebase (don't await to keep UI responsive)
-          annotationService.saveAnnotationsToFirebase(documentId, newAnnotations)
-            .catch(error => console.error('Error saving annotations to Firebase:', error));
+          // Remove automatic Firebase saving - will only happen when save button is pressed
+          // annotationService.saveAnnotationsToFirebase(documentId, newAnnotations)
+          //   .catch(error => console.error('Error saving annotations to Firebase:', error));
 
           return newState;
         });
@@ -175,9 +177,9 @@ export const useAnnotationStore = create<AnnotationState>()(
           // Push the new annotations array reference into the new history slice
           updatedHistory.push(newAnnotations);
           
-          // Save to Firebase (don't await to keep UI responsive)
-          annotationService.saveAnnotationsToFirebase(documentId, newAnnotations)
-            .catch(error => console.error('Error saving annotations to Firebase:', error));
+          // Remove automatic Firebase saving - will only happen when save button is pressed
+          // annotationService.saveAnnotationsToFirebase(documentId, newAnnotations)
+          //   .catch(error => console.error('Error saving annotations to Firebase:', error));
 
           return {
             documents: {
@@ -210,9 +212,9 @@ export const useAnnotationStore = create<AnnotationState>()(
           );
           newHistory.push(newAnnotations);
           
-          // Save to Firebase (don't await to keep UI responsive)
-          annotationService.saveAnnotationsToFirebase(documentId, newAnnotations)
-            .catch(error => console.error('Error saving annotations to Firebase:', error));
+          // Remove automatic Firebase saving - will only happen when save button is pressed
+          // annotationService.saveAnnotationsToFirebase(documentId, newAnnotations)
+          //   .catch(error => console.error('Error saving annotations to Firebase:', error));
 
           return {
             documents: {
@@ -244,9 +246,9 @@ export const useAnnotationStore = create<AnnotationState>()(
           );
           newHistory.push(newAnnotations);
           
-          // Save to Firebase after import (don't await to keep UI responsive)
-          annotationService.saveAnnotationsToFirebase(documentId, newAnnotations)
-            .catch(error => console.error('Error saving annotations to Firebase:', error));
+          // Remove automatic Firebase saving - will only happen when save button is pressed
+          // annotationService.saveAnnotationsToFirebase(documentId, newAnnotations)
+          //   .catch(error => console.error('Error saving annotations to Firebase:', error));
 
           return {
             documents: {
@@ -262,9 +264,9 @@ export const useAnnotationStore = create<AnnotationState>()(
 
       clearAnnotations: (documentId) => {
         set((state) => {
-          // Save empty annotations to Firebase after clearing
-          annotationService.saveAnnotationsToFirebase(documentId, [])
-            .catch(error => console.error('Error saving annotations to Firebase:', error));
+          // Remove automatic Firebase saving - will only happen when save button is pressed
+          // annotationService.saveAnnotationsToFirebase(documentId, [])
+          //   .catch(error => console.error('Error saving annotations to Firebase:', error));
             
           return {
             documents: {
