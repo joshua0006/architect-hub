@@ -177,6 +177,12 @@ export default function DocumentList({
   // Add new state for permission fetching and saving
   const [isFetchingPermission, setIsFetchingPermission] = useState(false);
   const [isSavingPermission, setIsSavingPermission] = useState(false);
+  const [isSavingName, setIsSavingName] = useState(false);
+  
+  // Add state for share functionality
+  const [isSharing, setIsSharing] = useState(false);
+  const [shareUrl, setShareUrl] = useState<string | null>(null);
+  const [showSharePopup, setShowSharePopup] = useState(false);
   
   // Add drag and drop state
   const [isDragging, setIsDragging] = useState(false);
@@ -343,66 +349,6 @@ export default function DocumentList({
     filteredDocs = filteredDocs.filter(doc =>
       hasFolderReadPermission(currentFolder?.metadata?.access as FolderAccessPermission)
     );
-
-    // Apply permission filter based on user role
-    // if (user?.role !== 'Staff' && user?.role !== 'Admin') {
-    //   // For non-staff users, filter based on their role
-    //   if (user?.role === 'Contractor') {
-    //     // Contractors can see folders with CONTRACTORS_WRITE or CLIENTS_READ or ALL permission
-    //     filteredFolders = filteredFolders.filter(folder => {
-    //       if (folder.metadata && 'access' in folder.metadata) {
-    //         const access = folder.metadata.access as string;
-    //         return access === 'CONTRACTORS_WRITE' || access === 'CLIENTS_READ' || access === 'ALL';
-    //       }
-    //       return false;
-    //     });
-
-    //     filteredDocs = filteredDocs.filter(doc => {
-    //       if (doc.metadata && 'access' in doc.metadata) {
-    //         const access = doc.metadata.access as string;
-    //         return access === 'CONTRACTORS_WRITE' || access === 'CLIENTS_READ' || access === 'ALL';
-    //       }
-    //       return false;
-    //     });
-    //   } else if (user?.role === 'Client') {
-    //     // Clients can only see folders with CLIENTS_READ or ALL permission
-    //     filteredFolders = filteredFolders.filter(folder => {
-    //       if (folder.metadata && 'access' in folder.metadata) {
-    //         const access = folder.metadata.access as string;
-    //         return access === 'CLIENTS_READ' || access === 'ALL';
-    //       }
-    //       return false;
-    //     });
-
-    //     filteredDocs = filteredDocs.filter(doc => {
-    //       if (doc.metadata && 'access' in doc.metadata) {
-    //         const access = doc.metadata.access as string;
-    //         return access === 'CLIENTS_READ' || access === 'ALL';
-    //       }
-    //       return false;
-    //     });
-    //   } else {
-    //     // Default handling for any other role
-    //     filteredFolders = filteredFolders.filter(folder => {
-    //       if (folder.metadata && 'access' in folder.metadata) {
-    //         const access = folder.metadata.access as string;
-    //         return access === 'ALL';
-    //       }
-    //       return false;
-    //     });
-
-    //     filteredDocs = filteredDocs.filter(doc => {
-    //       if (doc.metadata && 'access' in doc.metadata) {
-    //         const access = doc.metadata.access as string;
-    //         return access === 'ALL';
-    //       }
-    //       return false;
-    //     });
-    //   }
-    // } else {
-    //   // Staff users see all items regardless of permission
-    //   console.log('Staff user - showing all items regardless of permission');
-    // }
 
     // Apply view filter
     if (viewFilter === 'files') {
@@ -596,6 +542,10 @@ export default function DocumentList({
 
   const handleShare = async (resourceId: string, isFolder: boolean) => {
     try {
+      setIsSharing(true);
+      setShareUrl(null);
+      setShowSharePopup(true);
+      
       const token = await createShareToken(
         resourceId,
         isFolder ? 'folder' : 'file',
@@ -603,15 +553,28 @@ export default function DocumentList({
         { expiresInHours: 168 } // 7 days
       );
       
+      // Create the share URL
+      const url = `${window.location.origin}/shared/${token.id}`;
+      
       // Copy to clipboard
-      const shareUrl = `${window.location.origin}/shared/${token.id}`;
-      navigator.clipboard.writeText(shareUrl);
+      navigator.clipboard.writeText(url);
+      
+      // Set the share URL for the popup
+      setShareUrl(url);
       
       showToast('Share link copied to clipboard', 'success');
     } catch (error) {
       console.error('Sharing failed:', error);
       showToast('Failed to create share link', 'error');
+      setShowSharePopup(false);
+    } finally {
+      setIsSharing(false);
     }
+  };
+
+  const closeSharePopup = () => {
+    setShowSharePopup(false);
+    setShareUrl(null);
   };
 
   const handleDeleteItem = () => {
@@ -916,6 +879,7 @@ export default function DocumentList({
 
       // --- Rename Logic ---
       if (nameChanged) {
+        setIsSavingName(true); // Start loading state for name save
         if (popupItem.type === 'folder') {
           renamePromise = onUpdateFolder(popupItem.id, newName);
         } else {
@@ -963,6 +927,9 @@ export default function DocumentList({
         if (permissionChanged) {
           setIsSavingPermission(false);
         }
+        if (nameChanged) {
+          setIsSavingName(false);
+        }
       }
     };
 
@@ -1000,7 +967,7 @@ export default function DocumentList({
                 value={editNameField}
                 onChange={(e) => setEditNameField(e.target.value)}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
-                disabled={isSavingPermission} // Disable while saving
+                disabled={isSavingPermission || isSavingName} // Disable while saving
               />
             </div>
 
@@ -1086,20 +1053,20 @@ export default function DocumentList({
               <button
                 onClick={closePopup}
                 className="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-colors"
-                disabled={isSavingPermission} // Disable cancel while saving permission
+                disabled={isSavingPermission || isSavingName} // Disable cancel while saving
               >
                 Cancel
               </button>
               <button
                 onClick={handleSaveChanges}
                 className={`px-4 py-2 rounded-md transition-colors flex items-center justify-center min-w-[120px] ${
-                  isSavingPermission
+                  isSavingPermission || isSavingName
                     ? 'bg-primary-400 text-white cursor-not-allowed'
                     : 'bg-primary-600 text-white hover:bg-primary-700'
                 }`}
-                disabled={!editNameField.trim() || isSavingPermission || isFetchingPermission} // Disable if saving, fetching, or name is empty
+                disabled={!editNameField.trim() || isSavingPermission || isSavingName || isFetchingPermission} // Disable if saving, fetching, or name is empty
               >
-                {isSavingPermission ? (
+                {isSavingPermission || isSavingName ? (
                   <Loader2 className="w-5 h-5 animate-spin" />
                 ) : (
                   'Save Changes'
@@ -2902,6 +2869,72 @@ export default function DocumentList({
     }
   };
 
+  // Add share popup
+  const renderSharePopup = () => {
+    if (!showSharePopup) return null;
+    
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+        <div className="bg-white rounded-lg p-6 max-w-md w-full shadow-xl">
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="text-lg font-medium">Share</h3>
+            <button
+              onClick={closeSharePopup}
+              className="text-gray-400 hover:text-gray-600"
+              aria-label="Close"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+          
+          {isSharing ? (
+            <div className="flex flex-col items-center justify-center py-8">
+              <Loader2 className="w-10 h-10 animate-spin text-primary-500 mb-4" />
+              <p className="text-gray-600">Creating share link...</p>
+            </div>
+          ) : shareUrl ? (
+            <div className="space-y-4">
+              <p className="text-gray-600 mb-2">Use this link to share the content:</p>
+              <div className="flex items-center border border-gray-300 rounded-md overflow-hidden">
+                <input
+                  type="text"
+                  value={shareUrl}
+                  readOnly
+                  className="p-2 flex-1 outline-none text-sm"
+                />
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(shareUrl);
+                    showToast("Link copied to clipboard", "success");
+                  }}
+                  className="bg-primary-500 hover:bg-primary-600 text-white p-2"
+                  aria-label="Copy link"
+                >
+                  <Copy className="w-5 h-5" />
+                </button>
+              </div>
+              <p className="text-xs text-gray-500 mt-2">
+                This link will expire in 7 days.
+              </p>
+              <div className="flex justify-end mt-4">
+                <button
+                  onClick={closeSharePopup}
+                  className="px-4 py-2 bg-primary-500 text-white rounded-md hover:bg-primary-600 transition-colors"
+                >
+                  Done
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-center justify-center py-6">
+              <p className="text-red-500">Failed to create share link</p>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div 
       ref={dropZoneRef}
@@ -2913,44 +2946,48 @@ export default function DocumentList({
     >
       {/* Only show header when not in fullscreen */}
       {!isFullscreen && (
-        <div className="flex justify-between items-center border-b px-4 py-3 bg-white">
-          <DocumentBreadcrumbs
-            folders={folders}
-            currentFolder={currentFolder}
-            selectedDocument={selectedDocument}
-            onNavigate={handleBreadcrumbNavigation}
-            onDocumentClick={() => selectedDocument && onPreview(selectedDocument)}
-          />
-          
-          {/* Header actions */}
-          {renderUploadButtons()}
-        </div>
+        <>
+          <div className="flex justify-between items-center border-b px-4 py-3 bg-white">
+            <DocumentBreadcrumbs
+              folders={folders}
+              currentFolder={currentFolder}
+              selectedDocument={selectedDocument}
+              onNavigate={handleBreadcrumbNavigation}
+              onDocumentClick={() => selectedDocument && onPreview(selectedDocument)}
+            />
+            
+            {/* Header actions */}
+            {renderUploadButtons()}
+          </div>
+        </>
       )}
-      
+
+      {/* Main content area - documents grid or document viewer */}
       {selectedDocument ? (
-        <div className="flex-1 min-h-0 flex flex-col">
-          {/* Remove duplicate breadcrumbs - the main one at the top is enough */}
-          <DocumentViewer
-            document={selectedDocument}
-            onClose={() => setSelectedDocument(undefined)}
-            onRefresh={onRefresh}
-            folders={folders} // Pass the full folders array with complete folder information
-            onNavigateToFolder={handleBreadcrumbNavigation}
-            viewerHeight={600}
-            setViewerHeight={(height: number) => {
-              console.log('Viewer height updated:', height);
-              // You can add state for this if needed
-            }}
-            isFullscreen={isFullscreen}
-            onFullscreenChange={(fullscreen) => {
-              setIsFullscreen(fullscreen);
-              onFullscreenChange?.(fullscreen);
-            }}
-          />
-        </div>
+        <>
+          <div className="flex-1 min-h-0 flex flex-col">
+            {/* Remove duplicate breadcrumbs - the main one at the top is enough */}
+            <DocumentViewer
+              document={selectedDocument}
+              onClose={() => setSelectedDocument(undefined)}
+              onRefresh={onRefresh}
+              folders={folders} // Pass the full folders array with complete folder information
+              onNavigateToFolder={handleBreadcrumbNavigation}
+              viewerHeight={600}
+              setViewerHeight={(height: number) => {
+                console.log('Viewer height updated:', height);
+                // You can add state for this if needed
+              }}
+              isFullscreen={isFullscreen}
+              onFullscreenChange={(fullscreen) => {
+                setIsFullscreen(fullscreen);
+                onFullscreenChange?.(fullscreen);
+              }}
+            />
+          </div>
+        </>
       ) : (
         <>
-      
           {/* Search, filter, and sort controls */}
           <div className="px-4 my-4 space-y-3">
             <div className="flex items-center space-x-2">
@@ -3229,8 +3266,13 @@ export default function DocumentList({
                               onClick={() => handleShare(folder.id, true)}
                               className="p-1 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100"
                               aria-label="Share folder"
+                              disabled={isSharing}
                             >
-                              <Share2 className="w-5 h-5" />
+                              {isSharing && showSharePopup ? (
+                                <Loader2 className="w-5 h-5 animate-spin" />
+                              ) : (
+                                <Share2 className="w-5 h-5" />
+                              )}
                             </button>
                             <div className="absolute bottom-full mb-2 left-1/2 transform -translate-x-1/2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap">
                               Share
@@ -3307,6 +3349,25 @@ export default function DocumentList({
                       <div className="flex items-center space-x-1">
                         {/* Only show edit button if user can edit documents */}
 
+                        {/* Edit button for documents */}
+                        {canEditDocuments() && (
+                          <div className="group relative">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleEditClick(e, doc.id, 'document', typeof doc.name === 'string' ? doc.name : 'Unnamed document');
+                              }}
+                              className="p-1 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100"
+                              aria-label="Edit document name"
+                            >
+                              <Edit className="w-5 h-5" />
+                            </button>
+                            <div className="absolute bottom-full mb-2 left-1/2 transform -translate-x-1/2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap">
+                              Edit name
+                            </div>
+                          </div>
+                        )}
+
                         {/* Copy button for documents */}
                         {canEditDocuments() && (
                           <div className="group relative">
@@ -3370,8 +3431,13 @@ export default function DocumentList({
                               onClick={() => handleShare(doc.id, false)}
                               className="p-1 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100"
                               aria-label="Share document"
+                              disabled={isSharing}
                             >
-                              <Share2 className="w-5 h-5" />
+                              {isSharing && showSharePopup ? (
+                                <Loader2 className="w-5 h-5 animate-spin" />
+                              ) : (
+                                <Share2 className="w-5 h-5" />
+                              )}
                             </button>
                             <div className="absolute bottom-full mb-2 left-1/2 transform -translate-x-1/2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap">
                               Share
@@ -3424,10 +3490,41 @@ export default function DocumentList({
         </>
       )}
 
+      {/* Drag and drop overlay */}
+      <AnimatePresence>
+        {showDragOverlay && hasUploadPermission() && !selectedDocument && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-primary-600 bg-opacity-30 backdrop-blur-sm"
+            ref={dropZoneRef}
+          >
+            <div className="bg-white p-10 rounded-lg shadow-lg text-center border-2 border-dashed border-primary-500">
+              <Upload className="w-16 h-16 mx-auto text-primary-500 mb-4" />
+              <h3 className="text-xl font-medium text-primary-800 mb-2">Drop files or folders here</h3>
+              <p className="text-gray-500">
+                Drop your {draggedFileCount > 0 ? draggedFileCount : ''} item{draggedFileCount !== 1 ? 's' : ''} to upload 
+                {currentFolder ? ` to "${currentFolder.name}"` : ''}
+              </p>
+              <div className="mt-3 text-xs text-gray-400">
+                Supported formats: PDF, DWG, and document files
+              </div>
+              <div className="mt-1 text-xs text-gray-400">
+                Folder structure will be preserved on upload
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {renderEditPopup()}
+      {renderSharePopup()}
+
       {/* Standard dialogs */}
       <ConfirmDialog
         isOpen={showDeleteConfirm}
-        title={`Delete ${itemToDelete?.type === 'folder' ? 'Folder' : 'File'}`}
+        title={`Delete ${itemToDelete?.type === 'folder' ? 'Folder' : 'Document'}`}
         message={`Are you sure you want to delete "${itemToDelete?.name}"? This action cannot be undone.`}
         confirmText="Delete"
         cancelText="Cancel"
@@ -3444,7 +3541,7 @@ export default function DocumentList({
         onRename={handleRename}
         onCancel={closeRenameDialog}
       />
-
+      
       <PermissionsDialog
         isOpen={permissionsDialogOpen}
         title={`Edit ${itemForPermissions?.type === 'folder' ? 'Folder' : 'File'} Permissions`}
@@ -3689,31 +3786,57 @@ export default function DocumentList({
         </div>
       </div>
 
+      {/* Render popup */}
       {renderEditPopup()}
+      
+      {/* Render confirmation dialogs */}
+      <ConfirmDialog
+        isOpen={showDeleteConfirm}
+        title={`Delete ${itemToDelete?.type === 'folder' ? 'Folder' : 'File'}`}
+        message={`Are you sure you want to delete "${itemToDelete?.name}"? This action cannot be undone.`}
+        confirmText="Delete"
+        cancelText="Cancel"
+        onConfirm={handleDeleteItem}
+        onCancel={() => setShowDeleteConfirm(false)}
+        danger={true}
+      />
+      
+      <RenameDialog
+        isOpen={renameDialogOpen}
+        title={`Rename ${itemToRename?.type === 'folder' ? 'Folder' : 'File'}`}
+        currentName={itemToRename?.name || ''}
+        itemType={itemToRename?.type === 'folder' ? 'folder' : 'file'}
+        onRename={handleRename}
+        onCancel={closeRenameDialog}
+      />
+      
+      <PermissionsDialog
+        isOpen={permissionsDialogOpen}
+        title={`Edit ${itemForPermissions?.type === 'folder' ? 'Folder' : 'File'} Permissions`}
+        itemId={itemForPermissions?.id || ''}
+        itemType={itemForPermissions?.type || 'document'}
+        currentPermission={itemForPermissions?.permission || 'STAFF_ONLY'}
+        onSave={handleUpdatePermission}
+        onCancel={closePermissionsDialog}
+      />
 
       {/* Drag and drop overlay */}
       <AnimatePresence>
-        {showDragOverlay && hasUploadPermission() && !selectedDocument && (
+        {showDragOverlay && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-primary-600 bg-opacity-30 backdrop-blur-sm"
-            ref={dropZoneRef}
+            className="fixed inset-0 bg-black/60 z-50 flex flex-col items-center justify-center p-6"
           >
-            <div className="bg-white p-10 rounded-lg shadow-lg text-center border-2 border-dashed border-primary-500">
-              <Upload className="w-16 h-16 mx-auto text-primary-500 mb-4" />
-              <h3 className="text-xl font-medium text-primary-800 mb-2">Drop files or folders here</h3>
-              <p className="text-gray-500">
-                Drop your {draggedFileCount > 0 ? draggedFileCount : ''} item{draggedFileCount !== 1 ? 's' : ''} to upload 
-                {currentFolder ? ` to "${currentFolder.name}"` : ''}
+            <div className="bg-white rounded-xl p-8 max-w-md text-center shadow-2xl">
+              <div className="mb-4 bg-primary-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto">
+                <Upload className="w-8 h-8 text-primary-600" />
+              </div>
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">Drop {draggedFileCount > 1 ? 'Files' : 'File'} to Upload</h3>
+              <p className="text-gray-600">
+                Drop {draggedFileCount === 1 ? 'your file' : `your ${draggedFileCount} files`} anywhere to start uploading
               </p>
-              <div className="mt-3 text-xs text-gray-400">
-                Supported formats: PDF, DWG, and document files
-              </div>
-              <div className="mt-1 text-xs text-gray-400">
-                Folder structure will be preserved on upload
-              </div>
             </div>
           </motion.div>
         )}

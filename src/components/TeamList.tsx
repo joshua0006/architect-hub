@@ -97,7 +97,10 @@ export default function TeamList({
     };
 
     projectMembers.forEach((member) => {
-      if (member.role in groups) {
+      if (member.role === 'Admin') {
+        // Add Admin users to the Staff group
+        groups.Staff.push(member);
+      } else if (member.role in groups) {
         groups[member.role as keyof typeof groups].push(member);
       }
     });

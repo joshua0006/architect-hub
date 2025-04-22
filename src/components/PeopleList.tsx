@@ -194,7 +194,10 @@ export default function PeopleList({ projects, teamMembers, onCreateMember, onUp
     };
 
     users.forEach((user) => {
-      if (user.role in groups) {
+      if (user.role === 'Admin') {
+        // Add Admin users to the Staff group
+        groups.Staff.push(user);
+      } else if (user.role in groups) {
         groups[user.role as keyof typeof groups].push(user);
       }
     });
