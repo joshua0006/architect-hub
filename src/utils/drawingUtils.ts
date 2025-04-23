@@ -16,7 +16,8 @@ export const drawCircle = (
   ctx: CanvasRenderingContext2D,
   points: Point[],
   scale: number,
-  diameterMode: boolean = false
+  diameterMode: boolean = false,
+  isForExport: boolean = false
 ) => {
   if (!points || points.length < 2) return;
   const [start, end] = points;
@@ -52,7 +53,8 @@ export const drawLine = (
   ctx: CanvasRenderingContext2D,
   points: Point[],
   scale: number,
-  style: AnnotationStyle
+  style: AnnotationStyle,
+  isForExport: boolean = false
 ) => {
   if (!points || points.length < 2) return;
   const [start, end] = points;
@@ -73,7 +75,8 @@ ctx.beginPath();
 export const drawRectangle = (
   ctx: CanvasRenderingContext2D,
   points: Point[],
-  scale: number
+  scale: number,
+  isForExport: boolean = false
 ) => {
   if (!points || points.length < 2) return;
   const [start, end] = points;
@@ -92,7 +95,8 @@ export const drawRectangle = (
 export const drawTriangle = (
   ctx: CanvasRenderingContext2D,
   points: Point[],
-  scale: number
+  scale: number,
+  isForExport: boolean = false
 ) => {
   if (!points || points.length < 2) return;
   const [start, end] = points;
@@ -118,7 +122,8 @@ export const drawTriangle = (
 export const drawStar = (
   ctx: CanvasRenderingContext2D,
   points: Point[],
-  scale: number
+  scale: number,
+  isForExport: boolean = false
 ) => {
   if (!points || points.length < 2) return;
   const [start, end] = points;
@@ -154,7 +159,8 @@ export const drawStar = (
 export const drawNoSymbol = (
   ctx: CanvasRenderingContext2D,
   points: Point[],
-  scale: number
+  scale: number,
+  isForExport: boolean = false
 ) => {
   if (!points || points.length < 2) return;
   const [start, end] = points;
@@ -215,7 +221,8 @@ export const drawArrow = (
   points: Point[],
   scale: number,
   isDoubleArrow: boolean = false,
-  style: AnnotationStyle
+  style: AnnotationStyle,
+  isForExport: boolean = false
 ) => {
   if (!points || points.length < 2) return;
   const [start, end] = points;
@@ -358,7 +365,8 @@ export const drawArrow = (
 export const drawTick = (
   ctx: CanvasRenderingContext2D,
   points: Point[],
-  scale: number
+  scale: number,
+  isForExport: boolean = false
 ) => {
   if (!points || points.length < 2) return;
   const [start, end] = points;
@@ -386,7 +394,8 @@ export const drawTick = (
 export const drawCross = (
   ctx: CanvasRenderingContext2D,
   points: Point[],
-  scale: number
+  scale: number,
+  isForExport: boolean = false
 ) => {
   if (!points || points.length < 2) return;
   const [start, end] = points;
@@ -418,7 +427,8 @@ export const drawText = (
   ctx: CanvasRenderingContext2D,
   points: Point[],
   style: AnnotationStyle,
-  scale: number
+  scale: number,
+  isForExport: boolean = false
 ) => {
   if (!points || !points.length || !style.text) return;
   
@@ -465,7 +475,8 @@ export const drawStickyNote = (
   ctx: CanvasRenderingContext2D,
   points: Point[],
   style: AnnotationStyle,
-  scale: number
+  scale: number,
+  isForExport: boolean = false
 ) => {
   if (!points || !points.length) return;
   
@@ -561,7 +572,8 @@ export const drawHighlight = (
   ctx: CanvasRenderingContext2D,
   points: Point[],
   style: AnnotationStyle,
-  scale: number
+  scale: number,
+  isForExport: boolean = false
 ) => {
   if (!points || points.length < 2) return;
 
@@ -569,55 +581,65 @@ export const drawHighlight = (
   ctx.save();
 
   // Set highlight specific styles - cap opacity at 0.7
-  const cappedOpacity = Math.min(style.opacity || 0.3, 0.7);
+  let cappedOpacity = Math.min(style.opacity || 0.3, 0.7);
+  
+  // For exports, ensure opacity is within a good visible range for PDFs
+  if (isForExport) {
+    // Slightly boost opacity for exports to ensure visibility
+    cappedOpacity = Math.min(Math.max(cappedOpacity, 0.4), 0.7);
+  }
+  
   ctx.globalAlpha = cappedOpacity;
   ctx.fillStyle = style.color || "#FFFF00"; // Use style color or default to yellow
   ctx.strokeStyle = style.color || "#FFFF00"; // Add a stroke in the same color
-  ctx.lineWidth = 1 * scale; // Thin border for definition
+  ctx.lineWidth = (isForExport ? 1.5 : 1) * scale;
+  
+  // No need for line dash in highlight
+  ctx.setLineDash([]);
 
-  // For rectangle-like highlights with 2 points
+  // For highlight we use the current points to create a rectangle or path
+  const [start, ...rest] = points;
+
   if (points.length === 2) {
-    const [start, end] = points;
-    
-    // Calculate rectangle coordinates
+    // Simple case with two points - draw a rectangle
+    const end = points[1];
+
+    // Get the dimensions - make sure coordinates are scaled correctly
     const x = Math.min(start.x, end.x) * scale;
     const y = Math.min(start.y, end.y) * scale;
     const width = Math.abs(end.x - start.x) * scale;
     const height = Math.abs(end.y - start.y) * scale;
-    
-    // Draw as a rectangle (more efficient and easier to resize)
-    ctx.beginPath();
-    ctx.rect(x, y, width, height);
-    ctx.fill();
-    ctx.stroke();
-  } 
-  // For polygon highlights with more points
-  else {
-    // Draw highlight as a filled path
-    ctx.beginPath();
-    points.forEach((point, index) => {
-      if (!isValidPoint(point)) return;
 
-      if (index === 0) {
-        ctx.moveTo(point.x * scale, point.y * scale);
-      } else {
-        ctx.lineTo(point.x * scale, point.y * scale);
-      }
+    // For exports, slightly enhance dimensions to fix rounding issues
+    if (isForExport) {
+      ctx.fillRect(x, y, Math.max(width, 1), Math.max(height, 1));
+      // Add a subtle border to ensure visibility
+      ctx.strokeRect(x, y, Math.max(width, 1), Math.max(height, 1));
+    } else {
+      ctx.fillRect(x, y, width, height);
+    }
+  } else if (points.length > 2) {
+    // More complex path for freeform highlight
+    ctx.beginPath();
+    ctx.moveTo(start.x * scale, start.y * scale);
+
+    // Draw path through all points
+    rest.forEach(point => {
+      ctx.lineTo(point.x * scale, point.y * scale);
     });
 
-    // Close the path if it's not closed
-    if (points.length > 2) {
+    // For exports, ensure stroke is visible
+    if (isForExport) {
+      ctx.lineWidth = 1.5 * scale;
       ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    } else {
+      ctx.closePath();
+      ctx.fill();
     }
-    
-    // Fill with semi-transparent color
-    ctx.fill();
-    
-    // Add a subtle stroke for better visibility
-    ctx.stroke();
   }
 
-  // Restore context state
   ctx.restore();
 };
 
@@ -626,7 +648,8 @@ export const drawSmoothFreehand = (
   ctx: CanvasRenderingContext2D,
   points: Point[],
   scale: number,
-  style: AnnotationStyle
+  style: AnnotationStyle,
+  isForExport: boolean = false
 ) => {
   if (!points || points.length < 2) return;
 
@@ -691,7 +714,8 @@ export const drawSmoothFreehand = (
 export const drawAnnotation = (
   ctx: CanvasRenderingContext2D,
   annotation: Annotation,
-  scale: number
+  scale: number,
+  isForExport: boolean = false
 ) => {
   ctx.save();
   ctx.strokeStyle = annotation.style.color;
@@ -701,21 +725,26 @@ export const drawAnnotation = (
   ctx.lineJoin = "round";
   ctx.globalAlpha = annotation.style.opacity;
 
+  // For exports, ensure visibility by slightly increasing line width
+  if (isForExport) {
+    ctx.lineWidth = Math.max(ctx.lineWidth, 1.5 * scale); // Minimum line width for exports
+  }
+
   switch (annotation.type) {
     case "freehand":
-      drawSmoothFreehand(ctx, annotation.points, scale, annotation.style);
+      drawSmoothFreehand(ctx, annotation.points, scale, annotation.style, isForExport);
       break;
     case "line":
-      drawLine(ctx, annotation.points, scale, annotation.style);
+      drawLine(ctx, annotation.points, scale, annotation.style, isForExport);
       break;
     case "rectangle":
-      drawRectangle(ctx, annotation.points, scale);
+      drawRectangle(ctx, annotation.points, scale, isForExport);
       break;
     case "circle":
       // Support circleDiameterMode from the style property
       const diameterMode = annotation.style.circleDiameterMode as boolean || false;
-      // Pass the diameterMode to the drawCircle function
-      drawCircle(ctx, annotation.points, scale, diameterMode);
+      // Pass the diameterMode and isForExport to the drawCircle function
+      drawCircle(ctx, annotation.points, scale, diameterMode, isForExport);
       break;
     case "arrow":
     case "doubleArrow":
@@ -724,56 +753,57 @@ export const drawAnnotation = (
         annotation.points,
         scale,
         annotation.type === "doubleArrow",
-        annotation.style
+        annotation.style,
+        isForExport
       );
       break;
     case "stamp":
     case "stampApproved":
     case "stampRejected":
     case "stampRevision":
-      drawStamp(ctx, annotation.points, annotation.style, scale);
+      drawStamp(ctx, annotation.points, annotation.style, scale, isForExport);
       break;
     case "triangle":
-      drawTriangle(ctx, annotation.points, scale);
+      drawTriangle(ctx, annotation.points, scale, isForExport);
       break;
     case "star":
-      drawStar(ctx, annotation.points, scale);
+      drawStar(ctx, annotation.points, scale, isForExport);
       break;
     case "noSymbol" as any:
-      drawNoSymbol(ctx, annotation.points, scale);
+      drawNoSymbol(ctx, annotation.points, scale, isForExport);
       break;
     case "tick" as any:
-      drawTick(ctx, annotation.points, scale);
+      drawTick(ctx, annotation.points, scale, isForExport);
       break;
     case "cross" as any:
-      drawCross(ctx, annotation.points, scale);
+      drawCross(ctx, annotation.points, scale, isForExport);
       break;
     case "text":
-      drawText(ctx, annotation.points, annotation.style, scale);
+      drawText(ctx, annotation.points, annotation.style, scale, isForExport);
       break;
     case "stickyNote":
-      drawStickyNote(ctx, annotation.points, annotation.style, scale);
+      drawStickyNote(ctx, annotation.points, annotation.style, scale, isForExport);
       break;
     case "highlight":
-      drawHighlight(ctx, annotation.points, annotation.style, scale);
+      drawHighlight(ctx, annotation.points, annotation.style, scale, isForExport);
       break;
     case "door":
-      drawDoor(ctx, annotation.points, scale);
+      drawDoor(ctx, annotation.points, scale, isForExport);
       break;
     case "window":
-      drawWindow(ctx, annotation.points, scale);
+      drawWindow(ctx, annotation.points, scale, isForExport);
       break;
     case "fireExit":
-      drawFireExit(ctx, annotation.points, scale);
+      drawFireExit(ctx, annotation.points, scale, isForExport);
       break;
     case "stairs":
-      drawStairs(ctx, annotation.points, scale);
+      drawStairs(ctx, annotation.points, scale, isForExport);
       break;
     case "elevator":
-      drawElevator(ctx, annotation.points, scale);
+      drawElevator(ctx, annotation.points, scale, isForExport);
       break;
     case "toilet":
-      drawToilet(ctx, annotation.points, scale);
+      drawToilet(ctx, annotation.points, scale, isForExport);
       break;
     default:
       console.warn("Unsupported annotation type:", annotation.type);
@@ -988,7 +1018,8 @@ export const drawStamp = (
   ctx: CanvasRenderingContext2D,
   points: Point[],
   style: AnnotationStyle,
-  scale: number
+  scale: number,
+  isForExport: boolean = false
 ) => {
   if (!points.length || !style.stampType) return;
   const [start] = points;
@@ -1002,8 +1033,16 @@ export const drawStamp = (
   const sizeMultiplier = stampSizePercent / 100;
   
   // Size proportions - adjusted by scale and size percentage
-  const stampWidth = 180 * scale * sizeMultiplier;
-  const stampHeight = 50 * scale * sizeMultiplier;
+  let stampWidth = 180 * scale * sizeMultiplier;
+  let stampHeight = 50 * scale * sizeMultiplier;
+  
+  // For exports, ensure stamp is properly sized and positioned
+  if (isForExport) {
+    // Ensure minimum size for visibility in exports
+    stampWidth = Math.max(stampWidth, 150 * scale);
+    stampHeight = Math.max(stampHeight, 40 * scale);
+  }
+  
   const borderRadius = 6 * scale * sizeMultiplier;
 
   // Save context state
@@ -1030,8 +1069,8 @@ export const drawStamp = (
       icon = "";
   }
 
-  // Set stamp opacity
-  ctx.globalAlpha = style.opacity ?? 1.0;
+  // Set stamp opacity with minimum for exports
+  ctx.globalAlpha = isForExport ? Math.max(style.opacity ?? 0.9, 0.9) : style.opacity ?? 1.0;
   
   // Draw stamp background with rounded corners
   ctx.beginPath();
@@ -1046,9 +1085,15 @@ export const drawStamp = (
   ctx.quadraticCurveTo(x - stampWidth/2, y - stampHeight/2, x - stampWidth/2 + borderRadius, y - stampHeight/2);
   ctx.closePath();
   
-  // Draw border only (no background fill)
+  // For exports, fill with very light background for better visibility
+  if (isForExport) {
+    ctx.fillStyle = "rgba(255, 255, 255, 0.8)";
+    ctx.fill();
+  }
+  
+  // Draw border
   ctx.strokeStyle = stampColor;
-  ctx.lineWidth = 1.5 * scale;
+  ctx.lineWidth = (isForExport ? 2.0 : 1.5) * scale;
   ctx.setLineDash([]);
   ctx.stroke();
   
@@ -1300,7 +1345,8 @@ export const getRectangleDimensions = (start: Point, end: Point) => {
 export const drawDoor = (
   ctx: CanvasRenderingContext2D,
   points: Point[],
-  scale: number
+  scale: number,
+  isForExport: boolean = false
 ) => {
   if (!points || points.length < 2) return;
   const [start, end] = points;
@@ -1338,7 +1384,8 @@ export const drawDoor = (
 export const drawWindow = (
   ctx: CanvasRenderingContext2D,
   points: Point[],
-  scale: number
+  scale: number,
+  isForExport: boolean = false
 ) => {
   if (!points || points.length < 2) return;
   const [start, end] = points;
@@ -1367,7 +1414,8 @@ export const drawWindow = (
 export const drawFireExit = (
   ctx: CanvasRenderingContext2D,
   points: Point[],
-  scale: number
+  scale: number,
+  isForExport: boolean = false
 ) => {
   if (!points || points.length < 2) return;
   const [start, end] = points;
@@ -1433,7 +1481,8 @@ export const drawFireExit = (
 export const drawStairs = (
   ctx: CanvasRenderingContext2D,
   points: Point[],
-  scale: number
+  scale: number,
+  isForExport: boolean = false
 ) => {
   if (!points || points.length < 2) return;
   const [start, end] = points;
@@ -1460,7 +1509,8 @@ export const drawStairs = (
 export const drawElevator = (
   ctx: CanvasRenderingContext2D,
   points: Point[],
-  scale: number
+  scale: number,
+  isForExport: boolean = false
 ) => {
   if (!points || points.length < 2) return;
   const [start, end] = points;
@@ -1485,7 +1535,8 @@ export const drawElevator = (
 export const drawToilet = (
   ctx: CanvasRenderingContext2D,
   points: Point[],
-  scale: number
+  scale: number,
+  isForExport: boolean = false
 ) => {
   if (!points || points.length < 2) return;
   const [start, end] = points;

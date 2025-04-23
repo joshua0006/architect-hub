@@ -6,6 +6,7 @@ import {
   AnnotationStyle,
 } from "../types/annotation";
 import { compressData, decompressData, getStorageSize } from "../utils/storageUtils";
+import { annotationService } from "../services/annotationService";
 
 interface DocumentState {
   annotations: Annotation[];
@@ -50,6 +51,8 @@ interface AnnotationState {
   sendToBack: (documentId: string, annotationIds: string[]) => void;
   annotationToEditImmediately: Annotation | null;
   setAnnotationToEditImmediately: (annotation: Annotation | null) => void;
+  saveToFirebase: (documentId: string) => Promise<void>;
+  loadFromFirebase: (documentId: string) => Promise<void>;
 }
 
 export const initialDocumentState = () => ({
@@ -84,6 +87,43 @@ export const useAnnotationStore = create<AnnotationState>()(
             [documentId]: state.documents[documentId] || initialDocumentState(),
           },
         }));
+        
+        // Try to load annotations from Firebase when setting current document
+        get().loadFromFirebase(documentId);
+      },
+
+      // Add function to save annotations to Firebase
+      saveToFirebase: async (documentId) => {
+        try {
+          const state = get();
+          const document = state.documents[documentId];
+          
+          if (!document) {
+            console.warn('No annotations found for document:', documentId);
+            return Promise.resolve(); // Return resolved promise for consistency
+          }
+          
+          // Return the promise for chaining
+          return annotationService.saveAnnotationsToFirebase(documentId, document.annotations);
+        } catch (error) {
+          console.error('Error saving annotations to Firebase:', error);
+          return Promise.reject(error); // Return rejected promise for error handling
+        }
+      },
+      
+      // Add function to load annotations from Firebase
+      loadFromFirebase: async (documentId) => {
+        try {
+          const annotations = await annotationService.loadAnnotationsFromFirebase(documentId);
+          
+          if (annotations && annotations.length > 0) {
+            // Import the annotations from Firebase
+            get().importAnnotations(documentId, annotations, 'replace');
+            console.log(`Loaded ${annotations.length} annotations from Firebase`);
+          }
+        } catch (error) {
+          console.error('Error loading annotations from Firebase:', error);
+        }
       },
 
       addAnnotation: (documentId, annotation) => {
@@ -114,6 +154,10 @@ export const useAnnotationStore = create<AnnotationState>()(
               version: 1,
             })
           );
+          
+          // Remove automatic Firebase saving - will only happen when save button is pressed
+          // annotationService.saveAnnotationsToFirebase(documentId, newAnnotations)
+          //   .catch(error => console.error('Error saving annotations to Firebase:', error));
 
           return newState;
         });
@@ -132,6 +176,10 @@ export const useAnnotationStore = create<AnnotationState>()(
           const updatedHistory = document.history.slice(0, document.currentIndex + 1);
           // Push the new annotations array reference into the new history slice
           updatedHistory.push(newAnnotations);
+          
+          // Remove automatic Firebase saving - will only happen when save button is pressed
+          // annotationService.saveAnnotationsToFirebase(documentId, newAnnotations)
+          //   .catch(error => console.error('Error saving annotations to Firebase:', error));
 
           return {
             documents: {
@@ -163,6 +211,10 @@ export const useAnnotationStore = create<AnnotationState>()(
             document.currentIndex + 1
           );
           newHistory.push(newAnnotations);
+          
+          // Remove automatic Firebase saving - will only happen when save button is pressed
+          // annotationService.saveAnnotationsToFirebase(documentId, newAnnotations)
+          //   .catch(error => console.error('Error saving annotations to Firebase:', error));
 
           return {
             documents: {
@@ -193,6 +245,10 @@ export const useAnnotationStore = create<AnnotationState>()(
             document.currentIndex + 1
           );
           newHistory.push(newAnnotations);
+          
+          // Remove automatic Firebase saving - will only happen when save button is pressed
+          // annotationService.saveAnnotationsToFirebase(documentId, newAnnotations)
+          //   .catch(error => console.error('Error saving annotations to Firebase:', error));
 
           return {
             documents: {
@@ -207,12 +263,18 @@ export const useAnnotationStore = create<AnnotationState>()(
         }),
 
       clearAnnotations: (documentId) => {
-        set((state) => ({
-          documents: {
-            ...state.documents,
-            [documentId]: initialDocumentState(),
-          },
-        }));
+        set((state) => {
+          // Remove automatic Firebase saving - will only happen when save button is pressed
+          // annotationService.saveAnnotationsToFirebase(documentId, [])
+          //   .catch(error => console.error('Error saving annotations to Firebase:', error));
+            
+          return {
+            documents: {
+              ...state.documents,
+              [documentId]: initialDocumentState(),
+            },
+          };
+        });
       },
 
       setCurrentTool: (tool) => set({ currentTool: tool }),
@@ -516,10 +578,6 @@ export const useAnnotationStore = create<AnnotationState>()(
         },
         removeItem: (name) => localStorage.removeItem(name),
       })),
-      partialize: (state) => ({
-        documents: state.documents,
-        currentDrawMode: state.currentDrawMode,
-      }),
     }
   )
 );

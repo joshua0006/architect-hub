@@ -12,6 +12,7 @@ import {
   ZoomIn,
   ZoomOut,
   RefreshCw,
+  Settings,
 } from "lucide-react";
 import { useKeyboardShortcutGuide } from "../../hooks/useKeyboardShortcutGuide";
 
@@ -29,7 +30,7 @@ interface PDFControlsProps {
   onZoomOut: () => void;
   onResetZoom: () => void;
   onExportCurrentPage: (format: "png" | "pdf") => void;
-  onExportAllPages: (quality?: "standard" | "hd") => void;
+  onExportAllPages: (quality?: "standard" | "hd" | "optimal") => void;
   onExportAnnotations: () => void;
   onImportAnnotations: (file: File) => void;
   onDownloadCurrentPage: () => void;
@@ -55,9 +56,14 @@ export const PDFControls: React.FC<PDFControlsProps> = ({
   onDownloadCurrentPage,
 }) => {
   const { setIsShortcutGuideOpen } = useKeyboardShortcutGuide();
+  const [showQualityDropdown, setShowQualityDropdown] = useState(false);
+  const [selectedQuality, setSelectedQuality] = useState<"standard" | "optimal" | "hd">("optimal");
 
-
-  
+  // Function to handle quality selection and PDF export
+  const handleExportWithQuality = () => {
+    onExportAllPages(selectedQuality);
+    setShowQualityDropdown(false);
+  };
 
   return (
     <div className="bg-white border-b flex w-full items-center justify-between py-2 px-4 select-none">
@@ -151,19 +157,24 @@ export const PDFControls: React.FC<PDFControlsProps> = ({
         <div className="h-6 w-px bg-gray-200 mx-3" />
         
         {/* Download Options */}
-        <div className="flex items-center">
-          <button
-            onClick={() => onExportAllPages("hd")}
-            className="p-1 flex items-center gap-2 rounded-l hover:bg-blue-100 transition-colors duration-200"
-            title="Download HD PDF with annotations"
-            disabled={isExporting}
-          >
-            <Download size={20} className={isExporting ? "text-gray-400" : "text-blue-600"} /> 
-            <span className="text-blue-600 font-medium">Download PDF</span>
-            {isExporting && (
-              <span className="ml-1 text-xs text-gray-500">Exporting...</span>
-            )}
-          </button>
+        <div className="flex items-center relative">
+          <div className="relative">
+            <button
+              onClick={() => {
+                setSelectedQuality("hd");
+                handleExportWithQuality();
+              }}
+              className="p-1 flex items-center gap-2 rounded-l hover:bg-blue-100 transition-colors duration-200"
+              title="Download PDF with annotations"
+              disabled={isExporting}
+            >
+              <Download size={20} className={isExporting ? "text-gray-400" : "text-blue-600"} /> 
+              <span className="text-blue-600 font-medium">Download PDF</span>
+             
+            </button>
+
+           
+          </div>
           
           {/* Separator within download options */}
           <div className="h-6 w-px bg-gray-200 mx-1" />
