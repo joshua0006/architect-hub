@@ -3,7 +3,7 @@ import { Point, AnnotationStyle } from "../types/annotation";
 
 interface TextInputProps {
   position: Point;
-  onComplete: (text: string) => void;
+  onComplete: (text: string, finalPosition?: Point) => void;
   onCancel: () => void;
   scale: number;
   isSticky?: boolean;
@@ -32,6 +32,11 @@ const TextInputComponent: React.ForwardRefRenderFunction<HTMLTextAreaElement, Te
   // Use an internal ref for component logic like size adjustment
   const internalInputRef = useRef<HTMLTextAreaElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
+  
+  // Add position state for dragging
+  const [currentPosition, setCurrentPosition] = useState<Point>(position);
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragOffset, setDragOffset] = useState<Point>({ x: 0, y: 0 });
 
   // Combine forwarded ref and internal ref if necessary, or just use internal for logic
   // For simplicity and direct control, we'll use internalInputRef for focus/size logic
@@ -67,7 +72,7 @@ const TextInputComponent: React.ForwardRefRenderFunction<HTMLTextAreaElement, Te
     const handleClickOutside = (event: globalThis.MouseEvent) => {
       if (wrapperRef.current && !wrapperRef.current.contains(event.target as Node)) {
         if (text.trim()) {
-          onComplete(text);
+          onComplete(text, currentPosition);
         } else {
           onCancel();
         }
@@ -77,14 +82,38 @@ const TextInputComponent: React.ForwardRefRenderFunction<HTMLTextAreaElement, Te
     return () => {
       document.removeEventListener("mousedown", handleClickOutside);
     };
-  }, [onComplete, onCancel, text, wrapperRef]); // Dependencies
+  }, [onComplete, onCancel, text, wrapperRef, currentPosition]); // Dependencies
+
+  // Add drag event handlers
+  useEffect(() => {
+    if (!isDragging) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      e.preventDefault();
+      const newX = e.clientX / scale - dragOffset.x;
+      const newY = e.clientY / scale - dragOffset.y;
+      setCurrentPosition({ x: newX, y: newY });
+    };
+
+    const handleMouseUp = () => {
+      setIsDragging(false);
+    };
+
+    document.addEventListener("mousemove", handleMouseMove);
+    document.addEventListener("mouseup", handleMouseUp);
+
+    return () => {
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [isDragging, dragOffset, scale]);
 
   // Event handlers
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       if (text.trim()) {
-        onComplete(text);
+        onComplete(text, currentPosition);
       } else {
         onCancel();
       }
@@ -95,6 +124,18 @@ const TextInputComponent: React.ForwardRefRenderFunction<HTMLTextAreaElement, Te
 
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setText(e.target.value);
+  };
+
+  // Handle start dragging
+  const handleWrapperMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    // If clicking directly on the textarea, don't start dragging
+    if (e.target === internalInputRef.current) return;
+    
+    e.stopPropagation();
+    const offsetX = e.clientX / scale - currentPosition.x;
+    const offsetY = e.clientY / scale - currentPosition.y;
+    setDragOffset({ x: offsetX, y: offsetY });
+    setIsDragging(true);
   };
 
   // Assign forwarded ref to the textarea element
@@ -110,33 +151,56 @@ const TextInputComponent: React.ForwardRefRenderFunction<HTMLTextAreaElement, Te
     }
   };
 
-
   return (
     <div
       ref={wrapperRef}
       style={{
         position: "absolute",
-        left: `${position.x * scale}px`,
-        top: `${position.y * scale}px`,
+        left: `${currentPosition.x * scale}px`,
+        top: `${currentPosition.y * scale}px`,
         transformOrigin: "top left",
         zIndex: 1000,
+        cursor: isDragging ? "grabbing" : "grab",
       }}
-      // Prevent mousedown inside the wrapper from triggering the outside click handler
-      onMouseDown={(e) => e.stopPropagation()}
+      onMouseDown={handleWrapperMouseDown}
     >
       <div
         className={`
           relative
           ${isSticky
             ? "bg-yellow-200 border border-yellow-400 rounded shadow-md p-1"
-            : ""}
+            : "border border-blue-500 rounded shadow-md"}
         `}
         style={{
-          width: isSticky ? `${initialWidth || 200}px` : 'auto', // Use initialWidth if provided
+          width: isSticky ? `${initialWidth || 200}px` : (initialWidth ? `${initialWidth}px` : '160px'), // Use initialWidth if provided or default to 160px
           minWidth: '100px',
           height: isSticky ? `${initialHeight || 150}px` : 'auto', // Use initialHeight for sticky
+          minHeight: '80px', // Ensure minimum height for empty text
         }}
       >
+        {/* Add drag handle indicator at the top */}
+        <div 
+          className={`
+            w-full h-6 flex items-center justify-center
+            ${isSticky ? "bg-yellow-300 rounded-t" : "bg-blue-100 border-b border-blue-300"}
+            cursor-grab select-none
+          `}
+          onMouseDown={(e) => {
+            e.stopPropagation();
+            const offsetX = e.clientX / scale - currentPosition.x;
+            const offsetY = e.clientY / scale - currentPosition.y;
+            setDragOffset({ x: offsetX, y: offsetY });
+            setIsDragging(true);
+          }}
+          title="Drag to move"
+        >
+          <div className="flex space-x-1">
+            <div className="w-6 h-1 bg-gray-400 rounded-full"></div>
+            <div className="w-6 h-1 bg-gray-400 rounded-full"></div>
+            <div className="w-6 h-1 bg-gray-400 rounded-full"></div>
+          </div>
+        </div>
+        
         <textarea
           ref={assignRef} // Assign refs here
           value={text}
@@ -144,12 +208,12 @@ const TextInputComponent: React.ForwardRefRenderFunction<HTMLTextAreaElement, Te
           onKeyDown={handleKeyDown}
           className={`
             w-full min-h-[20px] p-2
-            outline-none resize-none rounded
+            outline-none resize-none rounded-b
             transition-colors duration-200
             ${
               isSticky
                 ? "bg-yellow-100 focus:bg-yellow-50"
-                : "bg-white bg-opacity-90 focus:bg-opacity-100 border border-blue-500 shadow-lg" // Enhanced focus style
+                : "bg-white bg-opacity-90 focus:bg-opacity-100 border-x border-b border-blue-500 shadow-lg" // Enhanced focus style
             }
           `}
           style={{ // Apply dynamic font styles
@@ -158,13 +222,15 @@ const TextInputComponent: React.ForwardRefRenderFunction<HTMLTextAreaElement, Te
             fontFamily: textOptions?.fontFamily || "Arial",
             fontWeight: textOptions?.bold ? 'bold' : 'normal',
             fontStyle: textOptions?.italic ? 'italic' : 'normal',
-            // Removed boxShadow here, handled by class potentially
+            cursor: "text", // Ensure cursor is text when over textarea
           }}
           placeholder={isSticky ? "Add note..." : "Add text..."}
           autoFocus // Rely on this for initial focus
+          onClick={(e) => e.stopPropagation()} // Prevent click from triggering drag
         />
+        
         {isSticky && (
-          <div className="absolute top-0 right-0 p-1 text-xs text-gray-500 opacity-75">
+          <div className="absolute top-6 right-0 p-1 text-xs text-gray-500 opacity-75">
             Esc/Click outside=Cancel, Enter=Save
           </div>
         )}

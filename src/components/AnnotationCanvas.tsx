@@ -37,12 +37,14 @@ import {
 
 interface TextInputProps {
   position: Point;
-  onComplete: (text: string) => void;
+  onComplete: (text: string, finalPosition?: Point) => void;
   onCancel: () => void;
   scale: number;
   isSticky: boolean;
   initialText?: string;
-  dimensions?: { width: number; height: number } | null;
+  initialWidth?: number;
+  initialHeight?: number;
+  textOptions?: AnnotationStyle['textOptions'];
 }
 
 interface AnnotationStyle {
@@ -1177,21 +1179,26 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
     }
   };
 
-  const handleTextComplete = (text: string) => {
+  const handleTextComplete = (text: string, finalPosition?: Point) => {
     setIsEditingText(false);
+    
+    // Use the finalPosition if provided (from dragging), otherwise use original position
+    const position = finalPosition || textInputPosition;
     
     if (editingAnnotation) {
       // Handle editing existing text annotation
       const updatedAnnotation = { 
         ...editingAnnotation,
         text,
+        // Update position if the text was moved
+        points: finalPosition ? [finalPosition] : editingAnnotation.points,
         style: {
           ...editingAnnotation.style,
           text,
         },
       };
       store.updateAnnotation(documentId, updatedAnnotation);
-    } else if (textInputPosition) {
+    } else if (position) {
       // Handle creating new text annotation
       const isSticky = stickyNoteScale > 0;
       
@@ -1200,10 +1207,9 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
         ? { color: '#FFD700', lineWidth: 1, opacity: 1 } // Minimal style - the createStickyNoteAnnotation will replace it
         : { ...currentStyle };
       
-      // Use the exact position from the preview
-      // This ensures the annotation appears exactly where the preview was shown
+      // Use the exact position from the preview or the final position after dragging
       handleTextToolCompletion(
-        textInputPosition,
+        position,
         text,
         isSticky,
         textStyle,
