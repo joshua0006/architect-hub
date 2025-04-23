@@ -1220,6 +1220,31 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     container.style.cursor = cursorMap[currentTool] || "default";
   }, [currentTool]);
 
+  // Add a complete implementation for the normalizeAnnotationForExport function that properly handles both arguments
+  const normalizeAnnotationForExport = useCallback((annotation: Annotation, originalViewport: any): Annotation => {
+    // Create a deep copy to avoid modifying the original
+    const normalizedAnnotation = JSON.parse(JSON.stringify(annotation));
+    
+    // PDF coordinates in annotations are stored relative to the PDF space coordinates
+    // For export, we need to ensure they're properly positioned in the exported PDF coordinate space
+    
+    // Check if the annotation has points
+    if (normalizedAnnotation.points && normalizedAnnotation.points.length > 0) {
+      // Transform each point from PDF space to export space
+      normalizedAnnotation.points = normalizedAnnotation.points.map((point: Point) => {
+        // In PDF.js, the viewport origin is the top-left, y-axis extends down
+        // No need to convert coordinates for our use case, but ensure they're in the correct range
+        // Make sure points are within the page boundaries
+        return {
+          x: Math.max(0, Math.min(point.x, originalViewport.width / originalViewport.scale)),
+          y: Math.max(0, Math.min(point.y, originalViewport.height / originalViewport.scale))
+        };
+      });
+    }
+    
+    return normalizedAnnotation;
+  }, []);
+
   // Export current page with annotations
   const handleExportCurrentPage = useCallback(async (format: "png" | "pdf" = "pdf") => {
     if (!page || !canvasRef.current || !viewport) {
@@ -1235,40 +1260,121 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
       const pageAnnotations = currentDoc?.annotations?.filter(
         a => a.pageNumber === currentPage
       ) || [];
-      // Create a canvas with both PDF and annotations
-      const exportCanvas = await createExportCanvas(
-        page, 
-        scale, 
-        pageAnnotations
-      );
-
-      // Ensure annotations are drawn at the correct scale
-      if (pageAnnotations.length > 0) {
-        const ctx = exportCanvas.canvas.getContext('2d');
-        if (ctx) {
-          // Draw annotations on top of the PDF content
-          pageAnnotations.forEach(annotation => {
-            try {
-              drawAnnotation(ctx, annotation, scale);
-            } catch (error) {
-              console.error("Error drawing annotation for export:", error, annotation);
-            }
-          });
-        }
-      }
       
-      if (format === "pdf") {
-        // Export to PDF with correct dimensions
-        exportToPDF(
-          exportCanvas.canvas, 
-          { width: viewport.width, height: viewport.height },
-          currentPage
+      if (format === "png") {
+        // For PNG export, use the canvas approach
+        const exportCanvas = await createExportCanvas(
+          page, 
+          scale, 
+          pageAnnotations
         );
-        showToast("PDF exported successfully with annotations", "success");
-      } else {
+
         // Export to PNG
         exportToPNG(exportCanvas.canvas, currentPage);
         showToast("PNG exported successfully with annotations", "success");
+      } else {
+        // For PDF, use pdf-lib to preserve original quality
+        // If no annotations, show a message - no need to modify the PDF
+        if (pageAnnotations.length === 0) {
+          showToast("No annotations on this page to export", "success");
+          setIsExporting(false);
+          return;
+        }
+        
+        // Get PDF data as ArrayBuffer
+        let pdfBytes: ArrayBuffer;
+        
+        if (typeof file === 'string') {
+          // File is a URL - fetch it
+          const response = await fetch(file);
+          pdfBytes = await response.arrayBuffer();
+        } else {
+          // File is a File object - read it
+          pdfBytes = await file.arrayBuffer();
+        }
+        
+        // Load the PDF document using pdf-lib to maintain original quality
+        const pdfDoc = await PDFDocument.load(pdfBytes);
+        
+        // Create a new document with just the current page
+        const newPdfDoc = await PDFDocument.create();
+        const [copiedPage] = await newPdfDoc.copyPages(pdfDoc, [currentPage - 1]); // pdf-lib uses 0-indexed pages
+        newPdfDoc.addPage(copiedPage);
+        
+        // Get the original page dimensions from PDF.js
+        const originalViewport = page.getViewport({ scale: 1.0 });
+        const width = originalViewport.width;
+        const height = originalViewport.height;
+        
+        // Create a canvas with just the annotations (transparent background)
+        const annotationCanvas = document.createElement("canvas");
+        annotationCanvas.width = width;
+        annotationCanvas.height = height;
+        
+        // Use alpha=true for transparency
+        const ctx = annotationCanvas.getContext("2d", { alpha: true });
+        if (!ctx) {
+          throw new Error("Failed to get canvas context");
+        }
+        
+        // Make background transparent
+        ctx.clearRect(0, 0, width, height);
+        
+        // Normalize annotation coordinates for this specific page
+        const normalizedAnnotations = pageAnnotations.map(annotation => 
+          normalizeAnnotationForExport(annotation, originalViewport)
+        );
+        
+        // Draw regular annotations
+        const regularAnnotations = normalizedAnnotations.filter(a => a.type !== 'highlight');
+        regularAnnotations.forEach(annotation => {
+          try {
+            drawAnnotation(ctx, annotation, 1.0, true); // Use scale 1.0 and isForExport=true
+          } catch (err) {
+            console.error("Error drawing annotation for export:", err);
+          }
+        });
+        
+        // Draw highlights with multiply blend mode
+        const highlightAnnotations = normalizedAnnotations.filter(a => a.type === 'highlight');
+        if (highlightAnnotations.length > 0) {
+          ctx.save();
+          ctx.globalCompositeOperation = 'multiply';
+          
+          highlightAnnotations.forEach(annotation => {
+            try {
+              drawAnnotation(ctx, annotation, 1.0, true); // Use scale 1.0 and isForExport=true
+            } catch (err) {
+              console.error("Error drawing highlight for export:", err);
+            }
+          });
+          
+          ctx.restore();
+        }
+        
+        // Convert annotation canvas to image
+        const annotationImage = await newPdfDoc.embedPng(annotationCanvas.toDataURL("image/png"));
+        
+        // Get the PDF page (first page in our new document)
+        const pdfPage = newPdfDoc.getPage(0);
+        
+        // Add annotation image as an overlay to the original page
+        pdfPage.drawImage(annotationImage, {
+          x: 0,
+          y: 0,
+          width: width,
+          height: height,
+        });
+        
+        // Save the PDF with original content plus annotation overlays
+        const modifiedPdfBytes = await newPdfDoc.save();
+        
+        // Create a blob and save it
+        const blob = new Blob([modifiedPdfBytes], { type: 'application/pdf' });
+        const fileName = `annotated-page-${currentPage}.pdf`;
+        
+        saveAs(blob, fileName);
+        showToast("PDF exported successfully with original quality", "success");
       }
     } catch (error) {
       console.error("Export error:", error);
@@ -1276,101 +1382,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     } finally {
       setIsExporting(false);
     }
-  }, [page, canvasRef, viewport, scale, currentPage, document, documentId, showToast]);
-  
-  // Add a new function to download just the current page without annotations
-  const downloadCurrentPage = useCallback(async () => {
-    if (!pdf || !page || !viewport) {
-      showToast("Cannot download - PDF not fully loaded", "error");
-      return;
-    }
-    
-    try {
-      setIsExporting(true);
-      
-      // Get annotations for the current page from store
-      const currentDoc = document ? useAnnotationStore.getState().documents[documentId] : null;
-      const pageAnnotations = currentDoc?.annotations?.filter(
-        a => a.pageNumber === currentPage
-      ) || [];
-      
-      
-      // Create a new PDF document with just the current page
-      const pdfDoc = new jsPDF({
-        orientation: viewport.width > viewport.height ? "landscape" : "portrait",
-        unit: "pt",
-        format: [viewport.width, viewport.height]
-      });
-      
-      // Create a temporary canvas for rendering
-      const canvas = document.createElement("canvas");
-      canvas.width = viewport.width;
-      canvas.height = viewport.height;
-      const ctx = canvas.getContext("2d", { alpha: true });
-      
-      if (!ctx) {
-        throw new Error("Failed to get canvas context");
-      }
-      
-      // Set white background
-      ctx.fillStyle = "#FFFFFF";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      
-      // Render the current page to the canvas
-      const renderTask = page.render({
-        canvasContext: ctx,
-        viewport: page.getViewport({ scale })
-      });
-      
-      await renderTask.promise;
-      
-      // Draw annotations on top if there are any
-      if (pageAnnotations.length > 0) {
-        
-        // Draw regular annotations first
-        const regularAnnotations = pageAnnotations.filter(a => a.type !== 'highlight');
-        regularAnnotations.forEach(annotation => {
-          try {
-            drawAnnotation(ctx, annotation, scale);
-          } catch (err) {
-            console.error("Error drawing annotation during download:", err);
-          }
-        });
-        
-        // Draw highlights with multiply blend mode
-        const highlightAnnotations = pageAnnotations.filter(a => a.type === 'highlight');
-        if (highlightAnnotations.length > 0) {
-          ctx.save();
-          ctx.globalCompositeOperation = 'multiply';
-          
-          highlightAnnotations.forEach(annotation => {
-            try {
-              drawAnnotation(ctx, annotation, scale);
-            } catch (err) {
-              console.error("Error drawing highlight during download:", err);
-            }
-          });
-          
-          ctx.restore();
-        }
-      }
-      
-      // Add the annotated page to the PDF
-      const imgData = canvas.toDataURL("image/jpeg", 0.95);
-      pdfDoc.addImage(imgData, "JPEG", 0, 0, viewport.width, viewport.height);
-      
-      // Save the PDF with a name including the page number
-      const fileName = `page-${currentPage}${documentId ? `-${documentId}` : ''}-with-annotations.pdf`;
-      pdfDoc.save(fileName);
-      
-      showToast(`Page ${currentPage} with annotations downloaded successfully`, "success");
-    } catch (error) {
-      console.error("Download page error:", error);
-      showToast(`Download failed: ${error instanceof Error ? error.message : 'Unknown error'}`, "error");
-    } finally {
-      setIsExporting(false);
-    }
-  }, [pdf, page, viewport, scale, currentPage, documentId, document, showToast]);
+  }, [page, canvasRef, viewport, scale, currentPage, document, documentId, file, showToast, normalizeAnnotationForExport]);
   
   // Export all annotations as JSON
   const handleExportAnnotations = useCallback(() => {
@@ -1426,52 +1438,63 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     input.click();
   }, [documentId, showToast]);
 
-  // Auto fit to width when page is loaded
-  useEffect(() => {
-    if (page && containerRef.current && !disableFitToWidthRef.current) {
-      // Wait a moment for the page to be fully rendered
-      setTimeout(() => {
-        handleFitToWidth();
-      }, 200);
-    }
-  }, [page, handleFitToWidth]);
-
   // Function to generate a canvas with PDF content and annotations
-  const createAnnotatedCanvas = useCallback(async (targetPage: PDFPageProxy, annotations: Annotation[], qualityScale: number = 1.0) => {
+  const createAnnotatedCanvas = useCallback(async (targetPage: PDFPageProxy, annotations: Annotation[], qualityOptions: { scale?: number, preserveRatio?: boolean, imageQuality?: number } = {}) => {
     // Create a new canvas for exporting
     const exportCanvas = document.createElement("canvas");
-    const viewport = targetPage.getViewport({ scale: scale * qualityScale });
-    exportCanvas.width = viewport.width;
-    exportCanvas.height = viewport.height;
+    
+    // Extract options with defaults - increased default quality scale
+    const qualityScale = qualityOptions.scale ?? 2.0; // Increased from 1.0 to 2.0 for better quality
+    const preserveRatio = qualityOptions.preserveRatio ?? true;
+    const imageQuality = qualityOptions.imageQuality ?? 1.0; // New parameter for controlling image quality
+    
+    // Get the original viewport with scale=1 to preserve original dimensions if needed
+    let baseViewport = targetPage.getViewport({ scale: 1.0 });
+    let viewport;
+    
+    if (preserveRatio) {
+      // Use original page dimensions with quality scaling
+      viewport = targetPage.getViewport({ scale: qualityScale });
+    } else {
+      // Use current on-screen scale (may distort aspect ratio)
+      viewport = targetPage.getViewport({ scale: scale * qualityScale });
+    }
+    
+    // Set canvas dimensions with higher limit for better quality
+    const MAX_DIMENSION = 4000; // Increased from default for higher resolution
+    const scaleRatio = Math.min(1.0, MAX_DIMENSION / Math.max(viewport.width, viewport.height));
+    
+    exportCanvas.width = Math.floor(viewport.width * scaleRatio);
+    exportCanvas.height = Math.floor(viewport.height * scaleRatio);
     
     // Get 2D context with alpha support for better annotation rendering
-    const ctx = exportCanvas.getContext("2d", { alpha: true })!;
+    const ctx = exportCanvas.getContext("2d", { alpha: true, willReadFrequently: true })!;
     
     // Set white background
     ctx.fillStyle = "#FFFFFF";
     ctx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
     
-    
-    // Enable high-quality image rendering on the context
+    // Enable high-quality image rendering on the context with better settings
     (ctx as any).imageSmoothingEnabled = true;
     (ctx as any).imageSmoothingQuality = 'high';
     
+    // Use print intent for better PDF quality
     const renderTask = targetPage.render({
       canvasContext: ctx,
       viewport: viewport,
-      // Use print intent for better text quality in exports
-      intent: "print"
+      intent: "print" // Use print intent for maximum quality
     });
     
     // Wait for PDF rendering to complete
     await renderTask.promise;
     
-    
     // First draw non-highlight annotations
     const regularAnnotations = annotations.filter(a => a.type !== 'highlight');
     regularAnnotations.forEach(annotation => {
       try {
-        drawAnnotation(ctx, annotation, scale * qualityScale);
+        // Use the viewport's scale for annotations
+        const annotationScale = preserveRatio ? qualityScale : scale * qualityScale;
+        drawAnnotation(ctx, annotation, annotationScale, true); // Always use isForExport=true
       } catch (err) {
         console.error("Error drawing annotation during export:", err);
       }
@@ -1485,7 +1508,9 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
       
       highlightAnnotations.forEach(annotation => {
         try {
-          drawAnnotation(ctx, annotation, scale * qualityScale);
+          // Use the viewport's scale for annotations
+          const annotationScale = preserveRatio ? qualityScale : scale * qualityScale;
+          drawAnnotation(ctx, annotation, annotationScale, true); // Always use isForExport=true
         } catch (err) {
           console.error("Error drawing highlight during export:", err);
         }
@@ -1494,11 +1519,164 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
       ctx.restore();
     }
     
-    return { canvas: exportCanvas, viewport };
+    return { canvas: exportCanvas, viewport, baseViewport, imageQuality };
   }, [scale]);
+
+  // Add a new function to download just the current page without annotations
+  const downloadCurrentPage = useCallback(async () => {
+    if (!pdf || !page || !viewport) {
+      showToast("Cannot download - PDF not fully loaded", "error");
+      return;
+    }
+    
+    try {
+      setIsExporting(true);
+      
+      // Get annotations for the current page from store
+      const currentDoc = document ? useAnnotationStore.getState().documents[documentId] : null;
+      const pageAnnotations = currentDoc?.annotations?.filter(
+        a => a.pageNumber === currentPage
+      ) || [];
+      
+      // If no annotations, show a message - no need to modify the PDF
+      if (pageAnnotations.length === 0) {
+        showToast("No annotations on this page to export", "success");
+        setIsExporting(false);
+        return;
+      }
+      
+      // Use pdf-lib to preserve the original PDF content
+      // First get the PDF data as an ArrayBuffer
+      let pdfBytes: ArrayBuffer;
+      
+      if (typeof file === 'string') {
+        // File is a URL - fetch it
+        const response = await fetch(file);
+        pdfBytes = await response.arrayBuffer();
+      } else {
+        // File is a File object - read it
+        pdfBytes = await file.arrayBuffer();
+      }
+      
+      // Load the PDF document using pdf-lib to maintain original quality
+      const pdfDoc = await PDFDocument.load(pdfBytes);
+      
+      // Create a new document with just the current page
+      const newPdfDoc = await PDFDocument.create();
+      const [copiedPage] = await newPdfDoc.copyPages(pdfDoc, [currentPage - 1]); // pdf-lib uses 0-indexed pages
+      newPdfDoc.addPage(copiedPage);
+      
+      // Get the original page dimensions from PDF.js
+      const originalViewport = page.getViewport({ scale: 1.0 });
+      const width = originalViewport.width;
+      const height = originalViewport.height;
+      
+      // Define high-quality scale factor
+      const qualityScaleFactor = 2.0; // Use 2x scale for good quality
+      
+      // Create a canvas with just the annotations (transparent background)
+      const annotationCanvas = document.createElement("canvas");
+      
+      // Increase canvas size for higher quality
+      const scaledWidth = Math.floor(width * qualityScaleFactor);
+      const scaledHeight = Math.floor(height * qualityScaleFactor);
+      annotationCanvas.width = scaledWidth;
+      annotationCanvas.height = scaledHeight;
+      
+      // Use alpha=true for transparency
+      const ctx = annotationCanvas.getContext("2d", { alpha: true });
+      if (!ctx) {
+        throw new Error("Failed to get canvas context");
+      }
+      
+      // Set high quality smoothing
+      (ctx as any).imageSmoothingEnabled = true;
+      (ctx as any).imageSmoothingQuality = 'high';
+      
+      // Make background transparent
+      ctx.clearRect(0, 0, scaledWidth, scaledHeight);
+      
+      // Apply quality scaling if needed
+      if (Math.abs(qualityScaleFactor - 1.0) > 0.001) {
+        ctx.scale(qualityScaleFactor, qualityScaleFactor);
+      }
+      
+      // Normalize annotation coordinates for this specific page
+      const normalizedAnnotations = pageAnnotations.map(annotation => 
+        normalizeAnnotationForExport(annotation, originalViewport)
+      );
+      
+      // Draw regular annotations
+      const regularAnnotations = normalizedAnnotations.filter(a => a.type !== 'highlight');
+      regularAnnotations.forEach(annotation => {
+        try {
+          drawAnnotation(ctx, annotation, 1.0, true); // Use scale 1.0 and isForExport=true
+        } catch (err) {
+          console.error("Error drawing annotation for single page export:", err);
+        }
+      });
+      
+      // Draw highlights with multiply blend mode
+      const highlightAnnotations = normalizedAnnotations.filter(a => a.type === 'highlight');
+      if (highlightAnnotations.length > 0) {
+        ctx.save();
+        ctx.globalCompositeOperation = 'multiply';
+        
+        highlightAnnotations.forEach(annotation => {
+          try {
+            drawAnnotation(ctx, annotation, 1.0, true); // Use scale 1.0 and isForExport=true
+          } catch (err) {
+            console.error("Error drawing highlight for single page export:", err);
+          }
+        });
+        
+        ctx.restore();
+      }
+      
+      // Convert annotation canvas to image with max quality
+      const annotationImage = await newPdfDoc.embedPng(annotationCanvas.toDataURL("image/png", 1.0));
+      
+      // Get the PDF page (first page in our new document)
+      const pdfPage = newPdfDoc.getPage(0);
+      
+      // Add annotation image as an overlay to the original page
+      pdfPage.drawImage(annotationImage, {
+        x: 0,
+        y: 0,
+        width: width,
+        height: height,
+      });
+      
+      // Save the PDF with original content plus annotation overlays
+      const modifiedPdfBytes = await newPdfDoc.save({ useObjectStreams: false, addDefaultPage: false });
+      
+      // Create a blob and save it
+      const blob = new Blob([modifiedPdfBytes], { type: 'application/pdf' });
+      const fileName = `page-${currentPage}${documentId ? `-${documentId}` : ''}-with-annotations.pdf`;
+      
+      saveAs(blob, fileName);
+      showToast(`Page ${currentPage} exported with high-quality annotations`, "success");
+      
+    } catch (error) {
+      console.error("Download page error:", error);
+      showToast(`Download failed: ${error instanceof Error ? error.message : 'Unknown error'}`, "error");
+    } finally {
+      setIsExporting(false);
+    }
+  }, [pdf, page, viewport, currentPage, documentId, document, file, showToast, normalizeAnnotationForExport]);
   
+  // Auto fit to width when page is loaded
+  useEffect(() => {
+    if (page && containerRef.current && !disableFitToWidthRef.current) {
+      // Wait a moment for the page to be fully rendered
+      setTimeout(() => {
+        handleFitToWidth();
+      }, 200);
+    }
+  }, [page, handleFitToWidth]);
+
   // Export all pages with annotations
-  const handleExportAllPages = useCallback(async (quality?: "standard" | "hd") => {
+  const handleExportAllPages = useCallback(async (quality?: "standard" | "hd" | "optimal") => {
     if (!pdf || !canvasRef.current || !viewport) {
       showToast("Cannot export - PDF not fully loaded", "error");
       return;
@@ -1514,49 +1692,126 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
         return;
       }
       
-      // Set scale factor based on requested quality
-      const qualityScale = quality === "hd" ? 2.0 : 1.0;
-      const qualityLabel = quality === "hd" ? "HD" : "Standard";
+      const qualityLabel = quality === "hd" ? "HD" : quality === "optimal" ? "Optimal" : "Standard";
+      
+      // Define scale factor based on quality setting
+      const qualityScaleFactor = quality === "hd" ? 3.0 : 
+                                quality === "optimal" ? 2.0 : 1.0;
       
       showToast(`Starting export of all pages with ${qualityLabel} quality...`, "success");
       
-      // Create a PDF with multiple pages
-      const multiPagePdf = new jsPDF({
-        orientation: viewport.width > viewport.height ? "landscape" : "portrait",
-        unit: "px",
-        format: [viewport.width, viewport.height],
-      });
+      // Use pdf-lib to preserve the original PDF content
+      // First get the PDF data as an ArrayBuffer
+      let pdfBytes: ArrayBuffer;
       
-      // Export each page
+      if (typeof file === 'string') {
+        // File is a URL - fetch it
+        const response = await fetch(file);
+        pdfBytes = await response.arrayBuffer();
+      } else {
+        // File is a File object - read it
+        pdfBytes = await file.arrayBuffer();
+      }
+      
+      // Load the PDF document using pdf-lib to maintain original quality
+      const pdfDoc = await PDFDocument.load(pdfBytes);
+      
+      // For each page, create a layer with the annotations
       for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
         try {
-          // Get the page
-          const pageObj = await pdf.getPage(pageNum);
-          
-          // Get annotations for this page
+          // Get annotations for this page from our store
           const pageAnnotations = currentDoc.annotations.filter(
             (a: Annotation) => a.pageNumber === pageNum
           );
           
-          // Create a canvas with both PDF content and annotations
-          // For HD exports, we'll use a higher scale factor when rendering
-          const exportCanvas = await createAnnotatedCanvas(pageObj, pageAnnotations, qualityScale);
-          
-          // If not the first page, add a new page to the PDF
-          if (pageNum > 1) {
-            multiPagePdf.addPage([viewport.width, viewport.height]);
+          // Skip page processing if there are no annotations
+          if (pageAnnotations.length === 0) {
+            continue;
           }
           
-          // Add the page with annotations to the PDF
-          // Use higher image quality when exporting HD
-          multiPagePdf.addImage(
-            exportCanvas.canvas.toDataURL("image/png", quality === "hd" ? 1.0 : 0.92),
-            "PNG",
-            0,
-            0,
-            viewport.width,
-            viewport.height
+          // Get the page from PDF.js for rendering
+          const pageObj = await pdf.getPage(pageNum);
+          
+          // Get the original page dimensions
+          const originalViewport = pageObj.getViewport({ scale: 1.0 });
+          const width = originalViewport.width;
+          const height = originalViewport.height;
+          
+          // Create a canvas with just the annotations (transparent background)
+          const annotationCanvas = document.createElement("canvas");
+          
+          // Increase canvas size based on quality setting
+          const scaledWidth = Math.floor(width * qualityScaleFactor);
+          const scaledHeight = Math.floor(height * qualityScaleFactor);
+          annotationCanvas.width = scaledWidth;
+          annotationCanvas.height = scaledHeight;
+          
+          // Use alpha=true for transparency
+          const ctx = annotationCanvas.getContext("2d", { alpha: true });
+          if (!ctx) {
+            throw new Error("Failed to get canvas context");
+          }
+          
+          // Make background transparent
+          ctx.clearRect(0, 0, scaledWidth, scaledHeight);
+          
+          // Set high quality smoothing
+          (ctx as any).imageSmoothingEnabled = true;
+          (ctx as any).imageSmoothingQuality = 'high';
+          
+          // Apply quality scaling if needed
+          if (Math.abs(qualityScaleFactor - 1.0) > 0.001) {
+            ctx.scale(qualityScaleFactor, qualityScaleFactor);
+          }
+          
+          
+          // Normalize annotation coordinates for this specific page
+          const normalizedAnnotations = pageAnnotations.map((annotation: Annotation) => 
+            normalizeAnnotationForExport(annotation, originalViewport)
           );
+          
+          // Draw annotations
+          // First regular annotations
+          const regularAnnotations = normalizedAnnotations.filter(a => a.type !== 'highlight');
+          regularAnnotations.forEach(annotation => {
+            try {
+              drawAnnotation(ctx, annotation, 1.0, true); // Use scale 1.0 and isForExport=true
+            } catch (err) {
+              console.error("Error drawing annotation for PDF export:", err);
+            }
+          });
+          
+          // Then highlights with multiply blend mode
+          const highlightAnnotations = normalizedAnnotations.filter(a => a.type === 'highlight');
+          if (highlightAnnotations.length > 0) {
+            ctx.save();
+            ctx.globalCompositeOperation = 'multiply';
+            
+            highlightAnnotations.forEach(annotation => {
+              try {
+                drawAnnotation(ctx, annotation, 1.0, true); // Use scale 1.0 and isForExport=true
+              } catch (err) {
+                console.error("Error drawing highlight for PDF export:", err);
+              }
+            });
+            
+            ctx.restore();
+          }
+          
+          // Convert annotation canvas to image with high quality settings
+          const pngOptions = { useCompression: quality !== "hd" };
+          const annotationImage = await pdfDoc.embedPng(annotationCanvas.toDataURL("image/png", 1.0)); // Use maximum quality 1.0
+          
+          // Get the PDF page
+          const pdfPage = pdfDoc.getPage(pageNum - 1); // pdf-lib uses 0-indexed pages
+          
+          // Add annotation image as an overlay to the original page
+          pdfPage.drawImage(annotationImage, {
+            x: 0,
+            y: 0,
+            width: width,
+            height: height,
+          });
           
         } catch (error) {
           console.error(`Error processing page ${pageNum}:`, error);
@@ -1564,18 +1819,25 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
         }
       }
       
-      // Save the complete PDF with a timestamp and quality indicator
+      // Save the PDF with original content plus annotation overlays
+      const compression = quality === "hd" ? 0 : quality === "optimal" ? 0.5 : 0.8; // Lower compression for higher quality
+      const modifiedPdfBytes = await pdfDoc.save({ useObjectStreams: false, addDefaultPage: false, objectsPerTick: 50 });
+      
+      // Create a blob and save it
+      const blob = new Blob([modifiedPdfBytes], { type: 'application/pdf' });
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const qualitySuffix = quality === "hd" ? "-HD" : "";
-      multiPagePdf.save(`${documentId}-annotated${qualitySuffix}-${timestamp}.pdf`);
+      const qualitySuffix = quality === "hd" ? "-HD" : quality === "optimal" ? "-Optimal" : "";
+      
+      saveAs(blob, `${documentId}-annotated${qualitySuffix}-${timestamp}.pdf`);
       showToast(`All pages exported successfully with ${qualityLabel} quality`, "success");
+      
     } catch (error) {
       console.error("Export all pages error:", error);
       showToast(`Export failed: ${error instanceof Error ? error.message : 'Unknown error'}`, "error");
     } finally {
       setIsExporting(false);
     }
-  }, [pdf, canvasRef, viewport, scale, document, documentId, showToast, createAnnotatedCanvas]);
+  }, [pdf, file, viewport, documentId, document, showToast, normalizeAnnotationForExport]);
 
   // Set up event listeners
   useEffect(() => {

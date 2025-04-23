@@ -1,5 +1,5 @@
 import { PDFPageProxy } from "pdfjs-dist";
-import { Annotation } from "../types/annotation";
+import { Annotation, Point } from "../types/annotation";
 import { drawAnnotation } from "../utils/drawingUtils";
 import { jsPDF } from "jspdf";
 import { useAnnotationStore } from "../store/useAnnotationStore";
@@ -26,26 +26,40 @@ export const createExportCanvas = async (
     intent: "display"
   }).promise;
 
+  // Make sure annotations are within the viewport boundaries
+  const normalizedAnnotations = annotations.map(annotation => {
+    const normalizedAnnotation = JSON.parse(JSON.stringify(annotation));
+    if (normalizedAnnotation.points && normalizedAnnotation.points.length > 0) {
+      normalizedAnnotation.points = normalizedAnnotation.points.map((point: Point) => {
+        return {
+          x: Math.max(0, Math.min(point.x, viewport.width / scale)),
+          y: Math.max(0, Math.min(point.y, viewport.height / scale))
+        };
+      });
+    }
+    return normalizedAnnotation;
+  });
+
   // Draw annotations in two passes
   // First pass: Draw all non-highlight annotations
-  const regularAnnotations = annotations.filter(a => a.type !== 'highlight');
+  const regularAnnotations = normalizedAnnotations.filter(a => a.type !== 'highlight');
   regularAnnotations.forEach((annotation) => {
     try {
-      drawAnnotation(ctx, annotation, scale);
+      drawAnnotation(ctx, annotation, scale, true);
     } catch (error) {
       console.error("Error drawing annotation:", error, annotation);
     }
   });
   
   // Second pass: Draw highlights with proper blending
-  const highlightAnnotations = annotations.filter(a => a.type === 'highlight');
+  const highlightAnnotations = normalizedAnnotations.filter(a => a.type === 'highlight');
   if (highlightAnnotations.length > 0) {
     ctx.save();
     ctx.globalCompositeOperation = 'multiply';
     
     highlightAnnotations.forEach((annotation) => {
       try {
-        drawAnnotation(ctx, annotation, scale);
+        drawAnnotation(ctx, annotation, scale, true);
       } catch (error) {
         console.error("Error drawing highlight:", error, annotation);
       }
