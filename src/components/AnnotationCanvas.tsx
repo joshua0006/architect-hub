@@ -2101,7 +2101,7 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
       )}
       {showSaveButton && hasUnsavedChanges && (
         <button
-          className={`absolute top-4 right-4 z-20 font-medium py-2 px-4 rounded-md shadow-md transition-all duration-200 flex items-center
+          className={`fixed top-100 right-20 z-50 font-medium py-2 px-4 rounded-md shadow-md transition-all duration-200 flex items-center
             ${isSaving 
               ? 'bg-gray-500 cursor-wait' 
               : saveSuccess 
