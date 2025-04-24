@@ -1894,6 +1894,9 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
       const isUserInteraction = source === 'userDrawing' || source === 'userEdit' || 
                                source === 'userAction' || forceRender;
       
+      // Remote user interactions (from Firebase) should also trigger immediate render
+      const isRemoteInteraction = source === 'remoteUser';
+      
       // If there's a pending render timeout, clear it
       if (renderTimeout) {
         clearTimeout(renderTimeout);
@@ -1906,8 +1909,8 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
         currentPageAnnotations = getAnnotationsForPage(documentId, targetPageNumber);
       }
       
-      // If this is from user interaction or deletion or if annotations are empty, render immediately
-      if (isUserInteraction || wasDeleted || currentPageAnnotations.length === 0) {
+      // If this is from user interaction, remote user, deletion or if annotations are empty, render immediately
+      if (isUserInteraction || isRemoteInteraction || wasDeleted || currentPageAnnotations.length === 0) {
         lastRenderTime = Date.now();
         
         // Only render if the event is for the current page
@@ -1931,9 +1934,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
           }
           
           // Immediate render - even shorter delay
-          setTimeout(() => {
-            renderPdfPage();
-          }, 0); // Immediate execution in next tick
+          renderPdfPage();
         }
         return;
       }
@@ -1950,7 +1951,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
             renderedPagesRef.current.delete(currentPage);
             renderPdfPage();
           }
-        }, 50); // Very short delay for better responsiveness
+        }, 20); // Very short delay for better responsiveness
         
         return;
       }
@@ -1970,9 +1971,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
         }
         
         // Immediate render
-        setTimeout(() => {
-          renderPdfPage();
-        }, 0);
+        renderPdfPage();
       }
     };
     
@@ -3349,6 +3348,12 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
         // Get the current annotations to compare
         const currentAnnots = useAnnotationStore.getState().documents[documentId]?.annotations || [];
         
+        // Skip update processing if it's from a local change to avoid feedback loop
+        if (isLocalChange && JSON.stringify(currentAnnots) === JSON.stringify(updatedAnnotations)) {
+          console.log('[PDFViewer] Skipping local change feedback');
+          return;
+        }
+        
         // Log the before/after counts for debugging purposes
         console.log(`[PDFViewer] Annotations comparison - Local: ${currentAnnots.length}, Remote: ${updatedAnnotations?.length || 0}`);
         
@@ -3413,8 +3418,30 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
         // Find added annotation IDs (present in updated but not in current)
         const addedIds = Array.from(updatedIds).filter(id => !currentIds.has(id));
         
+        // Check for modified annotations (same ID but different content)
+        const modifiedIds: string[] = [];
+        Array.from(updatedIds).forEach(id => {
+          if (currentIds.has(id)) {
+            const currentAnnot = currentAnnots.find(a => a.id === id);
+            const updatedAnnot = updatedAnnotations?.find(a => a.id === id);
+            // Do a deep comparison of the annotation data
+            if (JSON.stringify(currentAnnot) !== JSON.stringify(updatedAnnot)) {
+              modifiedIds.push(id);
+            }
+          }
+        });
+        
         const wasAnnotationDeleted = deletedIds.length > 0;
         const wasAnnotationAdded = addedIds.length > 0;
+        const wasAnnotationModified = modifiedIds.length > 0;
+        
+        // Check if there are any changes that require rendering
+        const hasAnyChanges = wasAnnotationDeleted || wasAnnotationAdded || wasAnnotationModified;
+        
+        if (!hasAnyChanges) {
+          console.log('[PDFViewer] No changes detected in annotations update');
+          return;
+        }
         
         if (wasAnnotationDeleted) {
           console.log(`[PDFViewer] Detected ${deletedIds.length} annotation deletions from remote user`);
@@ -3425,6 +3452,9 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
         }
         if (wasAnnotationAdded) {
           console.log(`[PDFViewer] Detected ${addedIds.length} new annotations from remote user`);
+        }
+        if (wasAnnotationModified) {
+          console.log(`[PDFViewer] Detected ${modifiedIds.length} modified annotations from remote user`);
         }
         
         // Find all affected pages to ensure proper re-rendering
@@ -3440,9 +3470,9 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
           });
         }
         
-        // Add pages with new annotations to affected pages
-        if (wasAnnotationAdded) {
-          addedIds.forEach(id => {
+        // Add pages with new or modified annotations to affected pages
+        if (wasAnnotationAdded || wasAnnotationModified) {
+          [...addedIds, ...modifiedIds].forEach(id => {
             const annotation = updatedAnnotations?.find(a => a.id === id);
             if (annotation) {
               affectedPages.add(annotation.pageNumber);
@@ -3504,10 +3534,8 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
               }
             }
             
-            // Force a PDF page re-render after a short delay
-            setTimeout(() => {
-              renderPdfPage();
-            }, 50);
+            // Force a PDF page re-render immediately
+            renderPdfPage();
           }
         });
         
@@ -3524,7 +3552,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
       // If subscription fails, fall back to non-realtime data
       useAnnotationStore.getState().loadFromFirebase(documentId);
     }
-  }, [documentId, currentPage, renderPdfPage]);
+  }, [documentId, currentPage, renderPdfPage, isLocalChange]);
 
   // Effect to set up and clean up subscription
   useEffect(() => {
@@ -3602,4 +3630,58 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
       document.removeEventListener('annotationRefresh', handleAnnotationRefresh);
     };
   }, [currentPage, renderPdfPage]);
+
+  // Add an effect for polling annotations as a fallback
+  useEffect(() => {
+    if (!documentId || !isViewerReady) return;
+    
+    // Set up polling for annotations as a fallback for real-time updates
+    const pollInterval = 3000; // Poll every 3 seconds
+    const pollTimeout = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        // Only poll when the document is visible
+        annotationService.loadAnnotationsFromFirebase(documentId).then((polledAnnotations: Annotation[] | null) => {
+          if (!polledAnnotations) return;
+          
+          // Compare with current annotations
+          const currentAnnots = useAnnotationStore.getState().documents[documentId]?.annotations || [];
+          
+          // Skip if there are no changes to avoid unnecessary updates
+          if (JSON.stringify(currentAnnots) === JSON.stringify(polledAnnotations)) {
+            return;
+          }
+          
+          // If we detected changes, update the local store
+          console.log('[PDFViewer] Poll detected annotation changes, updating...');
+          
+          // Create a fake remote user event to trigger a refresh
+          const event = new CustomEvent('annotationChanged', {
+            detail: {
+              source: 'remoteUser',
+              documentId,
+              pageNumber: currentPage,
+              forceRender: true
+            }
+          });
+          document.dispatchEvent(event);
+          
+          // Update the store with the latest annotations
+          setIsLocalChange(false);
+          useAnnotationStore.getState().importAnnotations(documentId, polledAnnotations || [], 'replace');
+          
+          // Reset local change flag after a short delay
+          setTimeout(() => {
+            setIsLocalChange(true);
+          }, 100);
+        }).catch((err: Error) => {
+          console.error('[PDFViewer] Error polling annotations:', err);
+        });
+      }
+    }, pollInterval);
+    
+    // Clean up interval on unmount
+    return () => {
+      clearInterval(pollTimeout);
+    };
+  }, [documentId, isViewerReady, currentPage]);
 };
