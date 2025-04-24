@@ -3231,8 +3231,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     };
   }, [pageChangeInProgress, isRendering]);
 
-  // Add saveAnnotationsToFirebase function after the handleExportAnnotations function
-  
   // Save annotations to Firebase
   const saveAnnotationsToFirebase = useCallback(() => {
     try {
@@ -3244,7 +3242,11 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     }
   }, [documentId]);
   
-  // Auto-save annotations every 60 seconds
+  // Create a reference for tracking the last user who made changes
+  const lastEditorRef = useRef<string | null>(null);
+  const [isLocalChange, setIsLocalChange] = useState<boolean>(true);
+  
+  // Auto-save annotations when they change, but not when they're updated from Firebase
   useEffect(() => {
     if (!documentId) return;
     
@@ -3253,28 +3255,42 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     
     // Set up auto-save interval
     const autoSaveInterval = setInterval(() => {
-      saveAnnotationsToFirebase();
-    }, 60000); // Save every 60 seconds
+      if (isLocalChange) {
+        saveAnnotationsToFirebase();
+      }
+    }, 5000); // Save every 5 seconds if there are local changes
     
     // Clean up interval when component unmounts
     return () => {
       clearInterval(autoSaveInterval);
       // Save one final time when leaving the page
-      saveAnnotationsToFirebase();
+      if (isLocalChange) {
+        saveAnnotationsToFirebase();
+      }
     };
-  }, [documentId, saveAnnotationsToFirebase]);
+  }, [documentId, saveAnnotationsToFirebase, isLocalChange]);
   
-  // Save to Firebase when annotations change
+  // Save to Firebase immediately when annotations change (with debounce)
   useEffect(() => {
     const annotations = getAnnotationsForPage(documentId, currentPage);
-    const debouncedSave = debounce(() => {
-      saveAnnotationsToFirebase();
-    }, 2000); // Debounce to avoid too many saves
     
-    if (annotations.length > 0) {
+    // Only save if this is a local change, not an update from Firebase
+    if (isLocalChange && annotations.length > 0) {
+      const debouncedSave = debounce(() => {
+        saveAnnotationsToFirebase();
+        // After saving, dispatch an event to notify the annotation canvas to update
+        const event = new CustomEvent('annotationSaved', {
+          detail: { source: 'localUser', documentId, pageNumber: currentPage }
+        });
+        document.dispatchEvent(event);
+      }, 500); // Shorter debounce for more responsive real-time updates
+      
       debouncedSave();
+      
+      // Cleanup function to cancel debounce if component unmounts
+      return () => debouncedSave.cancel();
     }
-  }, [documentId, currentPage, getAnnotationsForPage, saveAnnotationsToFirebase]);
+  }, [documentId, currentPage, getAnnotationsForPage, saveAnnotationsToFirebase, isLocalChange]);
   
   // Add keyboard shortcut for manually saving annotations (Ctrl+S)
   useEffect(() => {
@@ -3283,7 +3299,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
         e.preventDefault(); // Prevent browser save
         saveAnnotationsToFirebase();
-        showToast("Annotations saved to Firebase", "success");
+        showToast("Annotations saved", "success");
       }
     };
 
@@ -3302,10 +3318,35 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     // Set up new subscription
     try {
       const unsubscribe = annotationService.subscribeToAnnotations(documentId, (updatedAnnotations) => {
-        console.log("Annotations updated:", updatedAnnotations);
-        if (updatedAnnotations && updatedAnnotations.length > 0) {
+        console.log("Received real-time annotations update:", updatedAnnotations?.length || 0);
+        
+        // Get the current annotations to compare
+        const currentAnnots = useAnnotationStore.getState().documents[documentId]?.annotations || [];
+        
+        // Only update if there are actual changes (prevent circular updates)
+        if (JSON.stringify(currentAnnots) !== JSON.stringify(updatedAnnotations)) {
+          // Flag that this change is coming from Firebase, not a local user action
+          setIsLocalChange(false);
+          
           // Import the annotations from Firebase
-          annotationStore.importAnnotations(documentId, updatedAnnotations, 'replace');
+          annotationStore.importAnnotations(documentId, updatedAnnotations || [], 'replace');
+          
+          // Dispatch an event to notify the PDF viewer to re-render
+          const event = new CustomEvent('annotationChanged', {
+            detail: {
+              source: 'remoteUser',
+              documentId,
+              pageNumber: currentPage,
+              forceRender: true
+            }
+          });
+          document.dispatchEvent(event);
+          
+          // Reset the local change flag after a short delay
+          // This ensures any follow-up local edits will be saved
+          setTimeout(() => {
+            setIsLocalChange(true);
+          }, 100);
         }
       });
 
@@ -3314,9 +3355,9 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     } catch (err) {
       console.error("Error setting up annotation subscription:", err);
       // If subscription fails, fall back to non-realtime data
-      // loadAnnotations(documentId);
+      useAnnotationStore.getState().loadFromFirebase(documentId);
     }
-  }, [documentId, annotationStore]);
+  }, [documentId, annotationStore, currentPage]);
 
   // Effect to set up and clean up subscription
   useEffect(() => {

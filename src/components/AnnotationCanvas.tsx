@@ -156,6 +156,7 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
       const event = new CustomEvent("annotationChanged", {
         detail: {
           pageNumber,
+          documentId,
           source,
           forceRender,
           timestamp: Date.now(),
@@ -180,8 +181,11 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
       } catch (err) {
         console.error("[AnnotationCanvas] Error dispatching event:", err);
       }
+
+      // Also dispatch to document for components that might be listening globally
+      document.dispatchEvent(event);
     },
-    [pageNumber]
+    [pageNumber, documentId]
   );
 
   const getCanvasPoint = (e: React.MouseEvent): Point => {
@@ -694,6 +698,79 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
       }
     }
   };
+
+  // Add effect to listen for real-time annotation updates from other users
+  // This is now correctly placed after the render function is defined
+  useEffect(() => {
+    // Function to handle remote annotation updates
+    const handleRemoteAnnotationUpdate = (event: CustomEvent) => {
+      // Extract details from the event
+      const { source, documentId: eventDocId, pageNumber: eventPageNum, forceRender } = event.detail || {};
+      
+      // Only process if this update is from a remote user (not our own changes)
+      // and if it's for our current document and page
+      if (source === 'remoteUser' && eventDocId === documentId && eventPageNum === pageNumber) {
+        console.log("Received real-time annotation update from another user");
+        
+        // Force rerender the canvas to show the updated annotations
+        render();
+        
+        // If we're currently editing or have selections, check if they're still valid
+        if (editingAnnotation || selectedAnnotations.length > 0) {
+          // Get the updated annotations from the store
+          const updatedAnnots = store.documents[documentId]?.annotations || [];
+          
+          // If we're editing a text annotation, check if it still exists
+          if (editingAnnotation) {
+            const stillExists = updatedAnnots.some(a => a.id === editingAnnotation.id);
+            if (!stillExists) {
+              // The annotation being edited was deleted by another user
+              setIsEditingText(false);
+              setTextInputPosition(null);
+              setEditingAnnotation(null);
+            }
+          }
+          
+          // Update selected annotations if they changed
+          if (selectedAnnotations.length > 0) {
+            // Filter selected annotations to only include ones that still exist
+            const updatedSelections = selectedAnnotations.filter(sel => 
+              updatedAnnots.some(a => a.id === sel.id)
+            );
+            
+            // If any were removed, update our selection
+            if (updatedSelections.length !== selectedAnnotations.length) {
+              setSelectedAnnotations(updatedSelections);
+              
+              // If all selections were removed, clear any resize/move state
+              if (updatedSelections.length === 0) {
+                setIsResizing(false);
+                setActiveHandle(null);
+                setMoveOffset(null);
+              }
+            } else {
+              // Update the selected annotations with their new properties
+              const updatedSelObjects = updatedSelections.map(sel => {
+                const updated = updatedAnnots.find(a => a.id === sel.id);
+                return updated || sel;
+              });
+              setSelectedAnnotations(updatedSelObjects);
+            }
+          }
+        }
+      }
+    };
+
+    // Add event listener to document to catch all annotation change events
+    document.addEventListener('annotationChanged', 
+      handleRemoteAnnotationUpdate as EventListener);
+    
+    // Clean up the event listener when component unmounts
+    return () => {
+      document.removeEventListener('annotationChanged', 
+        handleRemoteAnnotationUpdate as EventListener);
+    };
+  }, [documentId, pageNumber, render, editingAnnotation, selectedAnnotations, store.documents]);
 
   // Update the handleAutoScroll function for smoother behavior
   const handleAutoScroll = useCallback((e: React.MouseEvent) => {
