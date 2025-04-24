@@ -155,9 +155,12 @@ export const useAnnotationStore = create<AnnotationState>()(
             })
           );
           
-          // Remove automatic Firebase saving - will only happen when save button is pressed
-          // annotationService.saveAnnotationsToFirebase(documentId, newAnnotations)
-          //   .catch(error => console.error('Error saving annotations to Firebase:', error));
+          // Enable automatic Firebase saving for real-time updates
+          // Use setTimeout to avoid blocking the UI when saving
+          setTimeout(() => {
+            annotationService.saveAnnotationsToFirebase(documentId, newAnnotations)
+              .catch(error => console.error('Error saving annotations to Firebase:', error));
+          }, 0);
 
           return newState;
         });
@@ -177,9 +180,12 @@ export const useAnnotationStore = create<AnnotationState>()(
           // Push the new annotations array reference into the new history slice
           updatedHistory.push(newAnnotations);
           
-          // Remove automatic Firebase saving - will only happen when save button is pressed
-          // annotationService.saveAnnotationsToFirebase(documentId, newAnnotations)
-          //   .catch(error => console.error('Error saving annotations to Firebase:', error));
+          // Enable automatic Firebase saving for real-time updates
+          // Use setTimeout to avoid blocking the UI when saving
+          setTimeout(() => {
+            annotationService.saveAnnotationsToFirebase(documentId, newAnnotations)
+              .catch(error => console.error('Error saving annotations to Firebase:', error));
+          }, 0);
 
           return {
             documents: {
@@ -212,9 +218,12 @@ export const useAnnotationStore = create<AnnotationState>()(
           );
           newHistory.push(newAnnotations);
           
-          // Remove automatic Firebase saving - will only happen when save button is pressed
-          // annotationService.saveAnnotationsToFirebase(documentId, newAnnotations)
-          //   .catch(error => console.error('Error saving annotations to Firebase:', error));
+          // Enable automatic Firebase saving for real-time updates
+          // Use setTimeout to avoid blocking the UI when saving
+          setTimeout(() => {
+            annotationService.saveAnnotationsToFirebase(documentId, newAnnotations)
+              .catch(error => console.error('Error saving annotations to Firebase:', error));
+          }, 0);
 
           return {
             documents: {
