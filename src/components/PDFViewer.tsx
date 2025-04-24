@@ -2244,7 +2244,12 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
   const pdfVerifiedRef = useRef<boolean>(false);
 
   // Function to handle stamp annotations
-  const handleStampAnnotation = useCallback((event: MouseEvent) => {
+  const handleStampAnnotation = useCallback((e: MouseEvent) => {
+    // Skip if this is a right-click (e.button === 2)
+    if (e.button === 2) {
+      return;
+    }
+    
     // Only process if current tool is a stamp type
     if (!currentTool || !['stamp', 'stampApproved', 'stampRejected', 'stampRevision'].includes(currentTool)) {
       return;
@@ -2261,8 +2266,8 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
 
     // Get relative mouse position on canvas
     const rect = canvas.getBoundingClientRect();
-    const x = (event.clientX - rect.left);
-    const y = (event.clientY - rect.top);
+    const x = (e.clientX - rect.left);
+    const y = (e.clientY - rect.top);
 
     // Convert to unscaled PDF coordinates
     let pointInPdfCoordinates: Point;
@@ -2744,6 +2749,12 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
   
+  const handleContextMenu = useCallback((e: React.MouseEvent) => {
+    // Prevent default browser context menu
+    e.preventDefault();
+    // No additional actions - right-click should have no function
+  }, []);
+
   // Make sure we explicitly return a JSX element to satisfy the React.FC type
   return (
     <div 
@@ -2751,6 +2762,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
       ref={containerRef}
       data-current-tool={currentTool}
       data-cursor-state={isDragging ? "grabbing" : currentTool === "drag" ? "grab" : currentTool}
+      onContextMenu={handleContextMenu}
     >
       {isShortcutGuideOpen && (
         <KeyboardShortcutGuide
@@ -2793,6 +2805,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
         className="pdf-container h-full flex-1 overflow-hidden" 
         ref={containerRef}
         data-has-overflow="false" // Default value, will be updated by the effect
+        onContextMenu={handleContextMenu}
       >
         {/* PDF Viewer - Fixed container with scrollable content */}
         <div 
@@ -2802,6 +2815,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
           onScroll={handleScroll}
+          onContextMenu={handleContextMenu}
         >
           {/* Initial Loading Animation - before PDF processing has started */}
           {isInitialLoading && !hasStartedLoading && !renderError && (
@@ -2927,6 +2941,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
                     width: `${viewport.width}px`,
                     height: `${viewport.height}px`,
                   }}
+                  onContextMenu={handleContextMenu}
                 />
                 {/* Always render the annotation canvas once the PDF is initially loaded */}
                 {isViewerReady && (
