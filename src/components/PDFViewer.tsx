@@ -26,6 +26,8 @@ import * as pdfjs from "pdfjs-dist";
 import { debounce } from "../utils/debounce";
 import { PDFDocument } from 'pdf-lib'; // Added: For PDF manipulation
 import { saveAs } from 'file-saver'; // Added: For saving files
+import { annotationService } from "../services/annotationService"; // Added: For annotation service
+
 interface PDFViewerProps {
   file: File | string;
   documentId: string;
@@ -91,6 +93,9 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
   const initializationStartedRef = useRef<boolean>(false);
   const currentRenderingPageRef = useRef<number | null>(null);
   const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null); // Ref for controls visibility timeout
+
+  // Add annotations subscription ref
+  const annotationsUnsubscribeRef = useRef<(() => void) | null>(null);
 
   // State declarations
   const [currentPage, setCurrentPage] = useState(1);
@@ -3285,4 +3290,46 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [saveAnnotationsToFirebase, showToast]);
+
+  // Add this function to set up the real-time subscription to annotations
+  const setupAnnotationsSubscription = useCallback(() => {
+    // Make sure to clean up any existing subscription first
+    if (annotationsUnsubscribeRef.current) {
+      annotationsUnsubscribeRef.current();
+      annotationsUnsubscribeRef.current = null;
+    }
+
+    // Set up new subscription
+    try {
+      const unsubscribe = annotationService.subscribeToAnnotations(documentId, (updatedAnnotations) => {
+        console.log("Annotations updated:", updatedAnnotations);
+        if (updatedAnnotations && updatedAnnotations.length > 0) {
+          // Import the annotations from Firebase
+          annotationStore.importAnnotations(documentId, updatedAnnotations, 'replace');
+        }
+      });
+
+      // Store the unsubscribe function
+      annotationsUnsubscribeRef.current = unsubscribe;
+    } catch (err) {
+      console.error("Error setting up annotation subscription:", err);
+      // If subscription fails, fall back to non-realtime data
+      // loadAnnotations(documentId);
+    }
+  }, [documentId, annotationStore]);
+
+  // Effect to set up and clean up subscription
+  useEffect(() => {
+    if (documentId) {
+      setupAnnotationsSubscription();
+    }
+    
+    return () => {
+      // Clean up subscription when component unmounts or documentId changes
+      if (annotationsUnsubscribeRef.current) {
+        annotationsUnsubscribeRef.current();
+        annotationsUnsubscribeRef.current = null;
+      }
+    };
+  }, [documentId, setupAnnotationsSubscription]);
 };
