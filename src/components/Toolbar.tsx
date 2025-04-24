@@ -11,6 +11,7 @@ import { useKeyboardShortcutGuide } from "../hooks/useKeyboardShortcutGuide";
 import { HelpCircle, FolderOpen, ChevronDown, ChevronUp } from "lucide-react";
 import { useAnnotationStore } from "../store/useAnnotationStore";
 import { KeyboardShortcutGuide } from "./KeyboardShortcutGuide";
+import { TextFormatToolbar } from "./TextFormatToolbar";
 
 // Define Folder interface to match DocumentViewer component
 export interface Folder {
@@ -184,6 +185,28 @@ export const Toolbar = ({ currentFolder }: ToolbarProps) => {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
+  // Check if any text annotation is selected
+  const hasSelectedTextAnnotation = selectedAnnotations.some(
+    annotation => annotation.type === 'text'
+  );
+  
+  // Show text formatting toolbar when text tool is selected or a text annotation is selected
+  const showTextFormatToolbar = currentTool === 'text' || hasSelectedTextAnnotation;
+
+  // Track state of text section expansion
+  useEffect(() => {
+    // If text tool is selected or text annotation is selected, ensure the text tools section is expanded
+    if (showTextFormatToolbar) {
+      const textSection = document.querySelector('[data-section="text"]');
+      if (textSection) {
+        const button = textSection.querySelector('button');
+        if (button && !textSection.querySelector('.max-h-96')) {
+          button.click(); // Programmatically expand the section
+        }
+      }
+    }
+  }, [showTextFormatToolbar]);
+
   const renderStyleSection = () => (
     <div className="space-y-4 p-2">
       {/* Color Picker */}
@@ -273,46 +296,65 @@ export const Toolbar = ({ currentFolder }: ToolbarProps) => {
         <label className="block text-sm font-medium text-gray-700 mb-2">
           Opacity
         </label>
-        <div className="flex gap-1.5">
-          {OPACITY_LEVELS.map((opacity) => (
-            <button
-              key={opacity}
-              onClick={() => {
-                const { selectedAnnotations, updateAnnotation, currentDocumentId, setCurrentStyle } = useAnnotationStore.getState();
-                const newStyle = { opacity }; // Capture the clicked opacity
+        <input
+          type="range"
+          min="0.1"
+          max="1"
+          step="0.1"
+          value={currentStyle.opacity}
+          onChange={(e) => {
+            const { selectedAnnotations, updateAnnotation, currentDocumentId, setCurrentStyle } = useAnnotationStore.getState();
+            const opacity = parseFloat(e.target.value);
+            const newStyle = { opacity }; // Capture the new opacity level
 
-                // Update selected annotations
-                if (selectedAnnotations.length > 0 && currentDocumentId) {
-                  selectedAnnotations.forEach(annotation => {
-                    updateAnnotation(currentDocumentId, {
-                      ...annotation,
-                      style: { ...annotation.style, ...newStyle }
-                    });
-                  });
-                }
+            // Update selected annotations
+            if (selectedAnnotations.length > 0 && currentDocumentId) {
+              selectedAnnotations.forEach(annotation => {
+                updateAnnotation(currentDocumentId, {
+                  ...annotation,
+                  style: { ...annotation.style, ...newStyle }
+                });
+              });
+            }
 
-                // Always update the current style for new annotations
-                setCurrentStyle(newStyle);
-              }}
-              className={`h-8 flex-1 border rounded-md transition-colors ${
-                currentStyle.opacity === opacity
-                  ? "border-blue-500 bg-blue-50"
-                  : "border-gray-200 hover:bg-gray-50"
-              }`}
-            >
-              <div
-                className="w-full h-full rounded-md"
-                style={{
-                  backgroundColor: currentStyle.color,
-                  opacity: opacity,
-                }}
-              />
-            </button>
-          ))}
+            // Always update current style for new annotations
+            setCurrentStyle(newStyle);
+          }}
+          className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-500"
+        />
+        <div className="text-right text-xs text-gray-500">
+          {Math.round(currentStyle.opacity * 100)}%
         </div>
       </div>
     </div>
   );
+
+  // Create JSX for text section with formatting tools when needed
+  const renderTextSection = () => {
+    return (
+      <>
+        {TOOLS.text.map((tool) => (
+          <ToolButton
+            key={tool.tool}
+            tool={tool.tool}
+            icon={tool.icon}
+            label={tool.label}
+            shortcut={getOptionalShortcut(tool)}
+            currentFolder={currentFolder}
+          />
+        ))}
+        
+        {showTextFormatToolbar && (
+          <div className="mt-2 border-t border-gray-200 pt-2">
+            <div className="text-xs font-medium text-gray-600 mb-1 px-2">Text Formatting</div>
+            <TextFormatToolbar 
+              selectedAnnotationId={selectedAnnotations.length > 0 ? selectedAnnotations[0]?.id : undefined} 
+            />
+          </div>
+        )}
+      </>
+    );
+  };
 
   return (
     <>
@@ -361,7 +403,8 @@ export const Toolbar = ({ currentFolder }: ToolbarProps) => {
             />
           ))}
         </ToolbarSection>
-        <ToolbarSection title="Lines & Arrows">
+        
+        <ToolbarSection title="Lines">
           {TOOLS.lines.map((tool) => (
             <ToolButton
               key={tool.tool}
@@ -373,19 +416,13 @@ export const Toolbar = ({ currentFolder }: ToolbarProps) => {
             />
           ))}
         </ToolbarSection>
-        <ToolbarSection title="Text">
-          {TOOLS.text.map((tool) => (
-            <ToolButton
-              key={tool.tool}
-              tool={tool.tool}
-              icon={tool.icon}
-              label={tool.label}
-              shortcut={getOptionalShortcut(tool)}
-              currentFolder={currentFolder}
-            />
-          ))}
+        
+        <ToolbarSection title="Text" data-section="text" defaultExpanded={showTextFormatToolbar}>
+          {renderTextSection()}
         </ToolbarSection>
+        
         <ToolbarSection title="Style">{renderStyleSection()}</ToolbarSection>
+        
         <div className="mt-auto border-t border-gray-200 p-2 space-y-2">
           <button
             onClick={() => setIsShortcutGuideOpen(true)}

@@ -22,7 +22,9 @@ import {
 import { 
   renderTextPreview, 
   handleTextToolCompletion, 
-  isPointInTextAnnotation 
+  isPointInTextAnnotation,
+  createTextAnnotation,
+  createStickyNoteAnnotation
 } from "../utils/textToolsUtils";
 import { Point, Annotation, AnnotationType } from "../types/annotation";
 import { TextInput } from "./TextInput";
@@ -58,6 +60,7 @@ interface AnnotationStyle {
     bold?: boolean;
     italic?: boolean;
     text?: string;
+    underline?: boolean;
   };
 }
 
@@ -117,12 +120,14 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
   const MIN_SCROLL_SPEED = 2; // Minimum scroll speed
   const ACCELERATION = 0.2; // Reduced acceleration for smoother ramping
   const DECELERATION = 0.92; // Smooth deceleration factor
+  const AUTOSAVE_DELAY = 2000; // Delay in ms before triggering autosave
 
   // Add state for save button UI feedback
   const [showSaveButton, setShowSaveButton] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [isAutosaving, setIsAutosaving] = useState(false);
   
   // Function to mark changes as unsaved and show save button
   const markUnsavedChanges = useCallback(() => {
@@ -303,46 +308,8 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
     
     const point = getCanvasPoint(e);
     
-    // Handle text and sticky note tools: Create annotation immediately on click
-    if (currentTool === "text" || currentTool === "stickyNote") {
-      const isSticky = currentTool === "stickyNote";
-      const defaultText = "Text"; // Changed default text
-      // Center the default box around the click point slightly
-      const defaultWidth = isSticky ? 200 : 120;
-      const defaultHeight = isSticky ? 150 : 40;
-      const initialPos = {
-          x: point.x - defaultWidth / (2 * scale), // Adjust x to center
-          y: point.y - defaultHeight / (2 * scale) // Adjust y to center
-      };
-
-      const newAnnotation: Annotation = {
-        id: Date.now().toString(),
-        type: currentTool as AnnotationType,
-        points: [initialPos], // Use adjusted position
-        text: defaultText,
-        style: {
-          ...currentStyle,
-          text: defaultText, // Ensure text is in style
-          textOptions: currentStyle.textOptions || { fontSize: 14, fontFamily: 'Arial' },
-          ...(isSticky && { color: '#000000', backgroundColor: '#FFD700' }) // Style for sticky
-        },
-        pageNumber,
-        timestamp: Date.now(),
-        userId: "current-user", // Replace with actual user ID
-        version: 1,
-        width: defaultWidth,
-        height: defaultHeight,
-      };
-
-      store.addAnnotation(documentId, newAnnotation);
-      setEditingAnnotation(newAnnotation);
-      setTextInputPosition(initialPos); // Use adjusted position for input
-      setIsEditingText(true);
-      setStickyNoteScale(isSticky ? 1 : 0); // For TextInput styling
-      store.setCurrentTool("select"); // Switch back to select tool
-      dispatchAnnotationChangeEvent("textCreate", true);
-      return; // Stop further processing
-    }
+    // We no longer need the text and sticky note handling code here since it's done in the useEffect
+    // The text tools now automatically center the annotation when selected
     
     if (currentTool === "select") {
       // Check if we're clicking on a selected annotation
@@ -1104,9 +1071,6 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
       // Select the newly created annotation
       store.selectAnnotation(newAnnotation);
 
-      // Switch back to select tool
-      store.setCurrentTool("select");
-
       // Dispatch event to notify about the change
       dispatchAnnotationChangeEvent("userDrawing", true); // Dispatch event *after* state changes
 
@@ -1184,6 +1148,7 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
     
     // Use the finalPosition if provided (from dragging), otherwise use original position
     const position = finalPosition || textInputPosition;
+    let completedAnnotation: Annotation | null = null;
     
     if (editingAnnotation) {
       // Handle editing existing text annotation
@@ -1195,9 +1160,14 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
         style: {
           ...editingAnnotation.style,
           text,
+          // Preserve existing textOptions which includes underline setting
+          textOptions: {
+            ...editingAnnotation.style.textOptions
+          }
         },
       };
       store.updateAnnotation(documentId, updatedAnnotation);
+      completedAnnotation = updatedAnnotation;
     } else if (position) {
       // Handle creating new text annotation
       const isSticky = stickyNoteScale > 0;
@@ -1207,20 +1177,14 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
         ? { color: '#FFD700', lineWidth: 1, opacity: 1 } // Minimal style - the createStickyNoteAnnotation will replace it
         : { ...currentStyle };
       
-      // Use the exact position from the preview or the final position after dragging
-      handleTextToolCompletion(
-        position,
-        text,
-        isSticky,
-        textStyle,
-        pageNumber,
-        "current-user", // Replace with actual user ID when available
-        documentId,
-        store.addAnnotation
-      );
-      
-      // Reset tool to select after adding text/sticky note
-      store.setCurrentTool("select");
+      // Create the annotation
+      const newAnnotation = isSticky 
+        ? createStickyNoteAnnotation(position, text, textStyle, pageNumber, "current-user")
+        : createTextAnnotation(position, text, textStyle, pageNumber, "current-user");
+        
+      // Add it to the store
+      store.addAnnotation(documentId, newAnnotation);
+      completedAnnotation = newAnnotation;
     }
     
     // Mark changes as unsaved
@@ -1228,8 +1192,15 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
     
     setTextInputPosition(null);
     setEditingAnnotation(null);
-    // Removed setTextDimensions call again
-    store.clearSelection(); // Deselect annotation after completion
+    
+    // Select the annotation we just created/edited instead of clearing selection
+    if (completedAnnotation) {
+      store.selectAnnotations([completedAnnotation]);
+    }
+    
+    // Ensure we're in select mode to make formatting tools available
+    store.setCurrentTool("select");
+    
     dispatchAnnotationChangeEvent("textComplete");
     setStickyNoteScale(0);
   };
@@ -1708,9 +1679,15 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
         const lineHeight = fontSize * 1.2;
         const textHeight = lineHeight * lines.length;
         
-        // Add padding
-        width = Math.max(maxWidth + 20, 100);
-        height = Math.max(textHeight + 20, 40);
+        // Add padding - increased padding for larger font sizes
+        const paddingX = Math.max(20, fontSize * 0.5);
+        const paddingY = Math.max(20, fontSize * 0.5);
+        width = Math.max(maxWidth + paddingX * 2, 100);
+        height = Math.max(textHeight + paddingY * 2, 40);
+        
+        // Store the calculated width and height on the annotation for consistency
+        annotation.width = width;
+        annotation.height = height;
       } else {
         // Fallback if context not available
         width = 120;
@@ -1778,43 +1755,176 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
     annotation: Annotation,
     scale: number
   ): void => {
-    if (!annotation.text || annotation.points.length === 0) return;
+    if (annotation.points.length === 0) return;
     
     const position = annotation.points[0];
-    const text = annotation.text;
+    const text = annotation.text || "";
     const textOptions = annotation.style.textOptions || {};
     
     // Set up text rendering styles
     ctx.save();
     
-    // Font settings
-    let fontStyle = '';
-    if (textOptions.bold) fontStyle += 'bold ';
-    if (textOptions.italic) fontStyle += 'italic ';
-    const baseFontSize = textOptions.fontSize || 14;
-    const scaledFontSize = baseFontSize * scale; // Scale font size
-    const fontFamily = textOptions.fontFamily || 'Arial';
-    ctx.font = `${fontStyle}${scaledFontSize}px ${fontFamily}`; // Use scaled font size
-    
-    // Calculate text dimensions
-    const lines = text.split('\n');
-    const scaledLineHeight = scaledFontSize * 1.2; // Use scaled font size for line height
-    
-    // Color settings
-    ctx.fillStyle = annotation.style.color || '#000000';
-    ctx.textBaseline = 'top';
-    
-    // Position inside the bounding box with padding
-    const textX = position.x * scale + 8 * scale;
-    const textY = position.y * scale + 8 * scale;
-    
-    // Render each line of text
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      ctx.fillText(line, textX, textY + i * scaledLineHeight); // Use scaled line height
+    // Calculate the width and height if not already determined
+    if (!annotation.width || !annotation.height) {
+      // Calculate dimensions based on content
+      const fontSize = textOptions.fontSize || 14;
+      
+      // Create a temporary canvas to measure text
+      const tempCanvas = document.createElement("canvas");
+      const tempCtx = tempCanvas.getContext("2d");
+      
+      if (tempCtx) {
+        // Set font for measurement
+        let fontStyle = "";
+        if (textOptions.bold) fontStyle += "bold ";
+        if (textOptions.italic) fontStyle += "italic ";
+        tempCtx.font = `${fontStyle}${fontSize}px ${textOptions.fontFamily || "Arial"}`;
+        
+        // Measure each line to find max width
+        const lines = text.split("\n");
+        let maxWidth = 0;
+        
+        for (const line of lines) {
+          const metrics = tempCtx.measureText(line);
+          maxWidth = Math.max(maxWidth, metrics.width);
+        }
+        
+        // Calculate height based on line count
+        const lineHeight = fontSize * 1.2;
+        const textHeight = Math.max(lineHeight * lines.length, lineHeight); // At least one line height
+        
+        // Add padding - increased padding for larger font sizes
+        const paddingX = Math.max(20, fontSize * 0.5);
+        const paddingY = Math.max(20, fontSize * 0.5);
+        annotation.width = Math.max(maxWidth + paddingX * 2, 120); // Minimum width even with empty text
+        annotation.height = Math.max(textHeight + paddingY * 2, 60); // Minimum height even with empty text
+      } else {
+        // Fallback dimensions
+        annotation.width = 120;
+        annotation.height = 60;
+      }
     }
     
-    // Restore context
+    // Draw a subtle background for the text box for better readability
+    ctx.fillStyle = "rgba(255, 255, 255, 0.9)"; // More opaque for better visibility
+    ctx.fillRect(
+      position.x * scale,
+      position.y * scale,
+      annotation.width * scale,
+      annotation.height * scale
+    );
+    
+    // Only render text if there's actually content
+    if (text) {
+      // Font settings
+      let fontStyle = '';
+      if (textOptions.bold) fontStyle += 'bold ';
+      if (textOptions.italic) fontStyle += 'italic ';
+      const baseFontSize = textOptions.fontSize || 14;
+      const scaledFontSize = baseFontSize * scale; // Scale font size
+      const fontFamily = textOptions.fontFamily || 'Arial';
+      ctx.font = `${fontStyle}${scaledFontSize}px ${fontFamily}`; // Use scaled font size
+      
+      // Calculate text dimensions
+      const lines = text.split('\n');
+      const scaledLineHeight = scaledFontSize * 1.2; // Use scaled font size for line height
+      
+      // Color settings
+      ctx.fillStyle = annotation.style.color || '#000000';
+      ctx.textBaseline = 'top';
+      
+      // Position inside the bounding box with padding
+      const paddingX = Math.max(8, baseFontSize * 0.3) * scale;
+      const paddingY = Math.max(8, baseFontSize * 0.3) * scale;
+      const textX = position.x * scale + paddingX;
+      const textY = position.y * scale + paddingY;
+      
+      // Available width for text wrapping (accounting for padding on both sides)
+      const availableWidth = (annotation.width * scale) - (paddingX * 2);
+      
+      // Track rendered lines and their positions for underline
+      const renderedLineInfo: {text: string, x: number, y: number}[] = [];
+      
+      // Render each line of text with word wrapping for very long lines
+      let yOffset = 0;
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        
+        // Check if the line needs wrapping
+        const lineWidth = ctx.measureText(line).width;
+        if (lineWidth <= availableWidth) {
+          // Line fits, draw it normally
+          ctx.fillText(line, textX, textY + yOffset);
+          renderedLineInfo.push({text: line, x: textX, y: textY + yOffset});
+          yOffset += scaledLineHeight;
+        } else {
+          // Line needs wrapping
+          const words = line.split(' ');
+          let currentLine = '';
+          
+          for (const word of words) {
+            const testLine = currentLine + (currentLine ? ' ' : '') + word;
+            const testWidth = ctx.measureText(testLine).width;
+            
+            if (testWidth <= availableWidth) {
+              currentLine = testLine;
+            } else {
+              // Draw the current line and move to next line
+              if (currentLine) {
+                ctx.fillText(currentLine, textX, textY + yOffset);
+                renderedLineInfo.push({text: currentLine, x: textX, y: textY + yOffset});
+                yOffset += scaledLineHeight;
+                currentLine = word;
+              } else {
+                // If a single word is too long, just draw it anyway
+                ctx.fillText(word, textX, textY + yOffset);
+                renderedLineInfo.push({text: word, x: textX, y: textY + yOffset});
+                yOffset += scaledLineHeight;
+                currentLine = '';
+              }
+            }
+          }
+          
+          // Draw any remaining text
+          if (currentLine) {
+            ctx.fillText(currentLine, textX, textY + yOffset);
+            renderedLineInfo.push({text: currentLine, x: textX, y: textY + yOffset});
+            yOffset += scaledLineHeight;
+          }
+        }
+      }
+      
+      // Add underline if specified in textOptions
+      if (textOptions.underline) {
+        ctx.strokeStyle = annotation.style.color || '#000000';
+        ctx.lineWidth = Math.max(1, scaledFontSize * 0.05);
+        
+        for (const line of renderedLineInfo) {
+          const metrics = ctx.measureText(line.text);
+          ctx.beginPath();
+          // Position the line slightly below the text baseline
+          const underlineY = line.y + scaledFontSize + 1;
+          ctx.moveTo(line.x, underlineY);
+          ctx.lineTo(line.x + metrics.width, underlineY);
+          ctx.stroke();
+        }
+      }
+    } else {
+      // For empty text, draw a subtle placeholder or cursor indicator
+      const paddingY = Math.max(8, (textOptions.fontSize || 14) * 0.3) * scale;
+      const textY = position.y * scale + paddingY;
+      const paddingX = Math.max(8, (textOptions.fontSize || 14) * 0.3) * scale;
+      const textX = position.x * scale + paddingX;
+      
+      // Draw a subtle cursor indicator for empty text
+      ctx.strokeStyle = "#888888";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(textX, textY);
+      ctx.lineTo(textX, textY + 16 * scale); // Draw cursor indicator
+      ctx.stroke();
+    }
+    
     ctx.restore();
   };
 
@@ -1905,13 +2015,41 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
       }
     }
     
+    // Track rendered line positions for underline
+    const renderedLineInfo: {text: string, x: number, y: number}[] = [];
+    
     // Render each line
     for (let i = 0; i < renderedLines.length; i++) {
+      const lineX = x + padding;
+      const lineY = y + padding + (i * scaledLineHeight);
+      
       ctx.fillText(
         renderedLines[i],
-        x + padding,
-        y + padding + (i * scaledLineHeight) // Use scaled line height for positioning
+        lineX,
+        lineY
       );
+      
+      renderedLineInfo.push({
+        text: renderedLines[i],
+        x: lineX,
+        y: lineY
+      });
+    }
+    
+    // Add underline if specified in textOptions
+    if (textOptions.underline) {
+      ctx.strokeStyle = "#000000"; // Always black for sticky notes
+      ctx.lineWidth = Math.max(1, scaledFontSize * 0.05);
+      
+      for (const line of renderedLineInfo) {
+        const metrics = ctx.measureText(line.text);
+        ctx.beginPath();
+        // Position the line slightly below the text baseline
+        const underlineY = line.y + scaledFontSize + 1;
+        ctx.moveTo(line.x, underlineY);
+        ctx.lineTo(line.x + metrics.width, underlineY);
+        ctx.stroke();
+      }
     }
     
     ctx.restore();
@@ -2044,7 +2182,45 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
     }
   }, [documentId, dispatchAnnotationChangeEvent, store, hasUnsavedChanges]);
   
-  // Show save button when annotations change
+  // Autosave functionality
+  const autosave = useCallback(() => {
+    if (!hasUnsavedChanges || isSaving) return;
+    
+    setIsAutosaving(true);
+    
+    try {
+      // Save to Firebase
+      store.saveToFirebase(documentId)
+        .then(() => {
+          setIsAutosaving(false);
+          setHasUnsavedChanges(false);
+          
+          // Dispatch events
+          dispatchAnnotationChangeEvent("autosave", true);
+        })
+        .catch((error) => {
+          console.error("Error autosaving annotations:", error);
+          setIsAutosaving(false);
+          // Leave hasUnsavedChanges true so user can try manual save
+        });
+    } catch (error) {
+      console.error("Error initiating autosave:", error);
+      setIsAutosaving(false);
+    }
+  }, [documentId, dispatchAnnotationChangeEvent, store, hasUnsavedChanges, isSaving]);
+  
+  // Debounced autosave effect - triggers autosave after delay when changes are made
+  useEffect(() => {
+    if (hasUnsavedChanges && !isSaving && !isAutosaving) {
+      const timer = setTimeout(() => {
+        autosave();
+      }, AUTOSAVE_DELAY);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [hasUnsavedChanges, isSaving, isAutosaving, autosave]);
+  
+  // Show save button when annotations change and reset autosave timer
   useEffect(() => {
     const annotations = documentState.annotations.filter(
       (a) => a.pageNumber === pageNumber
@@ -2054,6 +2230,83 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
       markUnsavedChanges();
     }
   }, [documentState.annotations, pageNumber, markUnsavedChanges]);
+
+  // Add a ref to track previous tool to prevent duplicate text annotations
+  const prevToolRef = useRef<string | null>(null);
+
+  // Add effect to create centered text annotation when text tool is selected
+  useEffect(() => {
+    // Only create text annotation when the text tool is newly selected
+    // (not when it was already selected or when switching from one to the other)
+    if ((currentTool === "text" || currentTool === "stickyNote") && 
+        prevToolRef.current !== "text" && 
+        prevToolRef.current !== "stickyNote") {
+      
+      const isSticky = currentTool === "stickyNote";
+      const defaultText = "";
+      
+      // Calculate center of the visible canvas
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      
+      // Get canvas dimensions
+      const canvasRect = canvas.getBoundingClientRect();
+      const canvasCenterX = canvasRect.width / 2;
+      const canvasCenterY = canvasRect.height / 2;
+      
+      // Convert to PDF coordinates
+      const centerX = canvasCenterX / scale;
+      const centerY = canvasCenterY / scale;
+      
+      // Define dimensions for the annotation
+      const defaultWidth = isSticky ? 200 : 120;
+      const defaultHeight = isSticky ? 150 : 40;
+      
+      // Calculate a position that will center the annotation
+      const centerPos = {
+        x: centerX - defaultWidth / 2,
+        y: centerY - defaultHeight / 2
+      };
+      
+      // Create annotation
+      const newAnnotation: Annotation = {
+        id: Date.now().toString(),
+        type: currentTool as AnnotationType,
+        points: [centerPos],
+        text: defaultText,
+        style: {
+          ...currentStyle,
+          text: defaultText,
+          textOptions: currentStyle.textOptions || { fontSize: 14, fontFamily: 'Arial' },
+          ...(isSticky && { color: '#000000', backgroundColor: '#FFD700' })
+        },
+        pageNumber,
+        timestamp: Date.now(),
+        userId: "current-user",
+        version: 1,
+        width: defaultWidth,
+        height: defaultHeight,
+      };
+      
+      // Add to store
+      store.addAnnotation(documentId, newAnnotation);
+      
+      // Start editing
+      setEditingAnnotation(newAnnotation);
+      setTextInputPosition(centerPos);
+      setIsEditingText(true);
+      setStickyNoteScale(isSticky ? 1 : 0);
+      
+      // Switch to select tool so we don't create additional text boxes when clicking
+      store.setCurrentTool("select");
+      
+      // Notify about the change
+      dispatchAnnotationChangeEvent("textCreate", true);
+    }
+    
+    // Update the previous tool reference
+    prevToolRef.current = currentTool;
+  }, [currentTool, scale, currentStyle, documentId, pageNumber, dispatchAnnotationChangeEvent]);
 
   return (
     <>
@@ -2099,27 +2352,28 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
           onClose={() => setContextMenu(null)}
         />
       )}
-      {showSaveButton && hasUnsavedChanges && (
+      {/* Show save button or autosave indicator */}
+      {(showSaveButton && hasUnsavedChanges) || isAutosaving || saveSuccess ? (
         <button
           className={`fixed top-100 right-20 z-50 font-medium py-2 px-4 rounded-md shadow-md transition-all duration-200 flex items-center
-            ${isSaving 
+            ${isSaving || isAutosaving
               ? 'bg-gray-500 cursor-wait' 
               : saveSuccess 
                 ? 'bg-green-600 hover:bg-green-700' 
                 : 'bg-indigo-600 hover:bg-indigo-700'
             } text-white`}
           onClick={saveAnnotations}
-          disabled={isSaving || saveSuccess}
-          aria-label={isSaving ? "Saving annotations" : saveSuccess ? "Annotations saved" : "Save annotations"}
-          title={isSaving ? "Saving annotations to cloud" : saveSuccess ? "Annotations saved to cloud" : "Save annotations to cloud"}
+          disabled={isSaving || isAutosaving || saveSuccess}
+          aria-label={isSaving ? "Saving annotations" : isAutosaving ? "Autosaving annotations" : saveSuccess ? "Annotations saved" : "Save annotations"}
+          title={isSaving ? "Saving annotations to cloud" : isAutosaving ? "Autosaving annotations to cloud" : saveSuccess ? "Annotations saved to cloud" : "Save annotations to cloud (Autosave enabled)"}
         >
-          {isSaving ? (
+          {isSaving || isAutosaving ? (
             <>
               <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
               </svg>
-              Saving...
+              {isSaving ? "Saving..." : "Autosaving..."}
             </>
           ) : saveSuccess ? (
             <>
@@ -2133,11 +2387,11 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
               <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
                 <path d="M7.707 10.293a1 1 0 10-1.414 1.414l3 3a1 1 0 001.414 0l3-3a1 1 0 00-1.414-1.414L11 11.586V6h5a2 2 0 012 2v7a2 2 0 01-2 2H4a2 2 0 01-2-2V8a2 2 0 012-2h5v5.586l-1.293-1.293z" />
               </svg>
-              Save
+              Save Now
             </>
           )}
         </button>
-      )}
+      ) : null}
     </>
   );
 };

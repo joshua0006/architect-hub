@@ -11,13 +11,25 @@ export const createTextAnnotation = (
   pageNumber: number,
   userId: string
 ): Annotation => {
+  // Ensure textOptions exists and is properly initialized
+  const textOptions = {
+    fontSize: 14,
+    fontFamily: 'Arial',
+    bold: false,
+    italic: false,
+    underline: false,
+    // Spread any existing textOptions from style, keeping above as defaults
+    ...style.textOptions
+  };
+  
   return {
     id: uuidv4(),
     type: 'text',
     points: [position],
     style: {
       ...style,
-      text
+      text,
+      textOptions
     },
     pageNumber,
     text,
@@ -72,7 +84,9 @@ export const getTextAnnotationBounds = (
   position: Point,
   text: string,
   fontSize: number = 14,
-  fontFamily: string = 'Arial'
+  fontFamily: string = 'Arial',
+  isBold: boolean = false,
+  isItalic: boolean = false
 ): { width: number, height: number } => {
   // Create temporary canvas for text measurements
   const canvas = document.createElement('canvas');
@@ -81,7 +95,10 @@ export const getTextAnnotationBounds = (
   if (!ctx) return { width: 100, height: 20 }; // Default fallback
   
   // Set font properties to match what will be rendered
-  ctx.font = `${fontSize}px ${fontFamily}`;
+  let fontStyle = '';
+  if (isBold) fontStyle += 'bold ';
+  if (isItalic) fontStyle += 'italic ';
+  ctx.font = `${fontStyle}${fontSize}px ${fontFamily}`;
   
   // Split text by newlines and measure each line
   const lines = text.split('\n');
@@ -94,15 +111,16 @@ export const getTextAnnotationBounds = (
   
   // Calculate height (approximate based on line count and font size)
   const lineHeight = fontSize * 1.2; // Standard line height
-  const height = lineHeight * lines.length;
+  const textHeight = lineHeight * lines.length;
   
   // Add padding to ensure text fits comfortably
-  // Use 8px padding to match the exact padding used in drawTextAnnotation
-  const padding = 8;
+  // Use dynamic padding based on font size
+  const paddingX = Math.max(10, fontSize * 0.5); // Increase padding for larger fonts
+  const paddingY = Math.max(10, fontSize * 0.5);
   
   return {
-    width: Math.max(maxWidth + padding * 2, 120),
-    height: Math.max(height + padding * 2, 40)
+    width: Math.max(maxWidth + paddingX * 2, 120),
+    height: Math.max(textHeight + paddingY * 2, 40)
   };
 };
 
@@ -144,26 +162,79 @@ export const renderTextPreview = (
   ctx.save();
   
   if (isSticky) {
-    // Draw sticky note background with fixed style
-    ctx.fillStyle = '#FFD700'; // Fixed yellow color
-    ctx.globalAlpha = 1;
-    ctx.fillRect(x, y, 100 * scale, 100 * scale);
+    // Draw sticky note background with more subtle style
+    const width = 150 * scale;
+    const height = 100 * scale;
+    
+    // Add shadow for depth
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.15)';
+    ctx.shadowBlur = 5 * scale;
+    ctx.shadowOffsetX = 2 * scale;
+    ctx.shadowOffsetY = 2 * scale;
+    
+    // Draw main background with subtle color
+    ctx.fillStyle = '#FFFDE7'; // Very light yellow
+    ctx.globalAlpha = 0.9;
+    ctx.fillRect(x, y, width, height);
+    
+    // Reset shadow for cleaner elements
+    ctx.shadowColor = 'transparent';
     
     // Draw fold corner
     ctx.beginPath();
-    ctx.moveTo(x + 80 * scale, y);
-    ctx.lineTo(x + 100 * scale, y + 20 * scale);
-    ctx.lineTo(x + 100 * scale, y);
+    ctx.moveTo(x + width - 15*scale, y);
+    ctx.lineTo(x + width, y + 15*scale);
+    ctx.lineTo(x + width, y);
     ctx.closePath();
-    ctx.fillStyle = 'rgba(0,0,0,0.1)';
+    ctx.fillStyle = 'rgba(0,0,0,0.08)';
     ctx.fill();
+    
+    // Draw placeholder lines
+    ctx.strokeStyle = 'rgba(0,0,0,0.15)';
+    ctx.lineWidth = 1 * scale;
+    
+    const lineStartX = x + 10 * scale;
+    const lineEndX = x + width - 20 * scale;
+    const lineStartY = y + 30 * scale;
+    const lineSpacing = 15 * scale;
+    
+    // Draw 3 placeholder lines
+    for (let i = 0; i < 3; i++) {
+      const lineY = lineStartY + (i * lineSpacing);
+      ctx.beginPath();
+      ctx.moveTo(lineStartX, lineY);
+      ctx.lineTo(lineEndX - (i * 15 * scale), lineY); // Shorter lines as they go down
+      ctx.stroke();
+    }
+    
+    // Add border
+    ctx.strokeStyle = 'rgba(0,0,0,0.1)';
+    ctx.lineWidth = 1 * scale;
+    ctx.strokeRect(x, y, width, height);
   } else {
-    // Draw simple text cursor indicator
-    ctx.strokeStyle = style.color;
+    // Draw a more modern text cursor indicator
+    const width = 120 * scale;
+    const height = 60 * scale;
+    
+    // Draw subtle background
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+    ctx.fillRect(x, y, width, height);
+    
+    // Add border
+    ctx.strokeStyle = style.color || 'rgba(33, 150, 243, 0.5)'; // Use the current style color
+    ctx.lineWidth = 1 * scale;
+    ctx.strokeRect(x, y, width, height);
+    
+    // Draw text cursor
+    const cursorX = x + 10 * scale;
+    const cursorStartY = y + 15 * scale;
+    const cursorHeight = 20 * scale;
+    
+    ctx.strokeStyle = style.color || '#2196F3';
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.moveTo(x, y);
-    ctx.lineTo(x, y + 20 * scale);
+    ctx.moveTo(cursorX, cursorStartY);
+    ctx.lineTo(cursorX, cursorStartY + cursorHeight);
     ctx.stroke();
   }
   
@@ -195,10 +266,30 @@ export const isPointInTextAnnotation = (
     width = 200;
     height = 150;
   } else {
-    // Text annotation - calculate based on content
-    const bounds = getTextAnnotationBounds(position, text);
-    width = bounds.width;
-    height = bounds.height;
+    // Check if annotation already has calculated width and height
+    if (annotation.width && annotation.height) {
+      width = annotation.width;
+      height = annotation.height;
+    } else {
+      // Text annotation - calculate based on content
+      const textOptions = annotation.style.textOptions || {};
+      const fontSize = textOptions.fontSize || 14;
+      const fontFamily = textOptions.fontFamily || 'Arial';
+      const isBold = textOptions.bold || false;
+      const isItalic = textOptions.italic || false;
+      
+      // Use a more accurate calculation that considers all text styling options
+      const bounds = getTextAnnotationBounds(
+        position, 
+        text, 
+        fontSize, 
+        fontFamily,
+        isBold,
+        isItalic
+      );
+      width = bounds.width;
+      height = bounds.height;
+    }
   }
   
   // Check if point is within bounds with added padding for easier selection

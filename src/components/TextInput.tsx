@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState, forwardRef, ForwardedRef } from "react";
 import { Point, AnnotationStyle } from "../types/annotation";
+import { useAnnotationStore } from "../store/useAnnotationStore";
 
 interface TextInputProps {
   position: Point;
@@ -13,6 +14,10 @@ interface TextInputProps {
   textOptions?: AnnotationStyle['textOptions'];
 }
 
+export interface TextInputRef {
+  focus: () => void;
+}
+
 // Use forwardRef correctly
 const TextInputComponent: React.ForwardRefRenderFunction<HTMLTextAreaElement, TextInputProps> = (
   {
@@ -23,7 +28,7 @@ const TextInputComponent: React.ForwardRefRenderFunction<HTMLTextAreaElement, Te
     isSticky = false,
     initialText = "",
     textOptions,
-    initialWidth, // Destructure but might not be used directly for styling textarea
+    initialWidth,
     initialHeight,
   },
   ref // Receive the forwarded ref
@@ -37,16 +42,62 @@ const TextInputComponent: React.ForwardRefRenderFunction<HTMLTextAreaElement, Te
   const [currentPosition, setCurrentPosition] = useState<Point>(position);
   const [isDragging, setIsDragging] = useState(false);
   const [dragOffset, setDragOffset] = useState<Point>({ x: 0, y: 0 });
+  // Add state for dynamic width and height
+  const [textWidth, setTextWidth] = useState(initialWidth || 200);
+  const [textHeight, setTextHeight] = useState(initialHeight || 80);
 
-  // Combine forwarded ref and internal ref if necessary, or just use internal for logic
-  // For simplicity and direct control, we'll use internalInputRef for focus/size logic
-  // and assign the forwarded ref (if provided) directly to the textarea element.
+  // Get current style from the store to apply text formatting
+  const { currentStyle } = useAnnotationStore();
+  const textOptionsMerged = textOptions || currentStyle.textOptions || {};
+  const fontSize = textOptionsMerged?.fontSize || 14;
+
+  // Calculate optimal width based on text content and font size
+  const calculateTextDimensions = () => {
+    // Create a temporary canvas to measure text dimensions
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d');
+    if (!context) return;
+    
+    // Set font properties to match the textarea
+    let fontStyle = '';
+    if (textOptionsMerged?.bold) fontStyle += 'bold ';
+    if (textOptionsMerged?.italic) fontStyle += 'italic ';
+    context.font = `${fontStyle}${fontSize}px ${textOptionsMerged?.fontFamily || 'Arial'}`;
+    
+    // Split text into lines and find the max width
+    const lines = text ? text.split('\n') : ['Te'];
+    
+    // If text is empty or short, use a reasonable default placeholder
+    if (!text || text.length < 2) {
+      lines.push('Text'); // Ensure we have minimum width for placeholder
+    }
+    
+    let maxWidth = 0;
+    
+    for (const line of lines) {
+      const metrics = context.measureText(line);
+      maxWidth = Math.max(maxWidth, metrics.width);
+    }
+    
+    // Calculate the height based on line count and font size
+    const lineHeight = fontSize * 1.2;
+    const calculatedHeight = Math.max(lines.length * lineHeight + 20, 80);
+    
+    // Add padding based on font size to ensure text fits comfortably
+    const paddingX = Math.max(20, fontSize * 1.2);
+    
+    // Update width and height states with appropriate minimum values
+    setTextWidth(Math.max(maxWidth + paddingX * 2, 180));
+    setTextHeight(calculatedHeight);
+  };
 
   // Auto-resize textarea based on content
   const adjustTextareaSize = () => {
     if (internalInputRef.current) {
       internalInputRef.current.style.height = 'auto'; // Reset height
       internalInputRef.current.style.height = `${internalInputRef.current.scrollHeight}px`;
+      // Also recalculate the width based on text content
+      calculateTextDimensions();
     }
   };
 
@@ -54,9 +105,12 @@ const TextInputComponent: React.ForwardRefRenderFunction<HTMLTextAreaElement, Te
   useEffect(() => {
     if (internalInputRef.current) {
       internalInputRef.current.focus();
-      // Select text only if it's the default placeholder
-      if (initialText === "Text" || initialText === "Type here...") {
+      // Only select text if there's content to select
+      if (initialText && initialText !== "") {
         internalInputRef.current.select();
+      } else {
+        // If no initial text, just ensure focus is at the start
+        internalInputRef.current.setSelectionRange(0, 0);
       }
       adjustTextareaSize(); // Adjust size on initial focus/mount
     }
@@ -65,7 +119,12 @@ const TextInputComponent: React.ForwardRefRenderFunction<HTMLTextAreaElement, Te
   // Effect to adjust size when text content changes
   useEffect(() => {
     adjustTextareaSize();
-  }, [text]);
+  }, [text, fontSize, textOptionsMerged?.bold, textOptionsMerged?.italic, textOptionsMerged?.fontFamily]);
+
+  // Initial dimension calculation on mount
+  useEffect(() => {
+    calculateTextDimensions();
+  }, []);
 
   // Effect to handle clicks outside the component
   useEffect(() => {
@@ -172,17 +231,18 @@ const TextInputComponent: React.ForwardRefRenderFunction<HTMLTextAreaElement, Te
             : "border border-blue-500 rounded shadow-md"}
         `}
         style={{
-          width: isSticky ? `${initialWidth || 200}px` : (initialWidth ? `${initialWidth}px` : '160px'), // Use initialWidth if provided or default to 160px
-          minWidth: '100px',
-          height: isSticky ? `${initialHeight || 150}px` : 'auto', // Use initialHeight for sticky
+          width: isSticky ? `${initialWidth || 200}px` : `${textWidth}px`,
+          minWidth: '160px',
+          height: isSticky ? `${initialHeight || 150}px` : 'auto',
           minHeight: '80px', // Ensure minimum height for empty text
+          background: isSticky ? undefined : 'transparent'
         }}
       >
         {/* Add drag handle indicator at the top */}
         <div 
           className={`
             w-full h-6 flex items-center justify-center
-            ${isSticky ? "bg-yellow-300 rounded-t" : "bg-blue-100 border-b border-blue-300"}
+            ${isSticky ? "bg-yellow-300 rounded-t" : "bg-transparent border-b border-blue-300"}
             cursor-grab select-none
           `}
           onMouseDown={(e) => {
@@ -213,16 +273,25 @@ const TextInputComponent: React.ForwardRefRenderFunction<HTMLTextAreaElement, Te
             ${
               isSticky
                 ? "bg-yellow-100 focus:bg-yellow-50"
-                : "bg-white bg-opacity-90 focus:bg-opacity-100 border-x border-b border-blue-500 shadow-lg" // Enhanced focus style
+                : "bg-white focus:bg-white border-x border-b border-blue-500"
             }
           `}
           style={{ // Apply dynamic font styles
-            fontSize: `${(textOptions?.fontSize || 14) * scale}px`, // Apply scale
-            lineHeight: `${(textOptions?.fontSize || 14) * 1.2 * scale}px`, // Apply scale
-            fontFamily: textOptions?.fontFamily || "Arial",
-            fontWeight: textOptions?.bold ? 'bold' : 'normal',
-            fontStyle: textOptions?.italic ? 'italic' : 'normal',
+            fontSize: `${fontSize * scale}px`, // Apply scale
+            lineHeight: `${fontSize * 1.2 * scale}px`, // Apply scale
+            fontFamily: textOptionsMerged?.fontFamily || "Arial",
+            fontWeight: textOptionsMerged?.bold ? 'bold' : 'normal',
+            fontStyle: textOptionsMerged?.italic ? 'italic' : 'normal',
+            textDecoration: textOptionsMerged?.underline ? 'underline' : 'none',
             cursor: "text", // Ensure cursor is text when over textarea
+            maxWidth: '100%', // Ensure text doesn't overflow container width
+            overflowWrap: 'break-word', // Allow long words to break
+            wordWrap: 'break-word',
+            width: '100%',
+            background: isSticky ? undefined : 'white',
+            backdropFilter: isSticky ? undefined : 'none',
+            caretColor: 'black', // Ensure caret is visible
+            minHeight: '60px', // Ensure minimum height even when empty
           }}
           placeholder={isSticky ? "Add note..." : "Add text..."}
           autoFocus // Rely on this for initial focus
