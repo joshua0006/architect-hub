@@ -69,6 +69,42 @@ const getCurrentPageNumber = (): number => {
   return pageElement ? parseInt(pageElement.textContent?.split('/')[0]?.trim() || '1') : 1;
 };
 
+// Apply text formatting to the selected annotation
+const applyTextFormatting = (annotation: Annotation, formatting: any): Annotation => {
+  // Clone the annotation to avoid direct mutation
+  const updatedAnnotation = { ...annotation };
+  
+  // Ensure textOptions exists
+  if (!updatedAnnotation.style.textOptions) {
+    updatedAnnotation.style.textOptions = {};
+  }
+  
+  // Apply the formatting options
+  updatedAnnotation.style.textOptions = {
+    ...updatedAnnotation.style.textOptions,
+    ...formatting
+  };
+  
+  return updatedAnnotation;
+};
+
+// Format the selected text annotations
+const formatSelectedTextAnnotations = (formatting: any) => {
+  const { selectedAnnotations, updateAnnotation, currentDocumentId } = useAnnotationStore.getState();
+  
+  if (selectedAnnotations.length > 0 && currentDocumentId) {
+    selectedAnnotations.forEach(annotation => {
+      if (annotation.type === 'text') {
+        const updatedAnnotation = applyTextFormatting(annotation, formatting);
+        updateAnnotation(currentDocumentId, updatedAnnotation);
+      }
+    });
+    
+    // Dispatch event to force canvas redraw
+    dispatchToolChangeEvent();
+  }
+};
+
 export const ToolButton: React.FC<ToolButtonProps> = ({
   tool,
   icon: IconComponent,
@@ -109,62 +145,19 @@ export const ToolButton: React.FC<ToolButtonProps> = ({
   const handleClick = () => {
     // Get necessary functions and state from the store
     const {
-      addAnnotation,
-      setAnnotationToEditImmediately,
       setCurrentTool,
-      currentStyle,
       currentDocumentId
     } = useAnnotationStore.getState();
 
-    if (tool === 'text') {
-      if (!currentDocumentId) {
-        console.error("Cannot add text annotation: No document selected.");
-        return;
-      }
-
-      // Define default properties for the new text annotation
-      const defaultPos = { x: 100, y: 100 }; // Default position (adjust as needed)
-      const defaultWidth = 120;
-      const defaultHeight = 40;
-      const defaultText = "Text";
-      const currentPage = getCurrentPageNumber(); // Use existing helper
-
-      const newAnnotation: Annotation = {
-        id: Date.now().toString(),
-        type: "text",
-        points: [defaultPos],
-        text: defaultText,
-        style: {
-          ...currentStyle,
-          text: defaultText,
-          textOptions: currentStyle.textOptions || { fontSize: 14, fontFamily: 'Arial' },
-        },
-        pageNumber: currentPage,
-        timestamp: Date.now(),
-        userId: "current-user", // Replace with actual user ID later
-        version: 1,
-        width: defaultWidth,
-        height: defaultHeight,
-      };
-
-      // Add the annotation to the store
-      addAnnotation(currentDocumentId, newAnnotation);
-      
-      // Signal AnnotationCanvas to start editing this annotation
-      setAnnotationToEditImmediately(newAnnotation);
-      
-      // Switch back to select tool immediately
-      setCurrentTool("select");
-
-      // Dispatch event to trigger canvas update for the new tool ('select')
-      dispatchToolChangeEvent();
-
-    } else {
-      // Default behavior for other tools
-      setCurrentTool(tool);
-      onClick?.(); // Call any additional onClick handler passed as prop
-      dispatchToolChangeEvent(); // Dispatch event for other tool changes
-    }
+    // For all tools including text tools, simply set the current tool
+    // The AnnotationCanvas component will handle creating centered text annotations
+    setCurrentTool(tool);
+    
+    // Call any additional onClick handler passed as prop
+    onClick?.();
+    
+    // Dispatch event to trigger canvas update
+    dispatchToolChangeEvent();
   };
 
   return (
