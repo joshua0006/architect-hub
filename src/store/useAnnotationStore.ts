@@ -161,6 +161,20 @@ export const useAnnotationStore = create<AnnotationState>()(
             annotationService.saveAnnotationsToFirebase(documentId, newAnnotations)
               .catch(error => console.error('Error saving annotations to Firebase:', error));
           }, 0);
+          
+          // Dispatch annotation change event
+          setTimeout(() => {
+            const event = new CustomEvent("annotationChanged", {
+              detail: {
+                source: "userDrawing",
+                documentId,
+                pageNumber: annotation.pageNumber,
+                forceRender: true,
+                timestamp: Date.now(),
+              },
+            });
+            window.document.dispatchEvent(event);
+          }, 0);
 
           return newState;
         });
@@ -186,6 +200,20 @@ export const useAnnotationStore = create<AnnotationState>()(
             annotationService.saveAnnotationsToFirebase(documentId, newAnnotations)
               .catch(error => console.error('Error saving annotations to Firebase:', error));
           }, 0);
+          
+          // Dispatch annotation change event
+          setTimeout(() => {
+            const event = new CustomEvent("annotationChanged", {
+              detail: {
+                source: "userEdit",
+                documentId,
+                pageNumber: annotation.pageNumber,
+                forceRender: true,
+                timestamp: Date.now(),
+              },
+            });
+            window.document.dispatchEvent(event);
+          }, 0);
 
           return {
             documents: {
@@ -209,6 +237,11 @@ export const useAnnotationStore = create<AnnotationState>()(
         set((state) => {
           const document =
             state.documents[documentId] || initialDocumentState();
+            
+          // Find the annotation before deleting it to get its page number
+          const annotationToDelete = document.annotations.find(a => a.id === annotationId);
+          const pageNumber = annotationToDelete?.pageNumber || 1;
+            
           const newAnnotations = document.annotations.filter(
             (a) => a.id !== annotationId
           );
@@ -218,11 +251,23 @@ export const useAnnotationStore = create<AnnotationState>()(
           );
           newHistory.push(newAnnotations);
           
-          // Enable automatic Firebase saving for real-time updates
-          // Use setTimeout to avoid blocking the UI when saving
+          // Immediately save to Firebase to ensure real-time updates for all users
+          annotationService.saveAnnotationsToFirebase(documentId, newAnnotations)
+            .catch(error => console.error('Error saving annotations to Firebase after deletion:', error));
+            
+          // Dispatch annotation change event with wasDeleted flag
           setTimeout(() => {
-            annotationService.saveAnnotationsToFirebase(documentId, newAnnotations)
-              .catch(error => console.error('Error saving annotations to Firebase:', error));
+            const event = new CustomEvent("annotationChanged", {
+              detail: {
+                source: "userAction",
+                documentId,
+                pageNumber,
+                wasDeleted: true,
+                forceRender: true,
+                timestamp: Date.now(),
+              },
+            });
+            window.document.dispatchEvent(event);
           }, 0);
 
           return {
@@ -342,6 +387,10 @@ export const useAnnotationStore = create<AnnotationState>()(
             document.currentIndex + 1
           );
           newHistory.push(newAnnotations);
+          
+          // Immediately save to Firebase to ensure real-time updates for all users
+          annotationService.saveAnnotationsToFirebase(currentDocumentId, newAnnotations)
+            .catch(error => console.error('Error saving to Firebase after single deletion:', error));
 
           return {
             selectedAnnotation: null,
@@ -425,6 +474,10 @@ export const useAnnotationStore = create<AnnotationState>()(
           if (newAnnotations.length > 0 && newAnnotations.length < 10) {
             console.log('[AnnotationStore] Remaining annotation IDs:', newAnnotations.map(a => a.id));
           }
+          
+          // Immediately save to Firebase to ensure real-time updates for all users
+          annotationService.saveAnnotationsToFirebase(currentDocumentId, newAnnotations)
+            .catch(error => console.error('Error saving to Firebase after bulk deletion:', error));
 
           return {
             selectedAnnotations: [],

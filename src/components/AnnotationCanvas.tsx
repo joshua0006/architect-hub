@@ -36,6 +36,7 @@ import {
   getResizedPoints,
   isValidResize,
 } from "../utils/resizeUtils";
+import { debounce } from "../utils/debounce";
 
 interface TextInputProps {
   position: Point;
@@ -120,14 +121,15 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
   const MIN_SCROLL_SPEED = 2; // Minimum scroll speed
   const ACCELERATION = 0.2; // Reduced acceleration for smoother ramping
   const DECELERATION = 0.92; // Smooth deceleration factor
-  const AUTOSAVE_DELAY = 2000; // Delay in ms before triggering autosave
 
   // Add state for save button UI feedback
   const [showSaveButton, setShowSaveButton] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
-  const [saveSuccess, setSaveSuccess] = useState(false);
-  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
-  const [isAutosaving, setIsAutosaving] = useState(false);
+  const [isSaving, setIsSaving] = useState<boolean>(false);
+  const [saveSuccess, setSaveSuccess] = useState<boolean>(false);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState<boolean>(false);
+  const [isAutosaving, setIsAutosaving] = useState<boolean>(false);
+  const lastSaveTimeRef = useRef<number>(0);
+  const pendingAutosaveRef = useRef<NodeJS.Timeout | null>(null);
   
   // Function to mark changes as unsaved and show save button
   const markUnsavedChanges = useCallback(() => {
@@ -304,12 +306,18 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
     // Prevent default behavior to avoid selections
     e.preventDefault();
     
+    // Skip if this is a right-click
+    if (e.button === 2) {
+      return;
+    }
+    
     // If drag tool is active, don't do any annotation operations
     // Let the PDFViewer component handle the panning
     if (currentTool === "drag") {
       return;
     }
     
+    // Get the position of the mouse relative to the canvas
     const point = getCanvasPoint(e);
     
     // We no longer need the text and sticky note handling code here since it's done in the useEffect
@@ -705,12 +713,26 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
     // Function to handle remote annotation updates
     const handleRemoteAnnotationUpdate = (event: CustomEvent) => {
       // Extract details from the event
-      const { source, documentId: eventDocId, pageNumber: eventPageNum, forceRender } = event.detail || {};
+      const { source, documentId: eventDocId, pageNumber: eventPageNum, forceRender, wasDeleted } = event.detail || {};
       
       // Only process if this update is from a remote user (not our own changes)
       // and if it's for our current document and page
       if (source === 'remoteUser' && eventDocId === documentId && eventPageNum === pageNumber) {
         console.log("Received real-time annotation update from another user");
+        
+        // If we know this was a deletion, log additional info and ensure full redraw
+        if (wasDeleted) {
+          console.log("[AnnotationCanvas] Processing remote annotation deletion");
+          
+          // Get the canvas element and clear it to force a full redraw
+          const canvas = canvasRef.current;
+          if (canvas) {
+            const ctx = canvas.getContext('2d');
+            if (ctx) {
+              ctx.clearRect(0, 0, canvas.width, canvas.height);
+            }
+          }
+        }
         
         // Force rerender the canvas to show the updated annotations
         render();
@@ -720,10 +742,13 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
           // Get the updated annotations from the store
           const updatedAnnots = store.documents[documentId]?.annotations || [];
           
+          console.log(`[AnnotationCanvas] Checking validity of edited/selected annotations after update. Store has ${updatedAnnots.length} annotations.`);
+          
           // If we're editing a text annotation, check if it still exists
           if (editingAnnotation) {
             const stillExists = updatedAnnots.some(a => a.id === editingAnnotation.id);
             if (!stillExists) {
+              console.log(`[AnnotationCanvas] The annotation being edited (ID: ${editingAnnotation.id}) was deleted by another user`);
               // The annotation being edited was deleted by another user
               setIsEditingText(false);
               setTextInputPosition(null);
@@ -733,6 +758,8 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
           
           // Update selected annotations if they changed
           if (selectedAnnotations.length > 0) {
+            console.log(`[AnnotationCanvas] Checking if selected annotations (${selectedAnnotations.length}) still exist`);
+            
             // Filter selected annotations to only include ones that still exist
             const updatedSelections = selectedAnnotations.filter(sel => 
               updatedAnnots.some(a => a.id === sel.id)
@@ -740,10 +767,12 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
             
             // If any were removed, update our selection
             if (updatedSelections.length !== selectedAnnotations.length) {
+              console.log(`[AnnotationCanvas] ${selectedAnnotations.length - updatedSelections.length} selected annotations were deleted remotely`);
               setSelectedAnnotations(updatedSelections);
               
               // If all selections were removed, clear any resize/move state
               if (updatedSelections.length === 0) {
+                console.log(`[AnnotationCanvas] All selected annotations were deleted, clearing selection state`);
                 setIsResizing(false);
                 setActiveHandle(null);
                 setMoveOffset(null);
@@ -758,6 +787,11 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
             }
           }
         }
+        
+        // Force a second render after state updates to ensure everything is correctly displayed
+        setTimeout(() => {
+          render();
+        }, 50);
       }
     };
 
@@ -877,6 +911,12 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
   }, [moveOffset, scale, selectedAnnotations, documentId, store]);
 
   const handleMouseMove = (e: React.MouseEvent) => {
+    // Skip if it's a right-click event
+    if (e.button === 2) {
+      return;
+    }
+    
+    // Get the position of the mouse relative to the canvas
     const point = getCanvasPoint(e);
     
     // Update cursor position for tool indicators
@@ -1103,8 +1143,11 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
   };
 
   const handleMouseUp = useCallback((e: React.MouseEvent) => {
-    if (e.button !== 0) return;
-
+    // Skip if it's anything other than a left click
+    if (e.button !== 0) {
+      return;
+    }
+    
     // Stop auto-scrolling with smooth deceleration
     if (autoScrollingRef.current) {
       const decelerate = () => {
@@ -1402,40 +1445,9 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
   };
 
   const handleContextMenu = (e: React.MouseEvent) => {
+    // Just prevent the default browser context menu
     e.preventDefault();
-
-    const point = getCanvasPoint(e);
-
-    // Check if clicking on a selected annotation
-    const clickedAnnotation = documentState.annotations.find(
-      (annotation) =>
-        annotation.pageNumber === pageNumber &&
-        isPointInAnnotation(point, annotation)
-    );
-
-    if (clickedAnnotation) {
-      // If clicking on an unselected annotation, select it
-      if (!selectedAnnotations.some((a) => a.id === clickedAnnotation.id)) {
-        store.selectAnnotation(clickedAnnotation, e.shiftKey);
-      }
-
-      // Show context menu
-      setContextMenu({
-        position: { x: e.clientX, y: e.clientY },
-      });
-    } else {
-      // Clear selection if clicking outside annotations
-      store.clearSelection();
-      setContextMenu(null);
-    }
-
-    // When deleting annotations from context menu
-    const deleteAnnotation = (annotationId: string) => {
-      store.deleteAnnotation(documentId, annotationId);
-      markUnsavedChanges();
-      setContextMenu(null);
-      dispatchAnnotationChangeEvent("delete");
-    };
+    // No additional actions
   };
 
   // Effect to handle immediate editing requested from toolbar
@@ -1563,7 +1575,7 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
         // Clear selection and update UI
         store.clearSelection();
         setSelectedAnnotations([]);
-        dispatchAnnotationChangeEvent("delete");
+        dispatchAnnotationChangeEvent("delete", true);
       }
       
       // ... rest of the function ...
@@ -2218,6 +2230,7 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
           setIsSaving(false);
           setSaveSuccess(true);
           setHasUnsavedChanges(false); // Clear unsaved changes flag
+          lastSaveTimeRef.current = Date.now();
           
           // Hide button after success message shown
           setTimeout(() => {
@@ -2259,58 +2272,115 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
     }
   }, [documentId, dispatchAnnotationChangeEvent, store, hasUnsavedChanges]);
   
-  // Autosave functionality
-  const autosave = useCallback(() => {
-    if (!hasUnsavedChanges || isSaving) return;
-    
-    setIsAutosaving(true);
-    
-    try {
-      // Save to Firebase
-      store.saveToFirebase(documentId)
-        .then(() => {
-          setIsAutosaving(false);
-          setHasUnsavedChanges(false);
-          
-          // Dispatch events
-          dispatchAnnotationChangeEvent("autosave", true);
-        })
-        .catch((error) => {
-          console.error("Error autosaving annotations:", error);
-          setIsAutosaving(false);
-          // Leave hasUnsavedChanges true so user can try manual save
-        });
-    } catch (error) {
-      console.error("Error initiating autosave:", error);
-      setIsAutosaving(false);
-    }
-  }, [documentId, dispatchAnnotationChangeEvent, store, hasUnsavedChanges, isSaving]);
-  
-  // Debounced autosave effect - triggers autosave after delay when changes are made
-  useEffect(() => {
-    if (hasUnsavedChanges && !isSaving && !isAutosaving) {
-      const timer = setTimeout(() => {
-        autosave();
-      }, AUTOSAVE_DELAY);
+  // Enhanced autosave functionality that only triggers on annotation changes
+  const autosave = useCallback(
+    debounce(() => {
+      // Don't autosave if manual save is in progress or if we've saved very recently
+      if (isSaving) return;
       
-      return () => clearTimeout(timer);
-    }
-  }, [hasUnsavedChanges, isSaving, isAutosaving, autosave]);
+      const now = Date.now();
+      const timeSinceLastSave = now - lastSaveTimeRef.current;
+      const MIN_SAVE_INTERVAL = 5000; // Don't save more than once every 5 seconds
+      
+      if (timeSinceLastSave < MIN_SAVE_INTERVAL) {
+        // Reschedule autosave for later if we've saved too recently
+        if (pendingAutosaveRef.current) {
+          clearTimeout(pendingAutosaveRef.current);
+        }
+        
+        pendingAutosaveRef.current = setTimeout(() => {
+          autosave();
+        }, MIN_SAVE_INTERVAL - timeSinceLastSave + 100);
+        
+        return;
+      }
+      
+      if (hasUnsavedChanges) {
+        setIsAutosaving(true);
+        
+        // Save to Firebase
+        store.saveToFirebase(documentId)
+          .then(() => {
+            setHasUnsavedChanges(false);
+            lastSaveTimeRef.current = Date.now();
+            
+            // Brief autosave indicator
+            setTimeout(() => {
+              setIsAutosaving(false);
+            }, 800);
+            
+            // Dispatch event without triggering UI update
+            const saveSuccessEvent = new CustomEvent("annotationSaved", {
+              detail: {
+                success: true,
+                documentId,
+                timestamp: Date.now(),
+                isAutosave: true
+              },
+            });
+            document.dispatchEvent(saveSuccessEvent);
+          })
+          .catch((error) => {
+            console.error("Error autosaving annotations:", error);
+            setIsAutosaving(false);
+            // Keep the unsaved changes flag if save failed
+          });
+      } else {
+        setIsAutosaving(false);
+      }
+    }, 2000),
+    [documentId, hasUnsavedChanges, isSaving, store]
+  ); // 2 second debounce
   
-  // Show save button when annotations change and reset autosave timer
+  // Set up event listener for annotation changes that should trigger autosave
   useEffect(() => {
-    const annotations = documentState.annotations.filter(
-      (a) => a.pageNumber === pageNumber
-    );
+    // Function to handle annotation change events
+    const handleAnnotationChange = (event: CustomEvent) => {
+      const source = event.detail?.source || '';
+      const wasDeleted = event.detail?.wasDeleted === true;
+      
+      // Only trigger autosave for these specific annotation events:
+      // - New annotations added (userDrawing)
+      // - Annotations edited (userEdit)
+      // - Annotations deleted (via wasDeleted flag)
+      // - Annotations moved (move)
+      // - Text formatting changes (textFormatting)
+      // - Annotations resized (resize)
+      const annotationModifyingSources = [
+        'userDrawing',
+        'userEdit',
+        'move',
+        'textFormatting',
+        'resize'
+      ];
+      
+      if (annotationModifyingSources.includes(source) || wasDeleted) {
+        // Mark as having unsaved changes to show the manual save button
+        markUnsavedChanges();
+        
+        // Trigger autosave
+        autosave();
+      }
+    };
     
-    if (annotations.length > 0) {
-      markUnsavedChanges();
-    }
-  }, [documentState.annotations, pageNumber, markUnsavedChanges]);
-
+    // Listen for annotation change events
+    document.addEventListener('annotationChanged', handleAnnotationChange as EventListener);
+    
+    // Clean up
+    return () => {
+      document.removeEventListener('annotationChanged', handleAnnotationChange as EventListener);
+      
+      // Cancel any pending autosaves
+      if (pendingAutosaveRef.current) {
+        clearTimeout(pendingAutosaveRef.current);
+        pendingAutosaveRef.current = null;
+      }
+    };
+  }, [autosave, markUnsavedChanges]);
+  
   // Add a ref to track previous tool to prevent duplicate text annotations
   const prevToolRef = useRef<string | null>(null);
-
+  
   // Add effect to create centered text annotation when text tool is selected
   useEffect(() => {
     // Only create text annotation when the text tool is newly selected
@@ -2361,8 +2431,6 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
         timestamp: Date.now(),
         userId: "current-user",
         version: 1,
-        width: defaultWidth,
-        height: defaultHeight,
       };
       
       // Add to store
@@ -2420,17 +2488,12 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
           initialText={editingAnnotation?.text} // Use .text directly
           initialWidth={editingAnnotation?.width} // Pass initial size
           initialHeight={editingAnnotation?.height} // Pass initial size
-          textOptions={editingAnnotation?.style.textOptions} // Pass text options
+          textOptions={editingAnnotation?.style?.textOptions} // Pass text options
         />
       )}
-      {contextMenu && (
-        <ContextMenu
-          position={contextMenu.position}
-          onClose={() => setContextMenu(null)}
-        />
-      )}
+      {/* Remove context menu rendering */}
       {/* Show save button or autosave indicator */}
-      {(showSaveButton && hasUnsavedChanges) || isAutosaving || saveSuccess ? (
+      {(showSaveButton && hasUnsavedChanges) || isSaving || saveSuccess || isAutosaving ? (
         <button
           className={`fixed top-100 right-20 z-50 font-medium py-2 px-4 rounded-md shadow-md transition-all duration-200 flex items-center
             ${isSaving || isAutosaving
@@ -2440,17 +2503,41 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
                 : 'bg-indigo-600 hover:bg-indigo-700'
             } text-white`}
           onClick={saveAnnotations}
-          disabled={isSaving || isAutosaving || saveSuccess}
-          aria-label={isSaving ? "Saving annotations" : isAutosaving ? "Autosaving annotations" : saveSuccess ? "Annotations saved" : "Save annotations"}
-          title={isSaving ? "Saving annotations to cloud" : isAutosaving ? "Autosaving annotations to cloud" : saveSuccess ? "Annotations saved to cloud" : "Save annotations to cloud (Autosave enabled)"}
+          disabled={isSaving || saveSuccess || isAutosaving}
+          aria-label={
+            isSaving 
+              ? "Saving annotations" 
+              : isAutosaving 
+                ? "Autosaving annotations" 
+                : saveSuccess 
+                  ? "Annotations saved" 
+                  : "Save annotations"
+          }
+          title={
+            isSaving 
+              ? "Saving annotations to cloud" 
+              : isAutosaving 
+                ? "Autosaving annotations to cloud" 
+                : saveSuccess 
+                  ? "Annotations saved to cloud" 
+                  : "Save annotations to cloud"
+          }
         >
-          {isSaving || isAutosaving ? (
+          {isSaving ? (
             <>
               <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
               </svg>
-              {isSaving ? "Saving..." : "Autosaving..."}
+              Saving...
+            </>
+          ) : isAutosaving ? (
+            <>
+              <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              Autosaving...
             </>
           ) : saveSuccess ? (
             <>
