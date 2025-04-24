@@ -264,12 +264,18 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
 
   // Helper function to get annotations for a specific page
   const getAnnotationsForPage = useCallback((documentId: string, pageNumber: number) => {
-    // Get all annotations for the document
-    const documentAnnotations = annotationStore.documents[documentId]?.annotations || [];
+    // Always get the latest annotations directly from the store
+    // This ensures we don't use stale data that might still include deleted annotations
+    const documentAnnotations = useAnnotationStore.getState().documents[documentId]?.annotations || [];
+    
+    // Log for debugging annotation sync issues
+    if (process.env.NODE_ENV === 'development') {
+      console.log(`[PDFViewer] Getting annotations for page ${pageNumber}, found ${documentAnnotations.length} total annotations`);
+    }
     
     // Filter annotations for this specific page
     return documentAnnotations.filter(annotation => annotation.pageNumber === pageNumber);
-  }, [annotationStore.documents]);
+  }, []); // Remove dependency on annotationStore.documents to ensure we always get fresh data
 
   // Add this ref near the top with other refs
   const lastPageNavigationTimeRef = useRef<number>(0);
@@ -449,6 +455,13 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
         return;
       }
 
+      // Force a fresh fetch of annotations from the store before rendering
+      // This ensures we don't use potentially stale data in the annotation store
+      if (documentId) {
+        // Verify that the annotation store has the latest data
+        useAnnotationStore.getState().loadFromFirebase(documentId);
+      }
+
       // Get canvas context - if this fails, we can't render
       const canvas = canvasRef.current;
       const ctx = canvas.getContext('2d');
@@ -566,10 +579,26 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
                 try {
                   // Check if documentId and current page are available
                   if (documentId && currentPage) {
-                    // Get annotations from the document annotations for this page
-                    annotations = annotationStore.documents[documentId]?.annotations?.filter(
-                      (a: any) => a.pageNumber === currentPage
-                    ) || [];
+                    // Always get the freshest annotations directly from the store
+                    // This ensures deleted annotations aren't shown
+                    annotations = getAnnotationsForPage(documentId, currentPage);
+                    
+                    // Log annotation count for the current page
+                    console.log(`[PDFViewer] Page ${currentPage} has ${annotations.length} annotations after render`);
+                    
+                    // When annotations array is empty, explicitly clear the annotation canvas
+                    if (annotations.length === 0) {
+                      // Find all annotation canvases and clear them
+                      const annotationCanvases = document.querySelectorAll('.annotation-canvas-container canvas');
+                      annotationCanvases.forEach(canvas => {
+                        const canvasElement = canvas as HTMLCanvasElement;
+                        const ctx = canvasElement.getContext('2d');
+                        if (ctx) {
+                          ctx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+                        }
+                      });
+                      console.log('[PDFViewer] Cleared annotation canvas due to empty annotations array');
+                    }
                   }
                 } catch (err) {
                   console.warn('[PDFViewer] Error accessing annotations:', err);
@@ -1859,6 +1888,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
       const source = event.detail.source || 'unknown';
       const targetPageNumber = event.detail.pageNumber || currentPage;
       const forceRender = event.detail.forceRender === true;
+      const wasDeleted = event.detail.wasDeleted === true;
       
       // User interactions should always trigger a render
       const isUserInteraction = source === 'userDrawing' || source === 'userEdit' || 
@@ -1870,8 +1900,14 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
         renderTimeout = null;
       }
       
-      // If this is from user interaction, render immediately
-      if (isUserInteraction) {
+      // Get current annotations to check if empty
+      let currentPageAnnotations: any[] = [];
+      if (documentId) {
+        currentPageAnnotations = getAnnotationsForPage(documentId, targetPageNumber);
+      }
+      
+      // If this is from user interaction or deletion or if annotations are empty, render immediately
+      if (isUserInteraction || wasDeleted || currentPageAnnotations.length === 0) {
         lastRenderTime = Date.now();
         
         // Only render if the event is for the current page
@@ -1879,6 +1915,20 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
           // Force a fresh render
           hasRenderedOnceRef.current[currentPage] = false;
           renderedPagesRef.current.delete(currentPage);
+          
+          // If annotations are now empty or a deletion occurred, explicitly clear the canvas
+          if (wasDeleted || currentPageAnnotations.length === 0) {
+            // Find the annotation canvas for this page and clear it
+            const annotationCanvas = document.querySelector('.annotation-canvas-container canvas') as HTMLCanvasElement | null;
+            if (annotationCanvas) {
+              const ctx = annotationCanvas.getContext('2d');
+              if (ctx) {
+                // Clear the entire canvas
+                ctx.clearRect(0, 0, annotationCanvas.width, annotationCanvas.height);
+                console.log('[PDFViewer] Cleared annotation canvas for page', currentPage, 'due to deletion or empty annotations');
+              }
+            }
+          }
           
           // Immediate render - even shorter delay
           setTimeout(() => {
@@ -3253,16 +3303,8 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     // Initial load from Firebase when component mounts
     useAnnotationStore.getState().loadFromFirebase(documentId);
     
-    // Set up auto-save interval
-    const autoSaveInterval = setInterval(() => {
-      if (isLocalChange) {
-        saveAnnotationsToFirebase();
-      }
-    }, 5000); // Save every 5 seconds if there are local changes
-    
-    // Clean up interval when component unmounts
+    // Clean up when component unmounts
     return () => {
-      clearInterval(autoSaveInterval);
       // Save one final time when leaving the page
       if (isLocalChange) {
         saveAnnotationsToFirebase();
@@ -3272,25 +3314,9 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
   
   // Save to Firebase immediately when annotations change (with debounce)
   useEffect(() => {
-    const annotations = getAnnotationsForPage(documentId, currentPage);
-    
-    // Only save if this is a local change, not an update from Firebase
-    if (isLocalChange && annotations.length > 0) {
-      const debouncedSave = debounce(() => {
-        saveAnnotationsToFirebase();
-        // After saving, dispatch an event to notify the annotation canvas to update
-        const event = new CustomEvent('annotationSaved', {
-          detail: { source: 'localUser', documentId, pageNumber: currentPage }
-        });
-        document.dispatchEvent(event);
-      }, 500); // Shorter debounce for more responsive real-time updates
-      
-      debouncedSave();
-      
-      // Cleanup function to cancel debounce if component unmounts
-      return () => debouncedSave.cancel();
-    }
-  }, [documentId, currentPage, getAnnotationsForPage, saveAnnotationsToFirebase, isLocalChange]);
+    // We're not implementing auto-save anymore, so this effect is simplified
+    // The annotations will only be saved when manually triggered
+  }, []);
   
   // Add keyboard shortcut for manually saving annotations (Ctrl+S)
   useEffect(() => {
@@ -3323,31 +3349,172 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
         // Get the current annotations to compare
         const currentAnnots = useAnnotationStore.getState().documents[documentId]?.annotations || [];
         
-        // Only update if there are actual changes (prevent circular updates)
-        if (JSON.stringify(currentAnnots) !== JSON.stringify(updatedAnnotations)) {
-          // Flag that this change is coming from Firebase, not a local user action
-          setIsLocalChange(false);
+        // Log the before/after counts for debugging purposes
+        console.log(`[PDFViewer] Annotations comparison - Local: ${currentAnnots.length}, Remote: ${updatedAnnotations?.length || 0}`);
+        
+        // Special handling for completely empty annotations array
+        const isNowEmpty = (updatedAnnotations?.length || 0) === 0;
+        if (isNowEmpty) {
+          console.log('[PDFViewer] Received empty annotations array from Firebase, clearing all annotations');
           
-          // Import the annotations from Firebase
-          annotationStore.importAnnotations(documentId, updatedAnnotations || [], 'replace');
+          // When we get an empty array, explicitly clear all annotations
+          // and force a refresh of all pages
           
-          // Dispatch an event to notify the PDF viewer to re-render
+          // Clear the annotation store
+          useAnnotationStore.getState().clearAnnotations(documentId);
+          
+          // Force a refresh of the annotation layer
+          document.dispatchEvent(new Event('annotationRefresh'));
+          
+          // Also clear any annotation canvases manually
+          const annotationCanvases = document.querySelectorAll('.annotation-canvas-container canvas');
+          annotationCanvases.forEach(canvas => {
+            const canvasElement = canvas as HTMLCanvasElement;
+            const ctx = canvasElement.getContext('2d');
+            if (ctx) {
+              // Completely clear the canvas
+              ctx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+            }
+          });
+          
+          // Dispatch an annotationChanged event with wasDeleted flag
           const event = new CustomEvent('annotationChanged', {
             detail: {
               source: 'remoteUser',
               documentId,
               pageNumber: currentPage,
-              forceRender: true
+              forceRender: true,
+              wasDeleted: true
             }
           });
           document.dispatchEvent(event);
           
-          // Reset the local change flag after a short delay
-          // This ensures any follow-up local edits will be saved
+          // Reset local change flag
+          setIsLocalChange(false);
+          
+          // Import empty array to ensure store is updated
+          useAnnotationStore.getState().importAnnotations(documentId, [], 'replace');
+          
+          // Schedule a render to ensure UI is updated
           setTimeout(() => {
             setIsLocalChange(true);
-          }, 100);
+            renderPdfPage();
+          }, 50);
+          
+          return; // Exit early after handling empty annotations case
         }
+        
+        // Check if any annotations were deleted by comparing IDs
+        const currentIds = new Set(currentAnnots.map(a => a.id));
+        const updatedIds = new Set(updatedAnnotations?.map(a => a.id) || []);
+        
+        // Find deleted annotation IDs (present in current but not in updated)
+        const deletedIds = Array.from(currentIds).filter(id => !updatedIds.has(id));
+        // Find added annotation IDs (present in updated but not in current)
+        const addedIds = Array.from(updatedIds).filter(id => !currentIds.has(id));
+        
+        const wasAnnotationDeleted = deletedIds.length > 0;
+        const wasAnnotationAdded = addedIds.length > 0;
+        
+        if (wasAnnotationDeleted) {
+          console.log(`[PDFViewer] Detected ${deletedIds.length} annotation deletions from remote user`);
+          
+          // Dispatch a special event to trigger a full annotation cache refresh
+          // This ensures deleted annotations don't persist on screen
+          document.dispatchEvent(new Event('annotationRefresh'));
+        }
+        if (wasAnnotationAdded) {
+          console.log(`[PDFViewer] Detected ${addedIds.length} new annotations from remote user`);
+        }
+        
+        // Find all affected pages to ensure proper re-rendering
+        const affectedPages = new Set<number>();
+        
+        // Add pages with deleted annotations to affected pages
+        if (wasAnnotationDeleted) {
+          deletedIds.forEach(id => {
+            const annotation = currentAnnots.find(a => a.id === id);
+            if (annotation) {
+              affectedPages.add(annotation.pageNumber);
+            }
+          });
+        }
+        
+        // Add pages with new annotations to affected pages
+        if (wasAnnotationAdded) {
+          addedIds.forEach(id => {
+            const annotation = updatedAnnotations?.find(a => a.id === id);
+            if (annotation) {
+              affectedPages.add(annotation.pageNumber);
+            }
+          });
+        }
+        
+        // Always update the local store with the newest annotations from Firebase
+        // Flag that this change is coming from Firebase, not a local user action
+        setIsLocalChange(false);
+        
+        // For deletions, explicitly remove each deleted annotation from the store first
+        // This ensures they're properly removed before importing the updated list
+        if (wasAnnotationDeleted) {
+          const store = useAnnotationStore.getState();
+          deletedIds.forEach(id => {
+            // Use the store's deleteAnnotation method to remove each deleted annotation
+            if (documentId && id) {
+              store.deleteAnnotation(documentId, id);
+            }
+          });
+        }
+        
+        // Import the annotations from Firebase
+        useAnnotationStore.getState().importAnnotations(documentId, updatedAnnotations || [], 'replace');
+        
+        // Always include current page in affected pages for guaranteed refresh
+        affectedPages.add(currentPage);
+        
+        // Dispatch events for each affected page
+        affectedPages.forEach(pageNumber => {
+          // Create and dispatch a custom event to trigger re-rendering
+          const event = new CustomEvent('annotationChanged', {
+            detail: {
+              source: 'remoteUser',
+              documentId,
+              pageNumber,
+              forceRender: true,
+              wasDeleted: wasAnnotationDeleted
+            }
+          });
+          document.dispatchEvent(event);
+          
+          // For current page, ensure the page is fully re-rendered with fresh data
+          if (pageNumber === currentPage) {
+            // Force current page to be re-rendered by resetting render state
+            hasRenderedOnceRef.current[currentPage] = false;
+            renderedPagesRef.current.delete(currentPage);
+            
+            // Find annotation canvas for current page and force redraw
+            const annotationCanvas = document.querySelector('.annotation-canvas-container canvas') as HTMLCanvasElement | null;
+            if (annotationCanvas) {
+              const context = annotationCanvas.getContext('2d');
+              if (context) {
+                // Clear and redraw canvas
+                context.clearRect(0, 0, annotationCanvas.width, annotationCanvas.height);
+                // Set data attribute to trigger redraw in rendering loop
+                annotationCanvas.dataset.forceRender = 'true';
+              }
+            }
+            
+            // Force a PDF page re-render after a short delay
+            setTimeout(() => {
+              renderPdfPage();
+            }, 50);
+          }
+        });
+        
+        // Reset the local change flag after a short delay
+        setTimeout(() => {
+          setIsLocalChange(true);
+        }, 100);
       });
 
       // Store the unsubscribe function
@@ -3357,7 +3524,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
       // If subscription fails, fall back to non-realtime data
       useAnnotationStore.getState().loadFromFirebase(documentId);
     }
-  }, [documentId, annotationStore, currentPage]);
+  }, [documentId, currentPage, renderPdfPage]);
 
   // Effect to set up and clean up subscription
   useEffect(() => {
@@ -3373,4 +3540,66 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
       }
     };
   }, [documentId, setupAnnotationsSubscription]);
+
+  // Add an effect to clear annotation caches when annotations change
+  useEffect(() => {
+    // This effect ensures annotation caches are cleared whenever annotations might have changed
+    // It helps prevent deleted annotations from persisting on screen
+    
+    // Create a function to clear annotation rendering caches
+    const clearAnnotationCaches = () => {
+      // Reset the rendered pages tracking to force re-render
+      hasRenderedOnceRef.current = {};
+      renderedPagesRef.current.clear();
+      
+      // Force current page to re-render with latest annotations
+      if (currentPage) {
+        // Clear the main canvas first
+        const mainCanvas = canvasRef.current;
+        if (mainCanvas) {
+          const mainCtx = mainCanvas.getContext('2d');
+          if (mainCtx) {
+            // Clear the main canvas to force full redraw
+            mainCtx.clearRect(0, 0, mainCanvas.width, mainCanvas.height);
+          }
+        }
+        
+        // Find all annotation canvases and clear them
+        const annotationCanvases = document.querySelectorAll('.annotation-canvas-container canvas');
+        annotationCanvases.forEach(canvas => {
+          const canvasElement = canvas as HTMLCanvasElement;
+          const ctx = canvasElement.getContext('2d');
+          if (ctx) {
+            // Completely clear the canvas
+            ctx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+            // Set force render attribute
+            canvasElement.dataset.forceRender = 'true';
+          }
+        });
+        
+        // Get fresh annotations for the current page
+        const freshAnnotations = getAnnotationsForPage(documentId, currentPage);
+        console.log(`[PDFViewer] Cache clear - Page ${currentPage} has ${freshAnnotations.length} annotations`);
+        
+        // Schedule a render after a short delay to ensure any state updates have settled
+        setTimeout(() => {
+          // Re-render the current page with latest annotation data
+          renderPdfPage();
+        }, 50);
+      }
+    };
+    
+    // Listen for a special event for when annotations might need a full refresh
+    const handleAnnotationRefresh = () => {
+      clearAnnotationCaches();
+    };
+    
+    // Add event listener for annotation refresh
+    document.addEventListener('annotationRefresh', handleAnnotationRefresh);
+    
+    // Clean up on unmount
+    return () => {
+      document.removeEventListener('annotationRefresh', handleAnnotationRefresh);
+    };
+  }, [currentPage, renderPdfPage]);
 };

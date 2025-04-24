@@ -218,12 +218,9 @@ export const useAnnotationStore = create<AnnotationState>()(
           );
           newHistory.push(newAnnotations);
           
-          // Enable automatic Firebase saving for real-time updates
-          // Use setTimeout to avoid blocking the UI when saving
-          setTimeout(() => {
-            annotationService.saveAnnotationsToFirebase(documentId, newAnnotations)
-              .catch(error => console.error('Error saving annotations to Firebase:', error));
-          }, 0);
+          // Immediately save to Firebase to ensure real-time updates for all users
+          annotationService.saveAnnotationsToFirebase(documentId, newAnnotations)
+            .catch(error => console.error('Error saving annotations to Firebase after deletion:', error));
 
           return {
             documents: {
@@ -342,6 +339,10 @@ export const useAnnotationStore = create<AnnotationState>()(
             document.currentIndex + 1
           );
           newHistory.push(newAnnotations);
+          
+          // Immediately save to Firebase to ensure real-time updates for all users
+          annotationService.saveAnnotationsToFirebase(currentDocumentId, newAnnotations)
+            .catch(error => console.error('Error saving to Firebase after single deletion:', error));
 
           return {
             selectedAnnotation: null,
@@ -425,6 +426,10 @@ export const useAnnotationStore = create<AnnotationState>()(
           if (newAnnotations.length > 0 && newAnnotations.length < 10) {
             console.log('[AnnotationStore] Remaining annotation IDs:', newAnnotations.map(a => a.id));
           }
+          
+          // Immediately save to Firebase to ensure real-time updates for all users
+          annotationService.saveAnnotationsToFirebase(currentDocumentId, newAnnotations)
+            .catch(error => console.error('Error saving to Firebase after bulk deletion:', error));
 
           return {
             selectedAnnotations: [],
