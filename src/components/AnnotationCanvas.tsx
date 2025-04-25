@@ -127,15 +127,82 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [saveSuccess, setSaveSuccess] = useState<boolean>(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState<boolean>(false);
-  const [isAutosaving, setIsAutosaving] = useState<boolean>(false);
   const lastSaveTimeRef = useRef<number>(0);
-  const pendingAutosaveRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // Add state for unsaved changes modal
+  const [showUnsavedChangesModal, setShowUnsavedChangesModal] = useState(false);
+  const navigationAttemptUrl = useRef<string | null>(null);
   
   // Function to mark changes as unsaved and show save button
   const markUnsavedChanges = useCallback(() => {
     setHasUnsavedChanges(true);
     setShowSaveButton(true);
   }, []);
+
+  // Handle browser navigation/closing when there are unsaved changes
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (hasUnsavedChanges) {
+        // Standard approach for modern browsers
+        const message = 'You have unsaved annotation changes. Are you sure you want to leave?';
+        e.preventDefault();
+        e.returnValue = message;
+        return message;
+      }
+    };
+
+    // Add event listener for browser close/refresh
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [hasUnsavedChanges]);
+
+  // Handle internal navigation attempts within the app
+  useEffect(() => {
+    // Function to handle link clicks and other navigation attempts within the SPA
+    const handleInternalNavigation = (e: MouseEvent) => {
+      if (!hasUnsavedChanges) return;
+
+      // Check if the clicked element is a link
+      const target = e.target as HTMLElement;
+      const link = target.closest('a');
+      
+      if (link && link.href && !link.href.startsWith('javascript:') && !link.getAttribute('download')) {
+        // This is a regular link navigation - check if it's going to navigate away
+        const isSamePage = link.href === window.location.href;
+        
+        if (!isSamePage) {
+          e.preventDefault();
+          navigationAttemptUrl.current = link.href;
+          setShowUnsavedChangesModal(true);
+        }
+      }
+    };
+
+    // Add event listener for link clicks
+    document.addEventListener('click', handleInternalNavigation);
+
+    return () => {
+      document.removeEventListener('click', handleInternalNavigation);
+    };
+  }, [hasUnsavedChanges]);
+
+  // Function to proceed with navigation after confirmation
+  const handleProceedNavigation = () => {
+    // Before navigating, we could optionally try to save changes
+    if (navigationAttemptUrl.current) {
+      window.location.href = navigationAttemptUrl.current;
+    }
+    setShowUnsavedChangesModal(false);
+  };
+
+  // Function to cancel navigation
+  const handleCancelNavigation = () => {
+    navigationAttemptUrl.current = null;
+    setShowUnsavedChangesModal(false);
+  };
 
   // Effect to focus the text input when editing starts
   useEffect(() => {
@@ -2272,112 +2339,6 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
     }
   }, [documentId, dispatchAnnotationChangeEvent, store, hasUnsavedChanges]);
   
-  // Enhanced autosave functionality that only triggers on annotation changes
-  const autosave = useCallback(
-    debounce(() => {
-      // Don't autosave if manual save is in progress or if we've saved very recently
-      if (isSaving) return;
-      
-      const now = Date.now();
-      const timeSinceLastSave = now - lastSaveTimeRef.current;
-      const MIN_SAVE_INTERVAL = 5000; // Don't save more than once every 5 seconds
-      
-      if (timeSinceLastSave < MIN_SAVE_INTERVAL) {
-        // Reschedule autosave for later if we've saved too recently
-        if (pendingAutosaveRef.current) {
-          clearTimeout(pendingAutosaveRef.current);
-        }
-        
-        pendingAutosaveRef.current = setTimeout(() => {
-          autosave();
-        }, MIN_SAVE_INTERVAL - timeSinceLastSave + 100);
-        
-        return;
-      }
-      
-      if (hasUnsavedChanges) {
-        setIsAutosaving(true);
-        
-        // Save to Firebase
-        store.saveToFirebase(documentId)
-          .then(() => {
-            setHasUnsavedChanges(false);
-            lastSaveTimeRef.current = Date.now();
-            
-            // Brief autosave indicator
-            setTimeout(() => {
-              setIsAutosaving(false);
-            }, 800);
-            
-            // Dispatch event without triggering UI update
-            const saveSuccessEvent = new CustomEvent("annotationSaved", {
-              detail: {
-                success: true,
-                documentId,
-                timestamp: Date.now(),
-                isAutosave: true
-              },
-            });
-            document.dispatchEvent(saveSuccessEvent);
-          })
-          .catch((error) => {
-            console.error("Error autosaving annotations:", error);
-            setIsAutosaving(false);
-            // Keep the unsaved changes flag if save failed
-          });
-      } else {
-        setIsAutosaving(false);
-      }
-    }, 2000),
-    [documentId, hasUnsavedChanges, isSaving, store]
-  ); // 2 second debounce
-  
-  // Set up event listener for annotation changes that should trigger autosave
-  useEffect(() => {
-    // Function to handle annotation change events
-    const handleAnnotationChange = (event: CustomEvent) => {
-      const source = event.detail?.source || '';
-      const wasDeleted = event.detail?.wasDeleted === true;
-      
-      // Only trigger autosave for these specific annotation events:
-      // - New annotations added (userDrawing)
-      // - Annotations edited (userEdit)
-      // - Annotations deleted (via wasDeleted flag)
-      // - Annotations moved (move)
-      // - Text formatting changes (textFormatting)
-      // - Annotations resized (resize)
-      const annotationModifyingSources = [
-        'userDrawing',
-        'userEdit',
-        'move',
-        'textFormatting',
-        'resize'
-      ];
-      
-      if (annotationModifyingSources.includes(source) || wasDeleted) {
-        // Mark as having unsaved changes to show the manual save button
-        markUnsavedChanges();
-        
-        // Trigger autosave
-        autosave();
-      }
-    };
-    
-    // Listen for annotation change events
-    document.addEventListener('annotationChanged', handleAnnotationChange as EventListener);
-    
-    // Clean up
-    return () => {
-      document.removeEventListener('annotationChanged', handleAnnotationChange as EventListener);
-      
-      // Cancel any pending autosaves
-      if (pendingAutosaveRef.current) {
-        clearTimeout(pendingAutosaveRef.current);
-        pendingAutosaveRef.current = null;
-      }
-    };
-  }, [autosave, markUnsavedChanges]);
-  
   // Add a ref to track previous tool to prevent duplicate text annotations
   const prevToolRef = useRef<string | null>(null);
   
@@ -2479,48 +2440,43 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
       />
       {isEditingText && textInputPosition && (
         <TextInput
-          ref={textInputRef} // Pass the ref here
+          ref={textInputRef}
           position={textInputPosition}
           onComplete={handleTextComplete}
           onCancel={handleTextCancel}
           scale={scale}
-          isSticky={editingAnnotation?.type === "stickyNote"} // Use editingAnnotation directly
-          initialText={editingAnnotation?.text} // Use .text directly
-          initialWidth={editingAnnotation?.width} // Pass initial size
-          initialHeight={editingAnnotation?.height} // Pass initial size
-          textOptions={editingAnnotation?.style?.textOptions} // Pass text options
+          isSticky={editingAnnotation?.type === "stickyNote"}
+          initialText={editingAnnotation?.text}
+          initialWidth={editingAnnotation?.width}
+          initialHeight={editingAnnotation?.height}
+          textOptions={editingAnnotation?.style?.textOptions}
         />
       )}
-      {/* Remove context menu rendering */}
-      {/* Show save button or autosave indicator */}
-      {(showSaveButton && hasUnsavedChanges) || isSaving || saveSuccess || isAutosaving ? (
+      {/* Show save button indicator */}
+      {(showSaveButton && hasUnsavedChanges) || isSaving || saveSuccess ? (
         <button
           className={`fixed top-100 right-20 z-50 font-medium py-2 px-4 rounded-md shadow-md transition-all duration-200 flex items-center
-            ${isSaving || isAutosaving
+            ${isSaving
               ? 'bg-gray-500 cursor-wait' 
               : saveSuccess 
                 ? 'bg-green-600 hover:bg-green-700' 
                 : 'bg-indigo-600 hover:bg-indigo-700'
             } text-white`}
           onClick={saveAnnotations}
-          disabled={isSaving || saveSuccess || isAutosaving}
+          disabled={isSaving || saveSuccess}
           aria-label={
             isSaving 
               ? "Saving annotations" 
-              : isAutosaving 
-                ? "Autosaving annotations" 
-                : saveSuccess 
-                  ? "Annotations saved" 
-                  : "Save annotations"
+              : saveSuccess 
+                ? "Annotations saved" 
+                : "Save annotations"
           }
           title={
             isSaving 
               ? "Saving annotations to cloud" 
-              : isAutosaving 
-                ? "Autosaving annotations to cloud" 
-                : saveSuccess 
-                  ? "Annotations saved to cloud" 
-                  : "Save annotations to cloud"
+              : saveSuccess 
+                ? "Annotations saved to cloud" 
+                : "Save annotations to cloud"
           }
         >
           {isSaving ? (
@@ -2530,14 +2486,6 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
               </svg>
               Saving...
-            </>
-          ) : isAutosaving ? (
-            <>
-              <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-              </svg>
-              Autosaving...
             </>
           ) : saveSuccess ? (
             <>
@@ -2556,6 +2504,45 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
           )}
         </button>
       ) : null}
+
+      {/* Unsaved Changes Modal */}
+      {showUnsavedChangesModal && (
+        <div className="fixed inset-0 flex items-center justify-center z-50 bg-black bg-opacity-50">
+          <div className="bg-white rounded-lg shadow-xl p-6 max-w-md mx-auto">
+            <div className="flex items-start mb-4">
+              <div className="flex-shrink-0 text-yellow-500">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+              </div>
+              <div className="ml-3">
+                <h3 className="text-lg font-medium text-gray-900">Unsaved Changes</h3>
+                <div className="mt-2">
+                  <p className="text-sm text-gray-500">
+                    You have unsaved annotation changes. If you leave now, your changes will be lost.
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div className="flex justify-end space-x-3">
+              <button
+                type="button"
+                className="inline-flex justify-center px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 border border-gray-300 rounded-md hover:bg-gray-200 focus:outline-none"
+                onClick={handleCancelNavigation}
+              >
+                Stay on This Page
+              </button>
+              <button
+                type="button"
+                className="inline-flex justify-center px-4 py-2 text-sm font-medium text-white bg-red-600 border border-transparent rounded-md hover:bg-red-700 focus:outline-none"
+                onClick={handleProceedNavigation}
+              >
+                Leave Page
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 };
