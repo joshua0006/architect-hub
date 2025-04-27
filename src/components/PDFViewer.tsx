@@ -27,6 +27,7 @@ import { debounce } from "../utils/debounce";
 import { PDFDocument } from 'pdf-lib'; // Added: For PDF manipulation
 import { saveAs } from 'file-saver'; // Added: For saving files
 import { annotationService } from "../services/annotationService"; // Added: For annotation service
+import { setupAnnotationSubscription } from "../services/annotationSubscriptionService";
 
 interface PDFViewerProps {
   file: File | string;
@@ -3699,4 +3700,80 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
       clearInterval(pollTimeout);
     };
   }, [documentId, isViewerReady, currentPage]);
+
+  // Add this useEffect hook for real-time annotation updates
+  useEffect(() => {
+    // Skip if no document ID is provided
+    if (!documentId) return;
+    
+    console.log(`Setting up real-time annotation subscription for document: ${documentId}`);
+    
+    // Clean up any existing subscription first
+    if (annotationsUnsubscribeRef.current) {
+      annotationsUnsubscribeRef.current();
+      annotationsUnsubscribeRef.current = null;
+    }
+    
+    // Set up real-time subscription to annotation changes in Firebase
+    annotationsUnsubscribeRef.current = setupAnnotationSubscription(documentId, (updatedAnnotations: Annotation[]) => {
+      console.log(`Received ${updatedAnnotations.length} annotations from Firebase for document ${documentId}`);
+      
+      // Update our local state with the new annotations
+      setCurrentAnnotations(updatedAnnotations);
+      
+      // Get reference to the current annotation store
+      const store = useAnnotationStore.getState();
+      
+      // Check if these annotations came from another user
+      // Use optional chaining to safely check if isCurrentlyUpdating exists
+      const isExternalUpdate = !(store as any).isCurrentlyUpdating;
+      
+      // If the update was from another user, update the store
+      if (isExternalUpdate) {
+        // Use the store's handler for remote updates if it exists, otherwise use a fallback
+        if (typeof (store as any).handleRemoteAnnotationUpdate === 'function') {
+          (store as any).handleRemoteAnnotationUpdate(documentId, updatedAnnotations);
+        } else if (documentId === store.currentDocumentId) {
+          // Fallback: manually update the document's annotations in the store
+          // This assumes the store has a method to set annotations
+          const docState = store.documents[documentId];
+          if (docState) {
+            // Use import annotations if it exists
+            if (typeof store.importAnnotations === 'function') {
+              store.importAnnotations(documentId, updatedAnnotations, "replace");
+            }
+          }
+        }
+        
+        // Create a custom event to notify all annotation canvases
+        const event = new CustomEvent("annotationChanged", {
+          detail: {
+            source: "firebase",
+            documentId,
+            annotations: updatedAnnotations,
+            isExternalUpdate: true,
+            timestamp: Date.now()
+          }
+        });
+        
+        // Dispatch the event to update all canvases
+        window.document.dispatchEvent(event);
+        
+        // Show a small notification that annotations were updated
+        if (updatedAnnotations.length > 0) {
+          // Simple toast message that works with the existing toast implementation
+          showToast("Another user has updated the annotations on this document");
+        }
+      }
+    });
+    
+    // Clean up subscription when component unmounts or document changes
+    return () => {
+      if (annotationsUnsubscribeRef.current) {
+        console.log(`Cleaning up annotation subscription for document: ${documentId}`);
+        annotationsUnsubscribeRef.current();
+        annotationsUnsubscribeRef.current = null;
+      }
+    };
+  }, [documentId, showToast]); // Only re-run if document ID changes
 };

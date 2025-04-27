@@ -10,18 +10,31 @@ export const annotationService = {
    */
   async saveAnnotationsToFirebase(documentId: string, annotations: Annotation[]): Promise<void> {
     try {
+      // Validate input
+      if (!documentId) {
+        console.error('Cannot save annotations: Invalid document ID');
+        return Promise.reject(new Error('Invalid document ID'));
+      }
+      
+      // Add timestamp to each annotation if not present
+      const timestampedAnnotations = annotations.map(annotation => ({
+        ...annotation,
+        lastModified: annotation.lastModified || Date.now()
+      }));
+      
       // Save annotations to the document's annotations subcollection
       const docRef = doc(db, 'documentAnnotations', documentId);
       
-      // Create or update the document with the annotations
+      // Create or update the document with the annotations and use server timestamp
+      // to ensure clients can detect changes
       await setDoc(docRef, {
-        annotations,
-        updatedAt: serverTimestamp(),
-        createdAt: serverTimestamp(),
+        annotations: timestampedAnnotations,
+        updatedAt: serverTimestamp(), // Always use server timestamp for reliable ordering
+        lastSyncTime: Date.now(), // Client timestamp for display purposes
         version: 1, // Increment this when making schema changes
       }, { merge: true });
       
-      console.log('Annotations saved to Firebase successfully');
+      console.log(`Annotations saved to Firebase successfully (${timestampedAnnotations.length} annotations)`);
     } catch (error) {
       console.error('Error saving annotations to Firebase:', error);
       throw error;
