@@ -63,6 +63,7 @@ export interface Annotation {
   version?: number;
   width?: number;
   height?: number;
+  lastModified?: number; // Timestamp of the last modification
 }
 
 export interface ToolConfig {
