@@ -161,7 +161,7 @@ const ProjectItem = ({
 
   const renderStatusMenu = () => {
     // For non-staff users, just show the status without dropdown
-    if (user?.role !== 'Staff' && user?.role !== 'Admin') {
+    if (user?.role !== 'Admin') {
       return (
         <div className="status-menu">
           <button
@@ -175,7 +175,7 @@ const ProjectItem = ({
       );
     }
 
-    // For staff and admin users, show the status button with dropdown
+    // For admin users only, show the status button with dropdown
     return (
       <div className="relative status-menu">
         <button
@@ -385,11 +385,11 @@ function ProjectListComponent({
         const searchLower = searchQuery.toLowerCase();
         return (
           project.name.toLowerCase().includes(searchLower) ||
-          project.client.toLowerCase().includes(searchLower) ||
-          project.metadata?.industry.toLowerCase().includes(searchLower) ||
-          project.metadata?.projectType.toLowerCase().includes(searchLower) ||
-          project.metadata?.location.city.toLowerCase().includes(searchLower) ||
-          project.metadata?.location.country.toLowerCase().includes(searchLower)
+          (project.client?.toLowerCase() || '').includes(searchLower) ||
+          (project.metadata?.industry?.toLowerCase() || '').includes(searchLower) ||
+          (project.metadata?.projectType?.toLowerCase() || '').includes(searchLower) ||
+          (project.metadata?.location?.city?.toLowerCase() || '').includes(searchLower) ||
+          (project.metadata?.location?.country?.toLowerCase() || '').includes(searchLower)
         );
       });
     
@@ -550,10 +550,10 @@ function ProjectListComponent({
               placeholder="Search projects..."
               className="w-full pl-10 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-200 transition-all duration-300"
             />
-            <Search className="absolute left-3 top-2.5 w-5 h-5 text-gray-400" />
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
             {searchQuery && (
               <button
-                className="absolute right-3 top-2.5 text-xs text-gray-500 hover:text-gray-700"
+                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-xs text-gray-500 hover:text-gray-700"
                 onClick={() => setSearchQuery("")}
               >
                 Clear
@@ -563,7 +563,7 @@ function ProjectListComponent({
         </div>
         
         <div className="flex w-full">
-          {(user?.role === "Staff" || user?.role === "Admin") && (
+          {(user?.role === "Admin" || user?.role === "Staff") && (
             <button
               onClick={() => setShowAddProject(true)}
               className="w-full px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 transition-all duration-300 flex items-center justify-center space-x-2"
