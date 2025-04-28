@@ -17,6 +17,7 @@ export default function AdminPage() {
   const [editingRoleId, setEditingRoleId] = useState<string | null>(null);
   const [selectedRole, setSelectedRole] = useState<UserRole>(UserRole.CONTRACTOR);
   const [updatingRole, setUpdatingRole] = useState(false);
+  const [updatingRoleData, setUpdatingRoleData] = useState<{userId: string, role: UserRole} | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [roleFilter, setRoleFilter] = useState<UserRole | 'ALL'>('ALL');
@@ -260,6 +261,7 @@ export default function AdminPage() {
   const handleRoleSelection = async (userId: string, role: UserRole) => {
     try {
       setUpdatingRole(true);
+      setUpdatingRoleData({ userId, role });
       setError(null);
       
       await userService.updateUserRole(userId, role);
@@ -281,6 +283,7 @@ export default function AdminPage() {
       setError('Failed to update user role');
     } finally {
       setUpdatingRole(false);
+      setUpdatingRoleData(null);
     }
   };
 
@@ -567,11 +570,20 @@ export default function AdminPage() {
                               className={`flex items-center space-x-1 px-3 w-24 justify-center py-1 rounded-full cursor-pointer ${getRoleBadgeColor(user.role)}`}
                               onClick={() => startEditingRole(user.id, user.role as UserRole)}
                             >
-                              <span className="text-xs font-medium">{user.role}</span>
-                              <ChevronDown className="w-3 h-3" />
+                              {updatingRoleData?.userId === user.id ? (
+                                <>
+                                  <div className="w-3 h-3 border-t-2 border-current rounded-full animate-spin mr-1"></div>
+                                  <span className="text-xs font-medium">Updating...</span>
+                                </>
+                              ) : (
+                                <>
+                                  <span className="text-xs font-medium">{user.role}</span>
+                                  <ChevronDown className="w-3 h-3" />
+                                </>
+                              )}
                             </div>
                             
-                            {editingRoleId === user.id && (
+                            {editingRoleId === user.id && !updatingRole && (
                               <div className="absolute z-50 mt-1 w-30 bg-white rounded-md shadow-lg overflow-visible">
                                 <ul className="py-1">
                                   {Object.values(UserRole).map((role) => (

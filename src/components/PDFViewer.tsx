@@ -28,6 +28,7 @@ import { PDFDocument } from 'pdf-lib'; // Added: For PDF manipulation
 import { saveAs } from 'file-saver'; // Added: For saving files
 import { annotationService } from "../services/annotationService"; // Added: For annotation service
 import { setupAnnotationSubscription } from "../services/annotationSubscriptionService";
+import { ContextMenu } from "./ContextMenu";
 
 interface PDFViewerProps {
   file: File | string;
@@ -154,6 +155,12 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
 
   // Add a new ref for caching
   const cachedPagesRef = useRef<Set<number>>(new Set());
+
+  // Add state for context menu
+  const [contextMenu, setContextMenu] = useState<{ visible: boolean; position: Point }>({
+    visible: false,
+    position: { x: 0, y: 0 }
+  });
 
   // Early file identification
   const fileId = useMemo(() => {
@@ -2753,7 +2760,17 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     // Prevent default browser context menu
     e.preventDefault();
-    // No additional actions - right-click should have no function
+    
+    // Show our custom context menu at the mouse position
+    setContextMenu({
+      visible: true,
+      position: { x: e.clientX, y: e.clientY }
+    });
+  }, []);
+
+  // Add function to close context menu
+  const closeContextMenu = useCallback(() => {
+    setContextMenu({ visible: false, position: { x: 0, y: 0 } });
   }, []);
 
   // Make sure we explicitly return a JSX element to satisfy the React.FC type
@@ -2768,6 +2785,14 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
       {isShortcutGuideOpen && (
         <KeyboardShortcutGuide
           onClose={() => setIsShortcutGuideOpen(false)}
+        />
+      )}
+      
+      {/* Add context menu */}
+      {contextMenu.visible && (
+        <ContextMenu 
+          position={contextMenu.position} 
+          onClose={closeContextMenu}
         />
       )}
       
@@ -3776,4 +3801,25 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
       }
     };
   }, [documentId, showToast]); // Only re-run if document ID changes
+
+  // Add effect to listen for showContextMenu events
+  useEffect(() => {
+    const handleShowContextMenu = (e: CustomEvent) => {
+      const position = e.detail.position;
+      
+      // Show our custom context menu at the position
+      setContextMenu({
+        visible: true,
+        position: position
+      });
+    };
+    
+    // Add event listener with proper type assertion
+    document.addEventListener('showContextMenu', handleShowContextMenu as EventListener);
+    
+    // Clean up
+    return () => {
+      document.removeEventListener('showContextMenu', handleShowContextMenu as EventListener);
+    };
+  }, []);
 };

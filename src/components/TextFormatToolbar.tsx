@@ -1,5 +1,5 @@
 import React from 'react';
-import { Bold, Italic, Underline, ChevronDown } from 'lucide-react';
+import { Bold, Italic, Underline, ChevronDown, Square } from 'lucide-react';
 import { AnnotationStyle } from '../types/annotation';
 import { useAnnotationStore } from '../store/useAnnotationStore';
 
@@ -24,7 +24,8 @@ export const TextFormatToolbar: React.FC<TextFormatToolbarProps> = ({ selectedAn
     fontFamily: 'Arial',
     bold: false,
     italic: false,
-    underline: false
+    underline: false,
+    backgroundOpacity: 0 // Default background opacity to 0
   };
 
   const fontSizes = [8, 10, 12, 14, 16, 18, 20, 24, 28, 32, 36, 42, 48];
@@ -88,6 +89,11 @@ export const TextFormatToolbar: React.FC<TextFormatToolbarProps> = ({ selectedAn
   const changeFontFamily = (e: React.ChangeEvent<HTMLSelectElement>) => {
     updateTextOptions({ fontFamily: e.target.value });
   };
+  
+  const changeBackgroundOpacity = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const backgroundOpacity = parseFloat(e.target.value);
+    updateTextOptions({ backgroundOpacity });
+  };
 
   return (
     <div className="flex flex-wrap items-center gap-2 p-2 bg-white border-t border-gray-200">
@@ -146,6 +152,22 @@ export const TextFormatToolbar: React.FC<TextFormatToolbarProps> = ({ selectedAn
         >
           <Underline size={16} />
         </button>
+      </div>
+
+      {/* Background Opacity Slider */}
+      <div className="flex items-center gap-2 ml-2">
+        <Square size={16} className="text-gray-500" />
+        <input
+          type="range"
+          min="0"
+          max="1"
+          step="0.1"
+          value={textOptions.backgroundOpacity !== undefined ? textOptions.backgroundOpacity : 0}
+          onChange={changeBackgroundOpacity}
+          className="w-20 h-1.5 appearance-none bg-gray-300 rounded outline-none"
+          title="Background Opacity"
+        />
+        <span className="text-xs text-gray-500">{(textOptions.backgroundOpacity !== undefined ? textOptions.backgroundOpacity : 0) * 100}%</span>
       </div>
     </div>
   );

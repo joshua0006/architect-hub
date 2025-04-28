@@ -972,7 +972,7 @@ export default function DocumentList({
             </div>
 
             {/* Permissions Section - Only for staff users */}
-            {user?.role === 'Staff' && (
+            {(user?.role === 'Staff' || user?.role === 'Admin') && (
               <div className="mb-3">
                 <p className="block text-sm font-medium text-gray-700 mb-2">
                   Who can access this {popupItem.type === 'folder' ? 'folder' : 'file'}?
