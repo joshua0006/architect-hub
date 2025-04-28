@@ -3,7 +3,7 @@ import { BrowserRouter, Route, Routes, Navigate } from "react-router-dom";
 import { OrganizationProvider } from "./contexts/OrganizationContext";
 import { AuthProvider } from "./contexts/AuthContext";
 import SignIn from "./components/auth/SignIn";
-import SignUp from "./components/auth/SignUp";
+
 import AppContent from "./components/AppContent";
 import { useAuth } from "./contexts/AuthContext";
 import { PDFViewer } from "./components/PDFViewer";

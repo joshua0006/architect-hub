@@ -3,7 +3,6 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { Loader2, AlertCircle } from 'lucide-react';
 import { useOrganization } from '../../contexts/OrganizationContext';
-
 export default function SignIn() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -105,16 +104,7 @@ export default function SignIn() {
             )}
           </button>
 
-          <p className="text-center text-sm text-gray-600">
-            Don't have an account?{' '}
-            <button
-              type="button"
-              onClick={() => navigate('/signup')}
-              className="font-medium text-primary-600 hover:text-primary-500"
-            >
-              Create an account
-            </button>
-          </p>
+         
         </form>
       </div>
     </div>
