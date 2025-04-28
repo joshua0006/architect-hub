@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from "react";
-import { Copy, Scissors, Clipboard, CheckSquare } from "lucide-react";
+import { Copy, Scissors, Clipboard, CheckSquare, Trash2 } from "lucide-react";
 import { KEYBOARD_SHORTCUTS } from "../constants/toolbar";
 import { useAnnotationStore } from "../store/useAnnotationStore";
 import { Point } from "../types/annotation";
@@ -37,6 +37,15 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({ position, onClose }) =
     if (count) {
       showToast(`${count} annotation${count > 1 ? "s" : ""} cut`);
       deleteSelectedAnnotations();
+    }
+    onClose();
+  };
+
+  const handleDelete = () => {
+    const count = selectedAnnotations.length;
+    if (count) {
+      deleteSelectedAnnotations();
+      showToast(`${count} annotation${count > 1 ? "s" : ""} deleted`);
     }
     onClose();
   };
@@ -169,6 +178,18 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({ position, onClose }) =
           <span>Paste</span>
           <span className="ml-auto text-xs text-gray-400">
             {KEYBOARD_SHORTCUTS.actions.paste}
+          </span>
+        </button>
+        <div className="h-px bg-gray-200 my-1" />
+        <button
+          className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2 text-red-600 disabled:opacity-50"
+          onClick={handleDelete}
+          disabled={isActionDisabled}
+        >
+          <Trash2 size={16} />
+          <span>Delete</span>
+          <span className="ml-auto text-xs text-gray-400">
+            {KEYBOARD_SHORTCUTS.actions.delete}
           </span>
         </button>
       </div>
