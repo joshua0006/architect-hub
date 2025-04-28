@@ -46,6 +46,7 @@ export interface AnnotationStyle {
     italic?: boolean;
     text?: string;
     underline?: boolean; // Added for text styling
+    backgroundOpacity?: number; // Added for text background opacity
   };
   stampSize?: number; // Added for stamp resizing
 }

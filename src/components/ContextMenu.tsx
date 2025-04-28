@@ -1,8 +1,9 @@
 import React, { useEffect, useRef } from "react";
-import { Copy, Trash2, Scissors, MoveUp, MoveDown } from "lucide-react";
+import { Copy, Scissors, Clipboard, CheckSquare } from "lucide-react";
 import { KEYBOARD_SHORTCUTS } from "../constants/toolbar";
 import { useAnnotationStore } from "../store/useAnnotationStore";
 import { Point } from "../types/annotation";
+import { useToast } from "../contexts/ToastContext";
 
 interface ContextMenuProps {
   position: Point;
@@ -11,50 +12,67 @@ interface ContextMenuProps {
 
 export const ContextMenu: React.FC<ContextMenuProps> = ({ position, onClose }) => {
   const menuRef = useRef<HTMLDivElement>(null);
+  const { showToast } = useToast();
   const {
     selectedAnnotations,
     copySelectedAnnotations,
+    pasteAnnotations,
     deleteSelectedAnnotations,
-    currentDocument,
+    currentDocumentId,
     documents,
-    bringToFront,
-    sendToBack,
+    selectAnnotations,
+    clipboardAnnotations
   } = useAnnotationStore();
 
   const handleCopy = () => {
-    copySelectedAnnotations();
+    const count = copySelectedAnnotations();
+    if (count) {
+      showToast(`${count} annotation${count > 1 ? "s" : ""} copied`);
+    }
     onClose();
   };
 
   const handleCut = () => {
-    copySelectedAnnotations();
-    deleteSelectedAnnotations();
+    const count = copySelectedAnnotations();
+    if (count) {
+      showToast(`${count} annotation${count > 1 ? "s" : ""} cut`);
+      deleteSelectedAnnotations();
+    }
     onClose();
   };
 
-  const handleDelete = () => {
-    deleteSelectedAnnotations();
+  const handlePaste = () => {
+    if (clipboardAnnotations.length === 0) {
+      showToast("No annotations to paste");
+      onClose();
+      return;
+    }
+
+    // Get the current page from the first selected annotation or default to page 1
+    const currentPage = selectedAnnotations.length > 0 
+      ? selectedAnnotations[0].pageNumber 
+      : 1;
+
+    const pastedCount = pasteAnnotations(currentPage);
+    showToast(`${pastedCount} annotation${pastedCount > 1 ? "s" : ""} pasted`);
     onClose();
   };
 
-  const handleBringToFront = () => {
-    if (currentDocument && selectedAnnotations.length) {
-      bringToFront(
-        currentDocument,
-        selectedAnnotations.map((a) => a.id)
+  const handleSelectAll = () => {
+    if (!currentDocumentId) return;
+    
+    const document = documents[currentDocumentId];
+    if (document) {
+      // Get the current page from the first selected annotation or default to page 1
+      const currentPage = selectedAnnotations.length > 0 
+        ? selectedAnnotations[0].pageNumber 
+        : 1;
+        
+      selectAnnotations(
+        document.annotations.filter((a) => a.pageNumber === currentPage)
       );
-      onClose();
     }
-  };
-
-  const handleSendToBack = () => {
-    if (currentDocument && selectedAnnotations.length) {
-      sendToBack(
-        currentDocument,
-        selectedAnnotations.map((a) => a.id)
-      );
-      onClose();
-    }
+    onClose();
   };
 
   // Adjust menu position to stay within viewport
@@ -80,7 +98,15 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({ position, onClose }) =
     menu.style.top = `${adjustedY}px`;
   }, [position]);
 
-  const isDisabled = !selectedAnnotations.length;
+  const isActionDisabled = !selectedAnnotations.length;
+  const isSelectDisabled = !currentDocumentId || 
+    !documents[currentDocumentId]?.annotations.some(a => {
+      // Get the current page from the first selected annotation or default to page 1
+      const currentPage = selectedAnnotations.length > 0 
+        ? selectedAnnotations[0].pageNumber 
+        : 1;
+      return a.pageNumber === currentPage;
+    });
 
   return (
     <>
@@ -101,9 +127,21 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({ position, onClose }) =
         }}
       >
         <button
+          className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2"
+          onClick={handleSelectAll}
+          disabled={isSelectDisabled}
+        >
+          <CheckSquare size={16} />
+          <span>Select All</span>
+          <span className="ml-auto text-xs text-gray-400">
+            {KEYBOARD_SHORTCUTS.actions.selectAll}
+          </span>
+        </button>
+        <div className="h-px bg-gray-200 my-1" />
+        <button
           className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2 disabled:opacity-50"
           onClick={handleCopy}
-          disabled={isDisabled}
+          disabled={isActionDisabled}
         >
           <Copy size={16} />
           <span>Copy</span>
@@ -114,7 +152,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({ position, onClose }) =
         <button
           className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2 disabled:opacity-50"
           onClick={handleCut}
-          disabled={isDisabled}
+          disabled={isActionDisabled}
         >
           <Scissors size={16} />
           <span>Cut</span>
@@ -122,39 +160,15 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({ position, onClose }) =
             {KEYBOARD_SHORTCUTS.actions.cut}
           </span>
         </button>
-        <div className="h-px bg-gray-200 my-1" />
         <button
-          className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2 disabled:opacity-50"
-          onClick={handleBringToFront}
-          disabled={isDisabled}
+          className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2"
+          onClick={handlePaste}
+          disabled={clipboardAnnotations.length === 0}
         >
-          <MoveUp size={16} />
-          <span>Bring to Front</span>
+          <Clipboard size={16} />
+          <span>Paste</span>
           <span className="ml-auto text-xs text-gray-400">
-            {KEYBOARD_SHORTCUTS.actions.bringToFront}
-          </span>
-        </button>
-        <button
-          className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2 disabled:opacity-50"
-          onClick={handleSendToBack}
-          disabled={isDisabled}
-        >
-          <MoveDown size={16} />
-          <span>Send to Back</span>
-          <span className="ml-auto text-xs text-gray-400">
-            {KEYBOARD_SHORTCUTS.actions.sendToBack}
-          </span>
-        </button>
-        <div className="h-px bg-gray-200 my-1" />
-        <button
-          className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2 disabled:opacity-50"
-          onClick={handleDelete}
-          disabled={isDisabled}
-        >
-          <Trash2 size={16} className="text-red-500" />
-          <span className="text-red-500">Delete</span>
-          <span className="ml-auto text-xs text-gray-400">
-            {KEYBOARD_SHORTCUTS.actions.delete}
+            {KEYBOARD_SHORTCUTS.actions.paste}
           </span>
         </button>
       </div>

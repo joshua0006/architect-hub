@@ -62,6 +62,7 @@ interface AnnotationStyle {
     italic?: boolean;
     text?: string;
     underline?: boolean;
+    backgroundOpacity?: number;
   };
 }
 
@@ -1514,7 +1515,26 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
   const handleContextMenu = (e: React.MouseEvent) => {
     // Just prevent the default browser context menu
     e.preventDefault();
-    // No additional actions
+    
+    // Get the canvas position
+    const canvasRect = canvasRef.current?.getBoundingClientRect();
+    
+    if (canvasRect) {
+      // Convert to canvas coordinates
+      const pos = {
+        x: e.clientX,
+        y: e.clientY
+      };
+      
+      // Show context menu
+      const event = new CustomEvent('showContextMenu', {
+        detail: {
+          position: pos
+        }
+      });
+      
+      document.dispatchEvent(event);
+    }
   };
 
   // Effect to handle immediate editing requested from toolbar
@@ -1962,7 +1982,9 @@ export const AnnotationCanvas: React.FC<AnnotationCanvasProps> = ({
     }
     
     // Draw a subtle background for the text box for better readability
-    ctx.fillStyle = "rgba(255, 255, 255, 0.9)"; // More opaque for better visibility
+    // Use backgroundOpacity from textOptions if available, otherwise use default of 0.9
+    const backgroundOpacity = textOptions.backgroundOpacity !== undefined ? textOptions.backgroundOpacity : 0;
+    ctx.fillStyle = `rgba(255, 255, 255, ${backgroundOpacity})`;
     ctx.fillRect(
       position.x * scale,
       position.y * scale,

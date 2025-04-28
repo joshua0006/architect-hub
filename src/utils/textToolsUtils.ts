@@ -18,6 +18,7 @@ export const createTextAnnotation = (
     bold: false,
     italic: false,
     underline: false,
+    backgroundOpacity: 0, // Default background opacity is 0 (transparent)
     // Spread any existing textOptions from style, keeping above as defaults
     ...style.textOptions
   };
