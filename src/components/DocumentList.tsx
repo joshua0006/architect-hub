@@ -25,6 +25,7 @@ import {
   ChevronUp,
   FolderInput,
   Image,
+  Video,
 } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { Document, Folder, Project } from "../types";
@@ -71,7 +72,7 @@ interface DocumentListProps {
   onFolderSelect: (folder?: Folder) => void;
   onPreview: (document: Document) => void;
   onCreateFolder: (name: string, parentId?: string) => Promise<void>;
-  onCreateDocument?: (name: string, type: "pdf" | "dwg" | "other", file: File, folderId?: string) => Promise<void>;
+  onCreateDocument?: (name: string, type: "pdf" | "dwg" | "other" | "image", file: File, folderId?: string) => Promise<void>;
   onCreateMultipleDocuments?: (files: File[], parentId?: string) => Promise<void>;
   onUpdateFolder: (id: string, name: string) => Promise<void>;
   onDeleteFolder: (id: string) => Promise<void>;
@@ -1754,13 +1755,15 @@ export default function DocumentList({
       }
       
       // Determine file type from extension
-      let fileType: "pdf" | "dwg" | "other" = "other";
+      let fileType: "pdf" | "dwg" | "other" | "image" = "other";
       const extension = fileName.split('.').pop()?.toLowerCase();
       
       if (extension === 'pdf') {
         fileType = "pdf";
       } else if (extension === 'dwg') {
         fileType = "dwg";
+      } else if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg'].includes(extension || '')) {
+        fileType = "image";
       } else {
         // Check if it's a valid document file
         const validExtensions = ['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'csv', 'rtf'];
@@ -2180,6 +2183,21 @@ export default function DocumentList({
     if (!doc) return false;
     const extension = doc.name.split('.').pop()?.toLowerCase();
     return extension === 'heic' || (doc.metadata?.contentType === 'image/heic');
+  };
+  
+  // Function to check if the document is a video
+  const isVideo = (doc?: Document) => {
+    if (!doc) return false;
+    
+    // Check file extension
+    const extension = doc.name.split('.').pop()?.toLowerCase();
+    const videoExtensions = ['mp4', 'webm', 'ogg', 'ogv', 'mov', 'avi', 'wmv', 'flv', 'mkv'];
+    
+    // Check content type if available
+    const contentType = doc.metadata?.contentType;
+    const isVideoContentType = contentType ? contentType.startsWith('video/') : false;
+    
+    return videoExtensions.includes(extension || '') || isVideoContentType;
   };
   
   // Function to check if the document is an image
@@ -3471,6 +3489,8 @@ export default function DocumentList({
                         <Image className="w-6 h-6 text-blue-400" />
                       ) : isPdf(doc) ? (
                         <FileText className="w-6 h-6 text-red-400" />
+                      ) : isVideo(doc) ? (
+                        <Video className="w-6 h-6 text-purple-400" />
                       ) : (
                         <FileText className="w-6 h-6 text-gray-400" />
                       )}

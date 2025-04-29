@@ -67,6 +67,7 @@ import EnhancedCommentInput from './EnhancedCommentInput';
 import { DocumentVersion, DocumentComment } from "../types";
 import { NOTIFICATION_DOCUMENT_UPDATE_EVENT } from './NotificationIcon';
 import HeicConverter from './HeicConverter';
+import { ImageViewer } from "./ImageViewer";
 
 interface Document {
   id: string;
@@ -1296,8 +1297,8 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
     // Implementation of handleAddAnnotation
   };
 
-  const handleDownload = () => {
-    // Implementation of handleDownload
+  const handleDocumentDownload = () => {
+    // Implementation of document-specific download function
   };
 
   const toggleFullscreen = () => {
@@ -1751,16 +1752,16 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
             />
           </div>
         ) : isImage(document.name, document.metadata?.contentType) ? (
-          <div className="h-full flex items-center justify-center bg-white rounded-lg shadow-sm p-4 document-content"
-            style={{
-              height: screenWidth < 1600 ? '63vh' : '71vh',
-            }}>
-            <img 
-              src={document.url} 
-              alt={document.name} 
-              className="max-w-full max-h-full object-contain" 
-              onError={() => console.error("Image loading error")} 
-            />
+          <div className={`flex h-full ${isFullscreen ? 'gap-0' : 'gap-4'}`}>
+            <Toolbar currentFolder={enhancedFolderInfo} />
+            <div
+              className={`relative bg-white ${isFullscreen ? '' : 'rounded-lg shadow-sm p-4'} flex-1 document-content`}
+              style={{ height: "100%" }}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => e.preventDefault()}
+            >
+              <ImageViewer file={document.url} documentId={document.id} />
+            </div>
           </div>
         ) : isVideo(document.name, document.metadata?.contentType) ? (
           <div className="h-full flex items-center justify-center bg-white rounded-lg shadow-sm p-4 document-content"
@@ -1768,13 +1769,11 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
               height: screenWidth < 1600 ? '63vh' : '71vh',
             }}>
             <video 
-              src={document.url} 
-              controls 
+              src={document.url}
+              controls
               className="max-w-full max-h-full" 
               onError={() => console.error("Video loading error")}
-            >
-              Your browser does not support the video tag.
-            </video>
+            />
           </div>
         ) : isAudio(document.name, document.metadata?.contentType) ? (
           <div className="h-full flex items-center justify-center bg-white rounded-lg shadow-sm p-4 document-content">

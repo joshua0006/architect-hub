@@ -120,9 +120,22 @@ export const uploadFileToFolder = async (
     const folderDocRef = doc(db, 'folders', folderId);
     const documentsCollectionRef = collection(folderDocRef, 'documents');
     
+    // Determine file type more accurately for the document record
+    let docType = 'other';
+    const fileType = file.type.toLowerCase();
+    const extension = file.name.split('.').pop()?.toLowerCase();
+    
+    if (fileType === 'application/pdf' || extension === 'pdf') {
+      docType = 'pdf';
+    } else if (extension === 'dwg') {
+      docType = 'dwg';
+    } else if (fileType.startsWith('image/') || ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg'].includes(extension || '')) {
+      docType = 'image';
+    }
+    
     const documentData = {
       name: file.name,
-      type: file.type.split('/')[1] || 'unknown',
+      type: docType,
       url: downloadUrl,
       storagePath,
       version: 1,

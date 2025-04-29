@@ -24,7 +24,7 @@ export interface Document {
   id: string;
   projectId: string;
   name: string;
-  type: 'pdf' | 'dwg' | 'other';
+  type: 'pdf' | 'dwg' | 'other' | 'image';
   folderId: string;
   version: number;
   dateModified: string;

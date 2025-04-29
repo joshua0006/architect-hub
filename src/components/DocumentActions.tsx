@@ -15,7 +15,7 @@ interface DocumentActionsProps {
   onCreateFolder: (name: string, parentId?: string) => Promise<void>;
   onCreateDocument: (
     name: string,
-    type: "pdf" | "dwg" | "other",
+    type: "pdf" | "dwg" | "other" | "image",
     file: File,
     folderId?: string
   ) => Promise<void>;
@@ -137,12 +137,14 @@ export default function DocumentActions({
         const fileName = file.name;
         
         // Determine file type from extension
-        let fileType: "pdf" | "dwg" | "other" = "other";
+        let fileType: "pdf" | "dwg" | "other" | "image" = "other";
         const extension = file.name.split('.').pop()?.toLowerCase();
         if (extension === 'pdf') {
           fileType = "pdf";
         } else if (extension === 'dwg') {
           fileType = "dwg";
+        } else if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg'].includes(extension || '')) {
+          fileType = "image";
         }
         
         await onCreateDocument(fileName, fileType, file, targetFolderId);
