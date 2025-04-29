@@ -25,6 +25,7 @@ import {
   ChevronUp,
   FolderInput,
   Image,
+  Video,
 } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { Document, Folder, Project } from "../types";
@@ -71,7 +72,7 @@ interface DocumentListProps {
   onFolderSelect: (folder?: Folder) => void;
   onPreview: (document: Document) => void;
   onCreateFolder: (name: string, parentId?: string) => Promise<void>;
-  onCreateDocument?: (name: string, type: "pdf" | "dwg" | "other", file: File, folderId?: string) => Promise<void>;
+  onCreateDocument?: (name: string, type: "pdf" | "dwg" | "other" | "image", file: File, folderId?: string) => Promise<void>;
   onCreateMultipleDocuments?: (files: File[], parentId?: string) => Promise<void>;
   onUpdateFolder: (id: string, name: string) => Promise<void>;
   onDeleteFolder: (id: string) => Promise<void>;
@@ -824,6 +825,9 @@ export default function DocumentList({
   // Update handleEditClick to not need mouse coordinates
   const handleEditClick = (e: React.MouseEvent, id: string, type: 'folder' | 'document', name: string) => {
     e.stopPropagation();
+    
+    // Close image preview popup if it's open
+    closeImagePreview();
     
     // Just need to set the item details, not the position
     setPopupPosition({ x: 0, y: 0 }); // Still set position to trigger popup visibility
@@ -1751,13 +1755,15 @@ export default function DocumentList({
       }
       
       // Determine file type from extension
-      let fileType: "pdf" | "dwg" | "other" = "other";
+      let fileType: "pdf" | "dwg" | "other" | "image" = "other";
       const extension = fileName.split('.').pop()?.toLowerCase();
       
       if (extension === 'pdf') {
         fileType = "pdf";
       } else if (extension === 'dwg') {
         fileType = "dwg";
+      } else if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg'].includes(extension || '')) {
+        fileType = "image";
       } else {
         // Check if it's a valid document file
         const validExtensions = ['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'csv', 'rtf'];
@@ -2167,7 +2173,6 @@ export default function DocumentList({
 
   const [isFullscreen, setIsFullscreen] = useState(false);
   
-  // Simple function to check if the document is a PDF
   const isPdf = (doc?: Document) => {
     if (!doc) return false;
     const extension = doc.name.split('.').pop()?.toLowerCase();
@@ -2178,6 +2183,139 @@ export default function DocumentList({
     if (!doc) return false;
     const extension = doc.name.split('.').pop()?.toLowerCase();
     return extension === 'heic' || (doc.metadata?.contentType === 'image/heic');
+  };
+  
+  // Function to check if the document is a video
+  const isVideo = (doc?: Document) => {
+    if (!doc) return false;
+    
+    // Check file extension
+    const extension = doc.name.split('.').pop()?.toLowerCase();
+    const videoExtensions = ['mp4', 'webm', 'ogg', 'ogv', 'mov', 'avi', 'wmv', 'flv', 'mkv'];
+    
+    // Check content type if available
+    const contentType = doc.metadata?.contentType;
+    const isVideoContentType = contentType ? contentType.startsWith('video/') : false;
+    
+    return videoExtensions.includes(extension || '') || isVideoContentType;
+  };
+  
+  // Function to check if the document is an image
+  const isImage = (doc?: Document) => {
+    if (!doc) return false;
+    
+    // Check file extension
+    const extension = doc.name.split('.').pop()?.toLowerCase();
+    const imageExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'];
+    
+    // Check content type if available
+    const contentType = doc.metadata?.contentType;
+    const isImageContentType = contentType ? contentType.startsWith('image/') && contentType !== 'image/heic' : false;
+    
+    return imageExtensions.includes(extension || '') || isImageContentType;
+  };
+  
+  // Function to generate thumbnail URL - uses the actual document URL for images
+  const getThumbnailUrl = (doc: Document) => {
+    return doc.url;
+  };
+  
+  // State for hover preview
+  const [hoveredImageDoc, setHoveredImageDoc] = useState<Document | null>(null);
+  const [showPreviewPopup, setShowPreviewPopup] = useState(false);
+  const [previewPosition, setPreviewPosition] = useState({ x: 0, y: 0 });
+  const [isPreviewLoading, setIsPreviewLoading] = useState(false);
+  const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // Mouse enter handler for image thumbnails
+  const handleImageMouseEnter = (doc: Document, e: React.MouseEvent) => {
+    setHoveredImageDoc(doc);
+    setIsPreviewLoading(true);
+    
+    // Calculate position based on mouse coordinates
+    const x = e.clientX;
+    const y = e.clientY;
+    
+    updatePreviewPosition(x, y);
+    
+    // Clear any existing timeout
+    if (hoverTimeoutRef.current) {
+      clearTimeout(hoverTimeoutRef.current);
+    }
+    
+    // Set a timeout to show the preview after 0.5 seconds
+    hoverTimeoutRef.current = setTimeout(() => {
+      setShowPreviewPopup(true);
+    }, 500);
+  };
+  
+  // Helper function to calculate and update preview position with boundary checks
+  const updatePreviewPosition = (x: number, y: number) => {
+    const previewWidth = 240;
+    const previewHeight = 240;
+    
+    // Get viewport dimensions
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    
+    // Calculate position (initially to the right and slightly above the cursor)
+    let posX = x + 20;
+    let posY = y - 50;
+    
+    // Check right boundary
+    if (posX + previewWidth > viewportWidth) {
+      // If it would go off the right edge, position it to the left of the cursor
+      posX = x - previewWidth - 20;
+    }
+    
+    // Check left boundary (in case the above adjustment pushed it too far left)
+    if (posX < 0) {
+      // If it would go off the left edge, align with left edge with small margin
+      posX = 10;
+    }
+    
+    // Check bottom boundary
+    if (posY + previewHeight > viewportHeight) {
+      // If it would go off the bottom, position it higher
+      posY = viewportHeight - previewHeight - 10;
+    }
+    
+    // Check top boundary
+    if (posY < 0) {
+      // If it would go off the top, align with top edge with small margin
+      posY = 10;
+    }
+    
+    // Update the position state
+    setPreviewPosition({ x: posX, y: posY });
+  };
+  
+  // Mouse move handler to update preview position
+  const handleImageMouseMove = (e: React.MouseEvent) => {
+    if (hoveredImageDoc) {
+      // Calculate position based on mouse coordinates
+      const x = e.clientX;
+      const y = e.clientY;
+      
+      updatePreviewPosition(x, y);
+    }
+  };
+  
+  // Function to close the image preview popup
+  const closeImagePreview = () => {
+    setShowPreviewPopup(false);
+    setHoveredImageDoc(null);
+    
+    // Clear any existing hover timeout
+    if (hoverTimeoutRef.current) {
+      clearTimeout(hoverTimeoutRef.current);
+      hoverTimeoutRef.current = null;
+    }
+  };
+  
+  // Mouse leave handler for image thumbnails
+  const handleImageMouseLeave = () => {
+    closeImagePreview();
   };
   
   // Find the Layout component ref or context to update its state when fullscreen changes
@@ -3313,6 +3451,9 @@ export default function DocumentList({
                   >
                     <button
                       onClick={() => {
+                        // Close image preview popup if it's open
+                        closeImagePreview();
+                        
                         if (isSharedView) {
                           onPreview(doc);
                         } else {
@@ -3324,10 +3465,32 @@ export default function DocumentList({
                       }}
                       className="flex items-center space-x-3 flex-1"
                     >
-                      {isHeic(doc) ? (
+                      {isImage(doc) ? (
+                        <div 
+                          className="w-10 h-10 relative rounded overflow-hidden flex-shrink-0 border border-gray-200"
+                          onMouseEnter={(e) => handleImageMouseEnter(doc, e)}
+                          onMouseMove={handleImageMouseMove}
+                          onMouseLeave={handleImageMouseLeave}
+                        >
+                          <img 
+                            src={getThumbnailUrl(doc)} 
+                            alt={doc.name} 
+                            className="w-full h-full object-cover"
+                            onError={(e) => {
+                              // If image fails to load, fallback to icon
+                              e.currentTarget.style.display = 'none';
+                              const icon = document.createElement('div');
+                              icon.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-6 h-6 text-gray-400 absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2"><path d="M4 22h14a2 2 0 0 0 2-2V7.5L14.5 2H6a2 2 0 0 0-2 2v4"></path><polyline points="14 2 14 8 20 8"></polyline><path d="M4 12v4a2 2 0 0 0 2 2h2"></path><path d="M14 18.5v.5"></path><path d="M17 18.5v.5"></path><path d="M3 12h14v2a2 2 0 0 1-2 2h-4a2 2 0 0 1-2-2v-1"></path></svg>';
+                              e.currentTarget.parentNode?.appendChild(icon.firstChild as Node);
+                            }}
+                          />
+                        </div>
+                      ) : isHeic(doc) ? (
                         <Image className="w-6 h-6 text-blue-400" />
                       ) : isPdf(doc) ? (
                         <FileText className="w-6 h-6 text-red-400" />
+                      ) : isVideo(doc) ? (
+                        <Video className="w-6 h-6 text-purple-400" />
                       ) : (
                         <FileText className="w-6 h-6 text-gray-400" />
                       )}
@@ -3355,6 +3518,7 @@ export default function DocumentList({
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
+                                closeImagePreview();
                                 handleEditClick(e, doc.id, 'document', typeof doc.name === 'string' ? doc.name : 'Unnamed document');
                               }}
                               className="p-1 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100"
@@ -3374,6 +3538,7 @@ export default function DocumentList({
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
+                                closeImagePreview();
                                 handleDocumentCopyClick(doc.id, typeof doc.name === 'string' ? doc.name : 'Unnamed document');
                               }}
                               className="p-1 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100"
@@ -3393,6 +3558,7 @@ export default function DocumentList({
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
+                                closeImagePreview();
                                 handleDocumentMoveClick(doc.id, typeof doc.name === 'string' ? doc.name : 'Unnamed document');
                               }}
                               className="p-1 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100"
@@ -3415,7 +3581,10 @@ export default function DocumentList({
                             download
                             className="p-1 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100 block"
                             aria-label="Download document"
-                            onClick={(e) => e.stopPropagation()}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              closeImagePreview();
+                            }}
                           >
                             <Download className="w-5 h-5" />
                           </a>
@@ -3428,7 +3597,11 @@ export default function DocumentList({
                         {canShareDocuments() && (
                           <div className="group relative">
                             <button
-                              onClick={() => handleShare(doc.id, false)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                closeImagePreview();
+                                handleShare(doc.id, false);
+                              }}
                               className="p-1 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100"
                               aria-label="Share document"
                               disabled={isSharing}
@@ -3451,6 +3624,7 @@ export default function DocumentList({
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
+                                closeImagePreview();
                                 confirmDelete(doc.id, 'document', typeof doc.name === 'string' ? doc.name : 'Unnamed document');
                               }}
                               className="p-1 text-gray-400 hover:text-red-600 rounded-full hover:bg-red-50"
@@ -3882,6 +4056,44 @@ export default function DocumentList({
                   "Please wait while your files are being uploaded..." : 
                   "Upload complete!"}
               </p>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Large image preview popup */}
+      <AnimatePresence>
+        {showPreviewPopup && hoveredImageDoc && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.8 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.8 }}
+            transition={{ duration: 0.2 }}
+            className="fixed z-50 bg-white rounded-lg shadow-xl border border-gray-200 overflow-hidden"
+            style={{ 
+              width: '240px',
+              height: '240px',
+              left: `${previewPosition.x}px`,
+              top: `${previewPosition.y}px`,
+              transform: 'none' // Remove the centered transform
+            }}
+          >
+            <div className="relative w-full h-full">
+              {isPreviewLoading && (
+                <div className="absolute inset-0 flex items-center justify-center bg-gray-100 bg-opacity-50">
+                  <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
+                </div>
+              )}
+              <img
+                src={hoveredImageDoc ? getThumbnailUrl(hoveredImageDoc) : ''}
+                alt={hoveredImageDoc?.name || 'Preview'}
+                className="w-full h-full object-contain"
+                onLoad={() => setIsPreviewLoading(false)}
+                onError={() => setIsPreviewLoading(false)}
+              />
+              <div className="absolute bottom-0 left-0 right-0 bg-black bg-opacity-60 text-white p-2 text-sm truncate">
+                {hoveredImageDoc?.name}
+              </div>
             </div>
           </motion.div>
         )}

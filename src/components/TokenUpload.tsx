@@ -249,12 +249,14 @@ const TokenUpload: React.FC = () => {
         try {
           setUploadStatus(prev => ({ ...prev, [fileId]: 'uploading' }));
           
-          let fileType: "pdf" | "dwg" | "other" = "other";
+          let fileType: "pdf" | "dwg" | "other" | "image" = "other";
           const extension = file.name.split('.').pop()?.toLowerCase();
           if (extension === 'pdf') {
             fileType = "pdf";
           } else if (extension === 'dwg') {
             fileType = "dwg";
+          } else if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg'].includes(extension || '')) {
+            fileType = "image";
           }
           
           const documentResult = await uploadDocument(

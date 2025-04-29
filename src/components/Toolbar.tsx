@@ -46,11 +46,11 @@ const dispatchAnnotationChangeEvent = (pageNumber: number = 1, source: string = 
     detail: { pageNumber, source }
   });
   
-  // First try to dispatch to the PDF container
-  const pdfContainer = document.querySelector('.pdf-container');
-  if (pdfContainer) {
-    pdfContainer.dispatchEvent(event);
-    console.log('[Toolbar] Dispatched annotationChanged event to PDF container');
+  // Try to dispatch to the document container (either PDF or Image)
+  const documentContainer = document.querySelector('.pdf-container, .image-container');
+  if (documentContainer) {
+    documentContainer.dispatchEvent(event);
+    console.log('[Toolbar] Dispatched annotationChanged event to document container');
   }
   
   // When using select tool for movement, avoid setting forceRender on the canvas
