@@ -825,6 +825,9 @@ export default function DocumentList({
   const handleEditClick = (e: React.MouseEvent, id: string, type: 'folder' | 'document', name: string) => {
     e.stopPropagation();
     
+    // Close image preview popup if it's open
+    closeImagePreview();
+    
     // Just need to set the item details, not the position
     setPopupPosition({ x: 0, y: 0 }); // Still set position to trigger popup visibility
     setPopupItem({id, type, name});
@@ -2280,16 +2283,21 @@ export default function DocumentList({
     }
   };
   
-  // Mouse leave handler for image thumbnails
-  const handleImageMouseLeave = () => {
-    // Clear the timeout
+  // Function to close the image preview popup
+  const closeImagePreview = () => {
+    setShowPreviewPopup(false);
+    setHoveredImageDoc(null);
+    
+    // Clear any existing hover timeout
     if (hoverTimeoutRef.current) {
       clearTimeout(hoverTimeoutRef.current);
       hoverTimeoutRef.current = null;
     }
-    
-    setShowPreviewPopup(false);
-    setHoveredImageDoc(null);
+  };
+  
+  // Mouse leave handler for image thumbnails
+  const handleImageMouseLeave = () => {
+    closeImagePreview();
   };
   
   // Find the Layout component ref or context to update its state when fullscreen changes
@@ -3425,6 +3433,9 @@ export default function DocumentList({
                   >
                     <button
                       onClick={() => {
+                        // Close image preview popup if it's open
+                        closeImagePreview();
+                        
                         if (isSharedView) {
                           onPreview(doc);
                         } else {
@@ -3487,6 +3498,7 @@ export default function DocumentList({
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
+                                closeImagePreview();
                                 handleEditClick(e, doc.id, 'document', typeof doc.name === 'string' ? doc.name : 'Unnamed document');
                               }}
                               className="p-1 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100"
@@ -3506,6 +3518,7 @@ export default function DocumentList({
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
+                                closeImagePreview();
                                 handleDocumentCopyClick(doc.id, typeof doc.name === 'string' ? doc.name : 'Unnamed document');
                               }}
                               className="p-1 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100"
@@ -3525,6 +3538,7 @@ export default function DocumentList({
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
+                                closeImagePreview();
                                 handleDocumentMoveClick(doc.id, typeof doc.name === 'string' ? doc.name : 'Unnamed document');
                               }}
                               className="p-1 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100"
@@ -3547,7 +3561,10 @@ export default function DocumentList({
                             download
                             className="p-1 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100 block"
                             aria-label="Download document"
-                            onClick={(e) => e.stopPropagation()}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              closeImagePreview();
+                            }}
                           >
                             <Download className="w-5 h-5" />
                           </a>
@@ -3560,7 +3577,11 @@ export default function DocumentList({
                         {canShareDocuments() && (
                           <div className="group relative">
                             <button
-                              onClick={() => handleShare(doc.id, false)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                closeImagePreview();
+                                handleShare(doc.id, false);
+                              }}
                               className="p-1 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100"
                               aria-label="Share document"
                               disabled={isSharing}
@@ -3583,6 +3604,7 @@ export default function DocumentList({
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
+                                closeImagePreview();
                                 confirmDelete(doc.id, 'document', typeof doc.name === 'string' ? doc.name : 'Unnamed document');
                               }}
                               className="p-1 text-gray-400 hover:text-red-600 rounded-full hover:bg-red-50"
