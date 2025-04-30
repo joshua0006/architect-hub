@@ -27,7 +27,7 @@ import {
   Image,
   Video,
 } from "lucide-react";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { Document, Folder, Project } from "../types";
 import DocumentBreadcrumbs from "./DocumentBreadcrumbs";
 import DocumentActions from "./DocumentActions";
@@ -53,6 +53,7 @@ import { User } from '../types/auth';
 import { useNavigate } from 'react-router-dom';
 import { USER_UPDATE_EVENT } from '../services/userSubscriptionService';
 import { documentService } from '../services/documentService';
+import { formatDistanceToNow } from 'date-fns';
 
 // Local type definition for the DocumentViewer's Folder type
 interface ViewerFolder {
@@ -251,6 +252,53 @@ export default function DocumentList({
   useEffect(() => {
     setLocalFolders(folders);
   }, [folders]);
+
+  // Component initialization - ensure documents are loaded on mount
+  useEffect(() => {
+    const initializeComponentData = async () => {
+      // Only proceed if we have a currentFolder and we're not in shared view
+      if (currentFolder && !isSharedView) {
+        console.log(`[DocumentList] Component mounted, initializing data for folder: ${currentFolder.id}`);
+        
+        try {
+          // Force load documents for current folder
+          if (localDocuments.length === 0) {
+            console.log(`[DocumentList] No documents in state, loading from service`);
+            const docs = await documentService.getByFolderId(currentFolder.id);
+            if (docs.length > 0) {
+              console.log(`[DocumentList] Loaded ${docs.length} documents during initialization`);
+              setLocalDocuments(docs);
+            }
+          }
+          
+          // Call parent refresh if available
+          if (onRefresh) {
+            console.log('[DocumentList] Calling parent refresh during initialization');
+            await onRefresh();
+          }
+        } catch (error) {
+          console.error('[DocumentList] Error initializing component data:', error);
+        }
+      }
+    };
+    
+    initializeComponentData();
+    
+    // Register a one-time listener for window focus events to refresh data
+    // This helps when a user tabs back to the application
+    const handleWindowFocus = () => {
+      if (currentFolder && onRefresh) {
+        console.log('[DocumentList] Window focused, refreshing data');
+        onRefresh();
+      }
+    };
+    
+    window.addEventListener('focus', handleWindowFocus);
+    
+    return () => {
+      window.removeEventListener('focus', handleWindowFocus);
+    };
+  }, []);  // Empty dependency array means this runs once on mount
 
   // Set initial values when popup opens - moved from renderEditPopup
   // Update useEffect to fetch permissions when popup opens
@@ -1402,12 +1450,14 @@ export default function DocumentList({
         const fileName = file.name;
         
         // Determine file type from extension
-        let fileType: "pdf" | "dwg" | "other" = "other";
+        let fileType: "pdf" | "dwg" | "other" | "image" = "other";
         const extension = file.name.split('.').pop()?.toLowerCase();
         if (extension === 'pdf') {
           fileType = "pdf";
         } else if (extension === 'dwg') {
           fileType = "dwg";
+        } else if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg'].includes(extension || '')) {
+          fileType = "image";
         }
         
         // Simulate progress updates
@@ -1916,13 +1966,13 @@ export default function DocumentList({
     
     // Create a properly typed wrapper function that always returns a function, never undefined
     const createDocumentHandler = onCreateDocument ? 
-      (name: string, type: "pdf" | "dwg" | "other", file: File, folderId?: string) => 
+      (name: string, type: "pdf" | "dwg" | "other" | "image", file: File, folderId?: string) => 
         onCreateDocument(name, type, file, folderId) : 
       // Fallback implementation that shows an error message
-      ((name: string, type: "pdf" | "dwg" | "other", file: File, folderId?: string): Promise<void> => {
+      ((name: string, type: "pdf" | "dwg" | "other" | "image", file: File, folderId?: string): Promise<void> => {
         showToast("Document creation is not available", "error");
         return Promise.reject(new Error("Document creation is not available"));
-      }) as (name: string, type: "pdf" | "dwg" | "other", file: File, folderId?: string) => Promise<void>;
+      }) as (name: string, type: "pdf" | "dwg" | "other" | "image", file: File, folderId?: string) => Promise<void>;
     
     return (
       <DocumentActions
@@ -1990,17 +2040,29 @@ export default function DocumentList({
 
     console.log(`[Document List] Setting up real-time document subscription for folder: ${currentFolder.id}`);
 
-    // Set up the subscription
-    const unsubscribe = subscribeToFolderDocuments(currentFolder.id, (updatedDocuments) => {
-      console.log(`[Document List] Received ${updatedDocuments.length} documents from real-time update`);
+    try {
+      // Set up the subscription
+      const unsubscribe = subscribeToFolderDocuments(currentFolder.id, (updatedDocuments) => {
+        console.log(`[Document List] Received ${updatedDocuments.length} documents from real-time update`);
 
-      // Update local state with the latest documents
-      setLocalDocuments(updatedDocuments);
-    });
+        // Update local state with the latest documents
+        setLocalDocuments(updatedDocuments);
+      });
 
-    // Store the unsubscribe function
-    unsubscribeDocRef.current = unsubscribe;
-    hasActiveDocSubscription.current = true;
+      // Store the unsubscribe function
+      unsubscribeDocRef.current = unsubscribe;
+      hasActiveDocSubscription.current = true;
+    } catch (error) {
+      console.error(`[Document List] Error setting up document subscription for folder ${currentFolder.id}:`, error);
+      
+      // If subscription fails, try to get documents directly as fallback
+      documentService.getByFolderId(currentFolder.id)
+        .then(docs => {
+          console.log(`[Document List] Fallback loading retrieved ${docs.length} documents`);
+          setLocalDocuments(docs);
+        })
+        .catch(err => console.error('[Document List] Fallback document loading failed:', err));
+    }
 
     // Cleanup on unmount or when the folder changes
     return () => {
@@ -2572,7 +2634,35 @@ export default function DocumentList({
     }
   };
   
-  // Update the copyOrMoveFolder function
+  // Force reload documents for a specific folder
+  const forceReloadDocuments = async (folderId: string) => {
+    try {
+      console.log(`[DocumentList] Force reloading documents for folder ${folderId}`);
+      
+      // Fetch fresh documents from the service
+      const freshDocuments = await documentService.getByFolderId(folderId);
+      console.log(`[DocumentList] Loaded ${freshDocuments.length} documents for folder ${folderId}`);
+      
+      // Update local state if this is the current folder
+      if (currentFolder && currentFolder.id === folderId) {
+        console.log(`[DocumentList] Updating documents for current folder`);
+        setLocalDocuments(freshDocuments);
+      }
+      
+      // Also call the parent refresh if available
+      if (onRefresh) {
+        console.log(`[DocumentList] Calling parent refresh after document reload`);
+        await onRefresh();
+      }
+      
+      return freshDocuments;
+    } catch (error) {
+      console.error(`Error force reloading documents for folder ${folderId}:`, error);
+      showToast("Failed to reload documents", "error");
+      return [];
+    }
+  };
+  
   const copyOrMoveFolder = async (source_folder: string, destination_project_id: string, destination_folder: string, action: 'move' | 'copy') => {
     try {
       // Set loading state to true when operation starts
@@ -2800,11 +2890,26 @@ export default function DocumentList({
         }
       }
       
-      // Refresh regardless of action
-      if (onRefresh) {
-        console.log('[DocumentList] Refreshing due to folder operation');
-        onRefresh();
-      }
+      // Add a small delay before refreshing documents to ensure database has synced
+      setTimeout(() => {
+        // Refresh regardless of action
+        if (onRefresh) {
+          console.log('[DocumentList] Refreshing due to folder operation with delay');
+          onRefresh();
+        }
+        
+        // If we have a current folder, also trigger a document update for it
+        if (currentFolder) {
+          console.log(`[DocumentList] Triggering document update for current folder: ${currentFolder.id}`);
+          triggerDocumentUpdate(currentFolder.id);
+        }
+        
+        // If we have a specific folder ID, also refresh its documents
+        if (folderId && folderId !== currentFolder?.id) {
+          console.log(`[DocumentList] Triggering document update for affected folder: ${folderId}`);
+          triggerDocumentUpdate(folderId);
+        }
+      }, 300); // Short delay to ensure database sync
       
       // Additional handling for cross-project moves
       if (action === 'move' && eventProjectId && eventProjectId !== selectedProject?.id) {
@@ -2837,6 +2942,23 @@ export default function DocumentList({
       }
     }
   }, [currentFolder?.id, onRefresh]);
+
+  // Ensure documents are loaded on page refresh
+  useEffect(() => {
+    // If we have a currentFolder but no documents in local state, trigger a refresh
+    if (currentFolder && !isSharedView && localDocuments.length === 0 && documents.length === 0) {
+      console.log(`[DocumentList] Page refresh detected - no documents loaded for folder ${currentFolder.id}, forcing refresh`);
+      
+      // Force a document refresh for this folder
+      triggerDocumentUpdate(currentFolder.id);
+      
+      // Also call parent refresh if available
+      if (onRefresh) {
+        console.log('[DocumentList] Calling parent refresh due to page refresh with empty documents');
+        onRefresh();
+      }
+    }
+  }, [currentFolder, localDocuments.length, documents.length, isSharedView, onRefresh]);
 
   // Listen for user update events when folder operations occur between projects
   useEffect(() => {
@@ -3072,6 +3194,31 @@ export default function DocumentList({
       </div>
     );
   };
+
+  // Add a specific handler for document update events that uses forceReloadDocuments
+  useEffect(() => {
+    const handleManualDocumentRefresh = (event: Event) => {
+      const customEvent = event as CustomEvent;
+      const { folderId } = customEvent.detail;
+      
+      // Only respond if we have a matching folder
+      if (folderId && (currentFolder?.id === folderId || (rootFolder && rootFolder.id === folderId))) {
+        console.log(`[DocumentList] Manual document refresh requested for folder ${folderId}`);
+        
+        // Use our force reload function to ensure documents are properly loaded
+        forceReloadDocuments(folderId).then(docs => {
+          console.log(`[DocumentList] Force loaded ${docs.length} documents in response to manual refresh`);
+        });
+      }
+    };
+    
+    // Listen for the document update event
+    document.addEventListener(DOCUMENT_UPDATE_EVENT, handleManualDocumentRefresh);
+    
+    return () => {
+      document.removeEventListener(DOCUMENT_UPDATE_EVENT, handleManualDocumentRefresh);
+    };
+  }, [currentFolder, rootFolder]);
 
   return (
     <div 

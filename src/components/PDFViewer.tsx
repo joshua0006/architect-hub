@@ -2108,44 +2108,80 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     
     // Simple load process with retry
     const loadPdf = () => {
+      if (!file) {
+        console.error("No file provided to PDFViewer");
+        setRenderError(new Error("No file provided"));
+        return;
+      }
       
-      if (typeof file === "string") {
-        // For URL, fetch it first
-        fetch(file)
-          .then(response => {
-            if (!response.ok) {
-              throw new Error(`Failed to fetch PDF: ${response.status}`);
-            }
-            return response.blob();
-          })
-          .then(blob => {
-            const pdfFile = new File([blob], file.split('/').pop() || 'document.pdf', { type: 'application/pdf' });
-            setPdfFile(pdfFile);
-            setHasStartedLoading(true);
-          })
-          .catch(error => {
-            console.error('[PDFViewer] Error loading PDF from URL:', error);
-            setRenderError(error instanceof Error ? error : new Error(String(error)));
-            setIsInitialLoading(false); // Stop loading state on error
-            // Try once more with a different approach if it failed
-            setTimeout(() => {
-              try {
-                // The PDF will be loaded by usePDFDocument hook after setting the file
-                setPdfFile(new File([new Uint8Array(0)], 'fallback.pdf', { type: 'application/pdf' }));
-                setCurrentPage(1);
-                setHasStartedLoading(false);
-                setIsInitialLoading(false); // Stop loading state
-              } catch (e) {
-                console.error('[PDFViewer] Failed to recover:', e);
-                setRenderError(e instanceof Error ? e : new Error(String(e)));
-                setIsInitialLoading(false); // Stop loading state
+      // Reset error state before attempting to load
+      setRenderError(null);
+      setRenderAttempts(prev => prev + 1);
+      setIsInitialLoading(true);
+      setShowForcedLoadingOverlay(true);
+      setRenderComplete(false);
+      
+      // Clear any existing cache for this file if we're reloading after errors
+      if (renderAttempts > 1) {
+        if (pageCanvasCache.has(fileId)) {
+          console.log(`Clearing cache for file ${fileId} due to previous errors`);
+          pageCanvasCache.delete(fileId);
+          pageCacheTimestamps.delete(fileId);
+          cachedPagesRef.current.clear();
+        }
+      }
+      
+      console.log(`Loading PDF file (attempt ${renderAttempts + 1}): ${typeof file === 'string' ? file : file.name}`);
+      
+      try {
+        let pdfFile: File | Blob;
+        
+        if (typeof file === 'string') {
+          // Create a new URL with a cache-busting parameter
+          const url = new URL(file, window.location.origin);
+          url.searchParams.append('_t', Date.now().toString());
+          
+          // Fetch the file with fetch API to ensure we're not getting a cached version
+          fetch(url.toString(), { cache: 'no-store' })
+            .then(response => {
+              if (!response.ok) {
+                throw new Error(`Failed to fetch PDF: ${response.status} ${response.statusText}`);
               }
-            }, 500);
-          });
-      } else if (file instanceof File) {
-        // For File object, use it directly
-        setPdfFile(file);
-        setHasStartedLoading(true);
+              return response.blob();
+            })
+            .then(blob => {
+              // Create a new File object from the blob
+              setPdfFile(new File([blob], 'document.pdf', { type: 'application/pdf' }));
+            })
+            .catch(error => {
+              console.error("Error loading PDF from URL:", error);
+              setRenderError(error instanceof Error ? error : new Error(String(error)));
+              
+              // Retry after a delay if we haven't exceeded max attempts
+              if (renderAttempts < 3) {
+                console.log(`Retrying PDF load in 2 seconds (attempt ${renderAttempts + 1})`);
+                setTimeout(() => {
+                  loadPdf();
+                }, 2000);
+              }
+            });
+        } else {
+          // File is already a File object
+          setPdfFile(file);
+        }
+        
+        // Always show the loading overlay for at least 1 second
+        setTimeout(() => {
+          setShowForcedLoadingOverlay(false);
+        }, 1000);
+        
+      } catch (error) {
+        console.error("Error in loadPdf:", error);
+        setRenderError(error instanceof Error ? error : new Error(String(error)));
+        setIsInitialLoading(false);
+        
+        // Clear forced loading overlay after an error
+        setShowForcedLoadingOverlay(false);
       }
     };
     
@@ -2164,6 +2200,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
         
         // Update state to indicate file is loaded but not yet processed
         // PDF processing will proceed in the usePDFDocument and usePDFPage hooks
+        setHasStartedLoading(true);
         
         // Set initial scale based on container width
         if (containerRef.current) {
@@ -2180,7 +2217,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
         }
         
         // PDF loading state will be updated by the hooks
-        setIsInitialLoading(false);
+        // We should not set isInitialLoading to false here - that will happen when the PDF is actually loaded
       } catch (error) {
         console.error('[PDFViewer] Failed to initialize PDF:', error);
         setRenderError(error instanceof Error ? error : new Error('Failed to load PDF'));
@@ -2844,7 +2881,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
           onContextMenu={handleContextMenu}
         >
           {/* Initial Loading Animation - before PDF processing has started */}
-          {isInitialLoading && !hasStartedLoading && !renderError && (
+          {isInitialLoading && !pdf && !renderError && (
             <div className="absolute inset-0 flex items-center justify-center z-50 bg-white">
               <div className="flex flex-col items-center max-w-md text-center p-8">
                 <div className="relative w-20 h-20 mb-4">
@@ -3822,4 +3859,26 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
       document.removeEventListener('showContextMenu', handleShowContextMenu as EventListener);
     };
   }, []);
+
+  // Add this effect after the usePDFPage hook
+  // Clear loading states when PDF is successfully loaded
+  useEffect(() => {
+    if (pdf && page) {
+      // PDF and page are loaded, so we should clear all loading states
+      setIsInitialLoading(false);
+      setHasStartedLoading(false);
+      setShowForcedLoadingOverlay(false);
+      console.log('[PDFViewer] PDF and page loaded successfully, clearing loading states');
+    }
+  }, [pdf, page]);
+
+  // Ensure that loading states are properly cleared once rendering is complete
+  useEffect(() => {
+    if (renderComplete && page) {
+      // When rendering is complete and page is available, clear all loading states
+      setIsInitialLoading(false);
+      setHasStartedLoading(false);
+      console.log('[PDFViewer] Render completed, clearing all loading states');
+    }
+  }, [renderComplete, page]);
 };

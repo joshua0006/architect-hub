@@ -7,6 +7,9 @@ import { KeyboardShortcutGuide } from "./KeyboardShortcutGuide";
 import { useKeyboardShortcutGuide } from "../hooks/useKeyboardShortcutGuide";
 import { ImageControls } from "./ImageViewer/ImageControls";
 import { drawAnnotation } from "../utils/drawingUtils";
+import { KEYBOARD_SHORTCUTS } from "../constants/toolbar";
+import { ContextMenu } from "./ContextMenu";
+import { useToast } from "../contexts/ToastContext";
 
 interface ImageViewerProps {
   file: string;
@@ -27,13 +30,22 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({ file, documentId }) =>
   const [dragStart, setDragStart] = useState<Point | null>(null);
   const grabCursorClassName = "cursor-grabbing";
   const { isShortcutGuideOpen, setIsShortcutGuideOpen } = useKeyboardShortcutGuide();
+  const [contextMenu, setContextMenu] = useState<{ visible: boolean; position: Point } | null>(null);
+  const { showToast, showAnnotationToast } = useToast();
 
   const { 
     currentTool,
     currentStyle,
     selectAnnotation,
     selectedAnnotations,
-    documents
+    documents,
+    deleteAnnotation,
+    copySelectedAnnotations,
+    pasteAnnotations,
+    selectAnnotations,
+    clearSelection,
+    deleteSelectedAnnotations,
+    setCurrentDocument
   } = useAnnotationStore();
   
   // Helper function to get annotations for the current page
@@ -41,6 +53,137 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({ file, documentId }) =>
     const documentAnnotations = documents[docId]?.annotations || [];
     return documentAnnotations.filter(annotation => annotation.pageNumber === pageNumber);
   }, [documents]);
+
+  // Helper function to get current annotations for the document
+  const getCurrentAnnotations = useCallback(() => {
+    return getAnnotationsForPage(documentId, 1); // Images always use page 1
+  }, [documentId, getAnnotationsForPage]);
+
+  // Set current document on mount
+  useEffect(() => {
+    if (documentId) {
+      setCurrentDocument(documentId);
+    }
+  }, [documentId, setCurrentDocument]);
+
+  // Handle keyboard shortcuts
+  const handleKeyDown = useCallback((e: KeyboardEvent) => {
+    // Ignore keyboard shortcuts when inside input elements
+    if (
+      e.target instanceof HTMLInputElement ||
+      e.target instanceof HTMLTextAreaElement ||
+      (e.target as HTMLElement)?.isContentEditable
+    ) {
+      return;
+    }
+
+    // Make sure the document id is set as current in the store
+    setCurrentDocument(documentId);
+
+    // Select All: Ctrl+A
+    if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
+      e.preventDefault();
+      const annotations = getCurrentAnnotations();
+      if (annotations.length > 0) {
+        selectAnnotations(annotations);
+        showAnnotationToast(`Selected ${annotations.length} annotation${annotations.length > 1 ? "s" : ""}`);
+        document.dispatchEvent(new CustomEvent('storeChanged'));
+      }
+    }
+    
+    // Copy: Ctrl+C
+    else if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
+      if (selectedAnnotations.length > 0) {
+        e.preventDefault();
+        const count = copySelectedAnnotations();
+        if (count) {
+          showAnnotationToast(`${count} annotation${count > 1 ? "s" : ""} copied`);
+          document.dispatchEvent(new CustomEvent('storeChanged'));
+        }
+      }
+    }
+    
+    // Cut: Ctrl+X
+    else if ((e.ctrlKey || e.metaKey) && e.key === 'x') {
+      if (selectedAnnotations.length > 0) {
+        e.preventDefault();
+        const count = copySelectedAnnotations();
+        if (count) {
+          showAnnotationToast(`${count} annotation${count > 1 ? "s" : ""} cut`);
+          deleteSelectedAnnotations();
+          document.dispatchEvent(new CustomEvent('annotationChanged'));
+          document.dispatchEvent(new CustomEvent('storeChanged'));
+        }
+      }
+    }
+    
+    // Paste: Ctrl+V
+    else if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
+      e.preventDefault();
+      const pastedCount = pasteAnnotations(1); // Images always use page 1
+      if (pastedCount > 0) {
+        showAnnotationToast(`${pastedCount} annotation${pastedCount > 1 ? "s" : ""} pasted`);
+        document.dispatchEvent(new CustomEvent('annotationChanged'));
+        document.dispatchEvent(new CustomEvent('storeChanged'));
+      } else {
+        showAnnotationToast("No annotations to paste");
+      }
+    }
+    
+    // Delete or Backspace
+    else if (e.key === 'Delete' || e.key === 'Backspace') {
+      if (selectedAnnotations.length > 0) {
+        e.preventDefault();
+        const count = selectedAnnotations.length;
+        deleteSelectedAnnotations();
+        showAnnotationToast(`${count} annotation${count > 1 ? "s" : ""} deleted`);
+        document.dispatchEvent(new CustomEvent('annotationChanged'));
+        document.dispatchEvent(new CustomEvent('storeChanged'));
+      }
+    }
+    
+    // Undo: Ctrl+Z
+    else if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+      e.preventDefault();
+      // Implement undo functionality if available in annotation store
+    }
+    
+    // Redo: Ctrl+Y or Ctrl+Shift+Z
+    else if (
+      ((e.ctrlKey || e.metaKey) && e.key === 'y') ||
+      ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'z')
+    ) {
+      e.preventDefault();
+      // Implement redo functionality if available in annotation store
+    }
+    
+    // Escape: clear selection or exit current tool
+    else if (e.key === 'Escape') {
+      e.preventDefault();
+      if (selectedAnnotations.length > 0) {
+        clearSelection();
+        showAnnotationToast('Selection cleared');
+      }
+    }
+    
+    // Keyboard shortcut guide: F1 or ?
+    else if (e.key === 'F1' || (e.shiftKey && e.key === '?')) {
+      e.preventDefault();
+      setIsShortcutGuideOpen(true);
+    }
+  }, [
+    documentId, 
+    selectedAnnotations, 
+    getCurrentAnnotations, 
+    selectAnnotations, 
+    copySelectedAnnotations,
+    pasteAnnotations, 
+    deleteSelectedAnnotations,
+    clearSelection,
+    setIsShortcutGuideOpen,
+    showAnnotationToast,
+    setCurrentDocument
+  ]);
 
   const handleImageLoad = () => {
     if (imageRef.current) {
@@ -70,6 +213,20 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({ file, documentId }) =>
   const handleContextMenu = (e: React.MouseEvent) => {
     // Prevent the default browser context menu
     e.preventDefault();
+    
+    // Make sure the document id is set in the store
+    setCurrentDocument(documentId);
+    
+    // Show our custom context menu
+    setContextMenu({
+      visible: true,
+      position: { x: e.clientX, y: e.clientY }
+    });
+  };
+
+  // Close the context menu
+  const closeContextMenu = () => {
+    setContextMenu(null);
   };
 
   // Zoom functions
@@ -288,6 +445,72 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({ file, documentId }) =>
     };
   }, [isDragging, dragStart, handleMouseUp]);
 
+  // Register keyboard shortcut handlers
+  useEffect(() => {
+    // Attach the keyboard event listener
+    window.addEventListener('keydown', handleKeyDown);
+    
+    // Clean up the event listener when component unmounts
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [handleKeyDown]);
+
+  // Listen for annotation store changes
+  useEffect(() => {
+    // Function to update annotations when they change
+    const updateAnnotations = () => {
+      const annotations = getAnnotationsForPage(documentId, 1);
+      setCurrentAnnotations(annotations);
+      
+      // Dispatch annotation rendering event
+      document.dispatchEvent(
+        new CustomEvent('renderAnnotations', {
+          detail: { 
+            pageNumber: 1,
+            annotations 
+          },
+        })
+      );
+    };
+    
+    // Watch for changes in the annotation store
+    updateAnnotations();
+    
+    // Add a listener to the document to update annotations when store changes
+    const handleStoreChange = () => {
+      updateAnnotations();
+    };
+    
+    // Listen for both store changes and annotation changes
+    document.addEventListener('storeChanged', handleStoreChange);
+    document.addEventListener('annotationChanged', handleStoreChange);
+    
+    return () => {
+      document.removeEventListener('storeChanged', handleStoreChange);
+      document.removeEventListener('annotationChanged', handleStoreChange);
+    };
+  }, [documentId, getAnnotationsForPage, documents]);
+
+  // Add event listener for context menu events from the canvas
+  useEffect(() => {
+    const handleShowContextMenu = (e: CustomEvent) => {
+      // Show our custom context menu at the position
+      setContextMenu({
+        visible: true,
+        position: e.detail.position
+      });
+    };
+    
+    // Add event listener with proper type assertion
+    document.addEventListener('showContextMenu', handleShowContextMenu as EventListener);
+    
+    // Clean up
+    return () => {
+      document.removeEventListener('showContextMenu', handleShowContextMenu as EventListener);
+    };
+  }, []);
+
   // Handle zooming with mouse wheel + Ctrl key
   useEffect(() => {
     const container = containerRef.current;
@@ -397,10 +620,8 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({ file, documentId }) =>
       }
     };
     
-    // Add event listeners
+    // Add event listeners for annotation changes
     containerRef.current.addEventListener('annotationChanged', handleAnnotationChange as EventListener);
-    
-    // Also listen on document for events
     document.addEventListener('annotationChanged', handleAnnotationChange as EventListener);
     
     return () => {
@@ -416,9 +637,18 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({ file, documentId }) =>
       data-current-tool={currentTool}
       data-cursor-state={isDragging ? "grabbing" : currentTool === "drag" ? "grab" : currentTool}
       onContextMenu={handleContextMenu}
+      tabIndex={0}
     >
       {isShortcutGuideOpen && (
         <KeyboardShortcutGuide onClose={() => setIsShortcutGuideOpen(false)} />
+      )}
+      
+      {/* Context Menu */}
+      {contextMenu && contextMenu.visible && (
+        <ContextMenu 
+          position={contextMenu.position} 
+          onClose={closeContextMenu} 
+        />
       )}
       
       {/* Image Controls */}
