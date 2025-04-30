@@ -12,7 +12,7 @@ interface ContextMenuProps {
 
 export const ContextMenu: React.FC<ContextMenuProps> = ({ position, onClose }) => {
   const menuRef = useRef<HTMLDivElement>(null);
-  const { showToast } = useToast();
+  const { showAnnotationToast } = useToast();
   const {
     selectedAnnotations,
     copySelectedAnnotations,
@@ -27,7 +27,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({ position, onClose }) =
   const handleCopy = () => {
     const count = copySelectedAnnotations();
     if (count) {
-      showToast(`${count} annotation${count > 1 ? "s" : ""} copied`);
+      showAnnotationToast(`${count} annotation${count > 1 ? "s" : ""} copied`);
     }
     onClose();
   };
@@ -35,7 +35,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({ position, onClose }) =
   const handleCut = () => {
     const count = copySelectedAnnotations();
     if (count) {
-      showToast(`${count} annotation${count > 1 ? "s" : ""} cut`);
+      showAnnotationToast(`${count} annotation${count > 1 ? "s" : ""} cut`);
       deleteSelectedAnnotations();
     }
     onClose();
@@ -45,14 +45,14 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({ position, onClose }) =
     const count = selectedAnnotations.length;
     if (count) {
       deleteSelectedAnnotations();
-      showToast(`${count} annotation${count > 1 ? "s" : ""} deleted`);
+      showAnnotationToast(`${count} annotation${count > 1 ? "s" : ""} deleted`);
     }
     onClose();
   };
 
   const handlePaste = () => {
     if (clipboardAnnotations.length === 0) {
-      showToast("No annotations to paste");
+      showAnnotationToast("No annotations to paste");
       onClose();
       return;
     }
@@ -63,7 +63,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({ position, onClose }) =
       : 1;
 
     const pastedCount = pasteAnnotations(currentPage);
-    showToast(`${pastedCount} annotation${pastedCount > 1 ? "s" : ""} pasted`);
+    showAnnotationToast(`${pastedCount} annotation${pastedCount > 1 ? "s" : ""} pasted`);
     onClose();
   };
 

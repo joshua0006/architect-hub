@@ -37,7 +37,7 @@ export const useKeyboardShortcuts = (
     clipboardAnnotations,
     selectedAnnotations
   } = useAnnotationStore();
-  const { showToast } = useToast();
+  const { showToast, showAnnotationToast } = useToast();
 
   const lastToolRef = useRef<string>("select");
 
@@ -61,13 +61,13 @@ export const useKeyboardShortcuts = (
       v: {
         action: () => {
           if (clipboardAnnotations.length === 0) {
-            showToast("No annotations to paste");
+            showAnnotationToast("No annotations to paste");
             return;
           }
 
           const pastedCount = pasteAnnotations(currentPage);
           
-          showToast(
+          showAnnotationToast(
             `${pastedCount} annotation${
               pastedCount > 1 ? "s" : ""
             } pasted`
@@ -92,7 +92,7 @@ export const useKeyboardShortcuts = (
           action: () => {
             const count = copySelectedAnnotations();
             if (count) {
-              showToast(`${count} annotation${count > 1 ? "s" : ""} copied`);
+              showAnnotationToast(`${count} annotation${count > 1 ? "s" : ""} copied`);
             }
           },
           ctrl: true,
@@ -151,7 +151,7 @@ export const useKeyboardShortcuts = (
         action: () => {
           const count = copySelectedAnnotations();
           if (count) {
-            showToast(`${count} annotation${count > 1 ? "s" : ""} cut`);
+            showAnnotationToast(`${count} annotation${count > 1 ? "s" : ""} cut`);
             deleteSelectedAnnotations();
           }
         },
@@ -248,22 +248,25 @@ export const useKeyboardShortcuts = (
   }, [
     documentId,
     currentPage,
+    zoomInFn,
+    zoomOutFn,
+    resetZoomFn,
     setCurrentTool,
     undo,
     redo,
     deleteSelectedAnnotations,
+    selectAnnotation,
     clearSelection,
     selectAnnotations,
     documents,
     copySelectedAnnotations,
-    pasteAnnotations,
-    showToast,
-    bringToFront,
-    sendToBack,
     clipboardAnnotations,
     selectedAnnotations,
-    zoomInFn,
-    zoomOutFn,
-    resetZoomFn
+    pasteAnnotations,
+    showToast,
+    showAnnotationToast,
+    bringToFront,
+    sendToBack,
+    lastToolRef,
   ]);
 };
