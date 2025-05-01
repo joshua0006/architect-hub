@@ -1,0 +1,8 @@
+[
+    {
+      "origin": ["https://architect-hub-test.netlify.app", "http://localhost:3000", "http://localhost:5173"],
+      "method": ["GET", "HEAD", "PUT", "POST", "DELETE"],
+      "responseHeader": ["Content-Type", "Content-Length", "Content-Disposition", "Content-Encoding", "Accept-Ranges", "ETag", "Range"],
+      "maxAgeSeconds": 3600
+    }
+  ] 

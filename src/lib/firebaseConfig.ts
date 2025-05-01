@@ -3,6 +3,10 @@
  * Contains both production and test configurations
  */
 
+// TOGGLE THIS CONSTANT TO SWITCH BETWEEN TEST AND PRODUCTION ENVIRONMENTS
+// Set to true to use test environment, false to use production
+export const USE_TEST_ENVIRONMENT = true;
+
 // Firebase configuration interface
 export interface FirebaseConfig {
   apiKey: string;
@@ -14,40 +18,38 @@ export interface FirebaseConfig {
   measurementId?: string;
 }
 
-// Production Firebase configuration
-export const PROD_CONFIG: FirebaseConfig = {
-  apiKey: "AIzaSyBu3Lvkp4s_RX6qNHpRPKimc3jwY5cPhgs",
-  authDomain: "structify-chris-cole.firebaseapp.com",
-  projectId: "structify-chris-cole",
-  storageBucket: "structify-chris-cole.firebasestorage.app",
-  messagingSenderId: "55459428968",
-  appId: "1:55459428968:web:56233aaec4e7699361d9dd"
-};
-
-// Test Firebase configuration
-export const TEST_CONFIG: FirebaseConfig = {
-  apiKey: "AIzaSyBd4o6amxsqm360eU8IUo0fr6gw3X3dSRk",
-  authDomain: "chris-cole-test.firebaseapp.com",
-  projectId: "chris-cole-test",
-  storageBucket: "chris-cole-test.firebasestorage.app",
-  messagingSenderId: "808102050509",
-  appId: "1:808102050509:web:2178128aa4b4d235d4c784",
-  measurementId: "G-8EZWF8CE3S"
-};
-
-// Environment variable access helper
-function getEnvValue(key: string, defaultValue: boolean): boolean {
-  // Log the raw values for debugging
-  console.log(`[ENV DEBUG] Reading env var ${key}:`);
-  console.log(`  - import.meta.env.${key} =`, import.meta.env[key]);
-  console.log(`  - typeof import.meta.env.${key} =`, typeof import.meta.env[key]);
-  
+// Helper function to load environment variables with fallbacks
+function getEnvString(key: string, fallback: string = ''): string {
   try {
-    // For boolean values, we need to handle string conversion
+    // Try to access from Vite's import.meta.env - direct property access
+    if (import.meta.env && typeof import.meta.env[key] !== 'undefined') {
+      return import.meta.env[key] as string;
+    }
+    
+    // For Vite, you can also try with VITE_ prefix
+    const viteKey = key.startsWith('VITE_') ? key : `VITE_${key}`;
+    if (import.meta.env && typeof import.meta.env[viteKey] !== 'undefined') {
+      return import.meta.env[viteKey] as string;
+    }
+    
+    // Try to access from process.env (for Node.js environments)
+    if (typeof process !== 'undefined' && process.env && typeof process.env[key] !== 'undefined') {
+      return process.env[key] as string;
+    }
+    
+    return fallback;
+  } catch (e) {
+    console.warn(`Error accessing env var ${key}:`, e);
+    return fallback;
+  }
+}
+
+// Environment variable access helper for boolean values
+function getEnvValue(key: string, defaultValue: boolean): boolean {
+  try {
     // Try to access from Vite's import.meta.env
     if (import.meta.env[key] !== undefined) {
       const rawValue = import.meta.env[key];
-      console.log(`  - Raw value from import.meta.env: "${rawValue}" (${typeof rawValue})`);
       
       // Handle different value types
       if (typeof rawValue === 'boolean') {
@@ -56,56 +58,63 @@ function getEnvValue(key: string, defaultValue: boolean): boolean {
       
       if (typeof rawValue === 'string') {
         const lowered = rawValue.toLowerCase();
-        console.log(`  - String value converted: "${lowered}" => ${lowered === 'true'}`);
         return lowered === 'true';
       }
       
-      console.log(`  - Using default because value type not handled: ${defaultValue}`);
       return defaultValue;
     }
 
     // Try to access from process.env (for SSR/build)
     if (typeof process !== 'undefined' && process.env && process.env[key] !== undefined) {
       const rawValue = process.env[key];
-      console.log(`  - Raw value from process.env: "${rawValue}" (${typeof rawValue})`);
       
       if (typeof rawValue === 'string') {
         const lowered = rawValue.toLowerCase();
-        console.log(`  - String value converted: "${lowered}" => ${lowered === 'true'}`);
         return lowered === 'true';
       }
       
-      console.log(`  - Using default because value type not handled: ${defaultValue}`);
       return defaultValue;
     }
     
-    console.log(`  - Using default because no value found: ${defaultValue}`);
     return defaultValue;
   } catch (e) {
-    console.warn(`[ENV DEBUG] Error accessing env var ${key}:`, e);
+    console.warn(`Error accessing env var ${key}:`, e);
     return defaultValue;
   }
 }
 
-// Environment variables debugging
-console.log('====================================');
-console.log('ENVIRONMENT VARIABLES DEBUG:');
-console.log('import.meta.env available keys:', Object.keys(import.meta.env).join(', '));
-console.log('Direct access to VITE_USE_TEST_FIREBASE:', import.meta.env.VITE_USE_TEST_FIREBASE);
-console.log('Type of direct value:', typeof import.meta.env.VITE_USE_TEST_FIREBASE);
-console.log('====================================');
-
 // Configuration flags - Read from environment variables with fallbacks
+// Override with USE_TEST_ENVIRONMENT constant if needed
 export const ENV_FLAGS = {
-  // Use environment variables with fallback to false
-  useTestFirebase: getEnvValue('VITE_USE_TEST_FIREBASE', false),
+  // Use the constant instead of environment variable if specified
+  useTestFirebase: USE_TEST_ENVIRONMENT || getEnvValue('VITE_USE_TEST_FIREBASE', false),
   useEmulators: getEnvValue('VITE_USE_FIREBASE_EMULATORS', false)
 };
 
-// FORCE TEST FOR DEBUGGING - COMMENT OUT TO USE ENVIRONMENT VARIABLES
-// Uncomment these lines to force a specific configuration regardless of env vars
-ENV_FLAGS.useTestFirebase = true; // FORCE TEST CONFIG
-// ENV_FLAGS.useEmulators = false;  // FORCE EMULATORS OFF (or on)
+// Firebase configurations - Single export for both environments
+export const FIREBASE_CONFIG = {
+  production: {
+    apiKey: getEnvString('VITE_FIREBASE_API_KEY'),
+    authDomain: getEnvString('VITE_FIREBASE_AUTH_DOMAIN'),
+    projectId: getEnvString('VITE_FIREBASE_PROJECT_ID'),
+    storageBucket: getEnvString('VITE_FIREBASE_STORAGE_BUCKET'),
+    messagingSenderId: getEnvString('VITE_FIREBASE_MESSAGING_SENDER_ID'),
+    appId: getEnvString('VITE_FIREBASE_APP_ID')
+  },
+  test: {
+    apiKey: getEnvString('VITE_TEST_FIREBASE_API_KEY'),
+    authDomain: getEnvString('VITE_TEST_FIREBASE_AUTH_DOMAIN'),
+    projectId: getEnvString('VITE_TEST_FIREBASE_PROJECT_ID'),
+    storageBucket: getEnvString('VITE_TEST_FIREBASE_STORAGE_BUCKET'),
+    messagingSenderId: getEnvString('VITE_TEST_FIREBASE_MESSAGING_SENDER_ID'),
+    appId: getEnvString('VITE_TEST_FIREBASE_APP_ID'),
+    measurementId: getEnvString('VITE_TEST_FIREBASE_MEASUREMENT_ID')
+  }
+};
+
+// For backward compatibility
+export const PROD_CONFIG = FIREBASE_CONFIG.production;
+export const TEST_CONFIG = FIREBASE_CONFIG.test;
 
 // Firebase emulator configuration
 export const EMULATOR_PORTS = {
@@ -114,11 +123,3 @@ export const EMULATOR_PORTS = {
   storage: 9199
 };
 
-// Log current configuration mode (for debugging)
-console.log("====================================");
-console.log("FIREBASE CONFIGURATION:");
-console.log(`- Using ${ENV_FLAGS.useTestFirebase ? "TEST" : "PRODUCTION"} Firebase project`);
-console.log(`- Test project: ${TEST_CONFIG.projectId}`);
-console.log(`- Production project: ${PROD_CONFIG.projectId}`);
-console.log(`- Emulators: ${ENV_FLAGS.useEmulators ? "ENABLED" : "DISABLED"}`);
-console.log("===================================="); 
