@@ -599,8 +599,25 @@ export default function AppContent() {
       
       if (rootFolder) {
         console.log(`Found _root folder (${rootFolder.id}) for project ${projectId}, redirecting`);
-        // Navigate to the _root folder
-        navigate(`/documents/projects/${projectId}/folders/${rootFolder.id}`, { replace: true });
+        
+        // Add the folder to state first to ensure it's available
+        const folder = folders.find(f => f.id === rootFolder.id);
+        if (folder) {
+          setDocumentManagerFolderId(folder.id);
+          
+          // Only navigate if we're not already on this folder's page
+          if (!location.pathname.includes(`/folders/${rootFolder.id}`)) {
+            // Navigate to the _root folder but using the project name instead of showing "_root"
+            // This makes the URL look cleaner and hides implementation details from the user
+            navigate(`/documents/projects/${projectId}/folders/${rootFolder.id}`, { 
+              replace: true,
+              state: { 
+                folderName: selectedProject.name || "Project Documents",
+                isRootFolder: true 
+              }
+            });
+          }
+        }
       } else {
         console.log(`No _root folder found for project ${projectId}, looking for alternative or creating one`);
         
@@ -625,7 +642,13 @@ export default function AppContent() {
               module.folderTemplateService.createInvisibleRootFolder(projectId)
                 .then((newRootFolder: Folder) => {
                   console.log(`Created new _root folder ${newRootFolder.id}, redirecting`);
-                  navigate(`/documents/projects/${projectId}/folders/${newRootFolder.id}`, { replace: true });
+                  navigate(`/documents/projects/${projectId}/folders/${newRootFolder.id}`, {
+                    replace: true,
+                    state: { 
+                      folderName: selectedProject.name || "Project Documents",
+                      isRootFolder: true 
+                    }
+                  });
                 })
                 .catch((error: Error) => {
                   console.error('Failed to create _root folder:', error);

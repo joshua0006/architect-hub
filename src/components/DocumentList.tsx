@@ -207,6 +207,7 @@ export default function DocumentList({
   const unsubscribeFolderRef = useRef<(() => void) | null>(null);
   const hasActiveDocSubscription = useRef<boolean>(false);
   const hasActiveFolderSubscription = useRef<boolean>(false);
+  const [isReloading, setIsReloading] = useState<boolean>(false);
 
   // Use the local folders from state for rendering if available, otherwise use the prop folders
   const displayFolders = isSharedView ? sharedFolders || [] : (localFolders.length > 0 ? localFolders : folders);
@@ -261,6 +262,10 @@ export default function DocumentList({
         console.log(`[DocumentList] Component mounted, initializing data for folder: ${currentFolder.id}`);
         
         try {
+          // Set loading state
+          setLoading(true);
+          setIsReloading(true);
+          
           // Force load documents for current folder
           if (localDocuments.length === 0) {
             console.log(`[DocumentList] No documents in state, loading from service`);
@@ -278,6 +283,9 @@ export default function DocumentList({
           }
         } catch (error) {
           console.error('[DocumentList] Error initializing component data:', error);
+        } finally {
+          setLoading(false);
+          setIsReloading(false);
         }
       }
     };
@@ -289,7 +297,8 @@ export default function DocumentList({
     const handleWindowFocus = () => {
       if (currentFolder && onRefresh) {
         console.log('[DocumentList] Window focused, refreshing data');
-        onRefresh();
+        setIsReloading(true);
+        onRefresh().finally(() => setIsReloading(false));
       }
     };
     
@@ -2600,6 +2609,10 @@ export default function DocumentList({
     try {
       console.log(`[DocumentList] Force reloading folders for project ${targetProjectId || projectId}`);
       
+      // Set loading state to true
+      setLoading(true);
+      setIsReloading(true);
+      
       // If a specific project ID is provided, load those folders
       if (targetProjectId) {
         const freshFolders = await folderService.getByProjectId(targetProjectId);
@@ -2631,6 +2644,10 @@ export default function DocumentList({
     } catch (error) {
       console.error("Error force reloading folders:", error);
       showToast("Failed to reload folders", "error");
+    } finally {
+      // Set loading state back to false
+      setLoading(false);
+      setIsReloading(false);
     }
   };
   
@@ -2638,6 +2655,10 @@ export default function DocumentList({
   const forceReloadDocuments = async (folderId: string) => {
     try {
       console.log(`[DocumentList] Force reloading documents for folder ${folderId}`);
+      
+      // Set loading state to true
+      setLoading(true);
+      setIsReloading(true);
       
       // Fetch fresh documents from the service
       const freshDocuments = await documentService.getByFolderId(folderId);
@@ -2660,6 +2681,10 @@ export default function DocumentList({
       console.error(`Error force reloading documents for folder ${folderId}:`, error);
       showToast("Failed to reload documents", "error");
       return [];
+    } finally {
+      // Set loading state back to false
+      setLoading(false);
+      setIsReloading(false);
     }
   };
   
@@ -3435,7 +3460,7 @@ export default function DocumentList({
           </div>
 
           <AnimatePresence mode="wait">
-            {loading ? (
+            {loading || isReloading ? (
               <motion.div
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
