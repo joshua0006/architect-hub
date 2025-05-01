@@ -1501,26 +1501,7 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
                 Version {currentVersion} • Last modified{" "}
                 {formatDate(document.dateModified)}
               </p>
-              {/* Add folder path as breadcrumbs */}
-              {currentFolder && (
-                <div className="mt-1 flex items-center text-xs text-gray-500">
-                  <FolderOpen className="w-3 h-3 mr-1 flex-shrink-0" />
-                  <span className="flex items-center">
-                    <Home className="w-3 h-3 mr-1 cursor-pointer hover:text-blue-500" onClick={() => onNavigateToFolder?.()} />
-                    {folderPath.map((folder, idx) => (
-                      <span key={folder.id} className="flex items-center">
-                        {idx > 0 && <ChevronRight className="w-3 h-3 mx-1" />}
-                        <span 
-                          className="hover:text-blue-500 cursor-pointer"
-                          onClick={() => onNavigateToFolder?.(folder)}
-                        >
-                          {folder.name}
-                        </span>
-                      </span>
-                    ))}
-                  </span>
-                </div>
-              )}
+             
             </div>
           </div>
           <div className="flex items-center space-x-4">
