@@ -2452,21 +2452,30 @@ export default function DocumentList({
             } else {
               fetchedProjects = await projectService.getUserProjects(user.id);
             }
+            
+            // Filter out archived projects
+            fetchedProjects = fetchedProjects.filter(project => project.status !== 'archived');
           }
           
-          // If no projects were fetched but we have a selected project, use that
-          if (fetchedProjects.length === 0 && selectedProject) {
+          // If no projects were fetched but we have a selected project (that's not archived)
+          if (fetchedProjects.length === 0 && selectedProject && selectedProject.status !== 'archived') {
             fetchedProjects = [selectedProject];
           }
           
           setAvailableProjects(fetchedProjects);
           
-          // Set the current project as default if available
-          if (selectedProject) {
+          // Set the current project as default if available and not archived
+          if (selectedProject && selectedProject.status !== 'archived') {
             setSelectedDestinationProjectId(selectedProject.id);
             
             // Load the folders for this project
             await loadProjectFolders(selectedProject.id);
+          } else if (fetchedProjects.length > 0) {
+            // Set the first non-archived project as default
+            setSelectedDestinationProjectId(fetchedProjects[0].id);
+            
+            // Load the folders for this project
+            await loadProjectFolders(fetchedProjects[0].id);
           }
           
           setIsLoadingProjects(false);
@@ -2503,6 +2512,21 @@ export default function DocumentList({
         [projectId]: fetchedFolders
       }));
       
+      // Auto-expand _root folders that have children
+      const rootFolders = fetchedFolders.filter(folder => 
+        folder.parentId === undefined && folder.name === '_root' && 
+        fetchedFolders.some(f => f.parentId === folder.id)
+      );
+      
+      // Add all _root folders with children to expanded folders set
+      setExpandedFolders(prev => {
+        const newExpanded = new Set(prev);
+        rootFolders.forEach(folder => {
+          newExpanded.add(folder.id);
+        });
+        return newExpanded;
+      });
+      
       setIsLoadingFolders(false);
     } catch (error) {
       console.error(`Error loading folders for project ${projectId}:`, error);
@@ -2519,6 +2543,18 @@ export default function DocumentList({
     
     // Load folders for the selected project
     await loadProjectFolders(projectId);
+    
+    // Automatically show folder dropdown if there are folders
+    const projectFoldersList = projectFolders[projectId] || [];
+    const hasRootFoldersWithChildren = projectFoldersList.some(folder => 
+      folder.parentId === undefined && 
+      folder.name === '_root' && 
+      projectFoldersList.some(f => f.parentId === folder.id)
+    );
+    
+    if (hasRootFoldersWithChildren) {
+      setShowFolderDropdown(true);
+    }
   };
   
   // Handle folder selection
@@ -2537,9 +2573,23 @@ export default function DocumentList({
   
   // Helper to build folder tree structure
   const buildFolderTree = (folders: Folder[], parentId?: string): Folder[] => {
-    return folders
-      .filter(folder => folder.parentId === parentId)
-      .map(folder => folder);
+    // If we're looking at the root level (parentId is undefined), filter root folders
+    if (parentId === undefined) {
+      // Get all root folders (folders with no parent)
+      const rootFolders = folders.filter(folder => folder.parentId === parentId);
+      
+      // Only include _root folders that have children, or non-_root folders
+      return rootFolders.filter(folder => {
+        // If folder name is not '_root', always include it
+        if (folder.name !== '_root') return true;
+        
+        // Only include _root folders that have at least one child folder
+        return folders.some(f => f.parentId === folder.id);
+      });
+    }
+    
+    // For non-root levels, return all folders with the specified parent
+    return folders.filter(folder => folder.parentId === parentId);
   };
   
   // Recursively render folder tree
@@ -2835,7 +2885,19 @@ export default function DocumentList({
     setShowCopyMoveDialog(true);
     setSelectedDestinationProjectId(projectId || "");
     if (projectId) {
-      loadProjectFolders(projectId);
+      loadProjectFolders(projectId).then(() => {
+        // Check if we have root folders with children and auto-expand
+        const projectFoldersList = projectFolders[projectId] || [];
+        const hasRootFoldersWithChildren = projectFoldersList.some(folder => 
+          folder.parentId === undefined && 
+          folder.name === '_root' && 
+          projectFoldersList.some(f => f.parentId === folder.id)
+        );
+        
+        if (hasRootFoldersWithChildren) {
+          setShowFolderDropdown(true);
+        }
+      });
     }
   };
 
@@ -2846,7 +2908,19 @@ export default function DocumentList({
     setShowCopyMoveDialog(true);
     setSelectedDestinationProjectId(projectId || "");
     if (projectId) {
-      loadProjectFolders(projectId);
+      loadProjectFolders(projectId).then(() => {
+        // Check if we have root folders with children and auto-expand
+        const projectFoldersList = projectFolders[projectId] || [];
+        const hasRootFoldersWithChildren = projectFoldersList.some(folder => 
+          folder.parentId === undefined && 
+          folder.name === '_root' && 
+          projectFoldersList.some(f => f.parentId === folder.id)
+        );
+        
+        if (hasRootFoldersWithChildren) {
+          setShowFolderDropdown(true);
+        }
+      });
     }
   };
 
@@ -3139,7 +3213,19 @@ export default function DocumentList({
     setShowCopyMoveDialog(true);
     setSelectedDestinationProjectId(projectId || "");
     if (projectId) {
-      loadProjectFolders(projectId);
+      loadProjectFolders(projectId).then(() => {
+        // Check if we have root folders with children and auto-expand
+        const projectFoldersList = projectFolders[projectId] || [];
+        const hasRootFoldersWithChildren = projectFoldersList.some(folder => 
+          folder.parentId === undefined && 
+          folder.name === '_root' && 
+          projectFoldersList.some(f => f.parentId === folder.id)
+        );
+        
+        if (hasRootFoldersWithChildren) {
+          setShowFolderDropdown(true);
+        }
+      });
     }
   };
 
@@ -3150,7 +3236,19 @@ export default function DocumentList({
     setShowCopyMoveDialog(true);
     setSelectedDestinationProjectId(projectId || "");
     if (projectId) {
-      loadProjectFolders(projectId);
+      loadProjectFolders(projectId).then(() => {
+        // Check if we have root folders with children and auto-expand
+        const projectFoldersList = projectFolders[projectId] || [];
+        const hasRootFoldersWithChildren = projectFoldersList.some(folder => 
+          folder.parentId === undefined && 
+          folder.name === '_root' && 
+          projectFoldersList.some(f => f.parentId === folder.id)
+        );
+        
+        if (hasRootFoldersWithChildren) {
+          setShowFolderDropdown(true);
+        }
+      });
     }
   };
 
