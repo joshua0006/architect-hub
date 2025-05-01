@@ -51,6 +51,7 @@ interface ProjectItemProps {
   tasks: Task[];
   isDeletingProject: string | null;
   index: number;
+  minimized?: boolean;
 }
 
 const ProjectItem = ({
@@ -61,7 +62,8 @@ const ProjectItem = ({
   onDeleteProject,
   tasks,
   isDeletingProject,
-  index
+  index,
+  minimized = false
 }: ProjectItemProps) => {
   const [showStatusMenu, setShowStatusMenu] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -221,6 +223,44 @@ const ProjectItem = ({
     );
   };
 
+  if (minimized) {
+    // Render minimized version
+    return (
+      <Draggable draggableId={project.id} index={index}>
+        {(provided) => (
+          <div
+            ref={provided.innerRef}
+            {...provided.draggableProps}
+            {...provided.dragHandleProps}
+            className="mb-2 px-2"
+          >
+            <button
+              onClick={() => onSelect(project)}
+              className={`w-12 h-12 rounded-md flex items-center justify-center transition-all ${
+                selectedId === project.id
+                  ? "bg-primary-100 border-primary-300 border-2"
+                  : "bg-white border-gray-200 border hover:bg-gray-50"
+              }`}
+              title={project.name}
+            >
+              <div className="flex flex-col items-center">
+                <span className="text-xs font-medium truncate" style={{ maxWidth: '100%' }}>
+                  {project.name.charAt(0).toUpperCase()}
+                </span>
+                <div className="w-6 h-1 mt-1 rounded-full overflow-hidden bg-gray-100">
+                  <div
+                    className={`h-full ${getProgressColor(progress)}`}
+                    style={{ width: `${progress}%` }}
+                  />
+                </div>
+              </div>
+            </button>
+          </div>
+        )}
+      </Draggable>
+    );
+  }
+
   return (
     <>
       <Draggable draggableId={project.id} index={index}>
@@ -300,6 +340,7 @@ interface ProjectListProps {
   onProjectsChange: () => void;
   onUpdateProject: (id: string, updates: Partial<Project>) => void;
   tasks: Task[];
+  minimized?: boolean;
 }
 
 function ProjectListComponent({
@@ -309,6 +350,7 @@ function ProjectListComponent({
   onProjectsChange,
   onUpdateProject,
   tasks,
+  minimized = false
 }: ProjectListProps) {
   const [showAddProject, setShowAddProject] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -540,49 +582,63 @@ function ProjectListComponent({
 
   return (
     <>
-      <div className="sticky top-0 z-10 bg-white border-b border-gray-200 p-4 space-y-4">
-        <div className="flex items-center space-x-2">
-          <div className="relative flex-1">
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search projects..."
-              className="w-full pl-10 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-200 transition-all duration-300"
-            />
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
-            {searchQuery && (
+      {!minimized && (
+        <div className="sticky top-0 z-10 bg-white border-b border-gray-200 p-4 space-y-4">
+          <div className="flex items-center space-x-2">
+            <div className="relative flex-1">
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search projects..."
+                className="w-full pl-10 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-200 transition-all duration-300"
+              />
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
+              {searchQuery && (
+                <button
+                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-xs text-gray-500 hover:text-gray-700"
+                  onClick={() => setSearchQuery("")}
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+          </div>
+          
+          <div className="flex w-full">
+            {(user?.role === "Admin" || user?.role === "Staff") && (
               <button
-                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-xs text-gray-500 hover:text-gray-700"
-                onClick={() => setSearchQuery("")}
+                onClick={() => setShowAddProject(true)}
+                className="w-full px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 transition-all duration-300 flex items-center justify-center space-x-2"
               >
-                Clear
+                <Plus className="w-4 h-4" />
+                <span>New Project</span>
               </button>
             )}
           </div>
-        </div>
-        
-        <div className="flex w-full">
-          {(user?.role === "Admin" || user?.role === "Staff") && (
-            <button
-              onClick={() => setShowAddProject(true)}
-              className="w-full px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 transition-all duration-300 flex items-center justify-center space-x-2"
-            >
-              <Plus className="w-4 h-4" />
-              <span>New Project</span>
-            </button>
+
+          {searchQuery && (
+            <div className="text-sm text-gray-500">
+              Found {filteredProjects.length}{" "}
+              {filteredProjects.length === 1 ? "project" : "projects"}
+            </div>
           )}
         </div>
+      )}
 
-        {searchQuery && (
-          <div className="text-sm text-gray-500">
-            Found {filteredProjects.length}{" "}
-            {filteredProjects.length === 1 ? "project" : "projects"}
-          </div>
-        )}
-      </div>
+      {minimized && (user?.role === "Admin" || user?.role === "Staff") && (
+        <div className="py-2 px-2">
+          <button
+            onClick={() => setShowAddProject(true)}
+            className="w-12 h-12 bg-primary-600 text-white rounded-md hover:bg-primary-700 transition-all flex items-center justify-center"
+            title="New Project"
+          >
+            <Plus className="w-6 h-6" />
+          </button>
+        </div>
+      )}
 
-      <div className="p-4 space-y-4">
+      <div className={minimized ? "py-2" : "p-4 space-y-4"}>
         <DragDropContext onDragEnd={handleDragEnd}>
           {filteredProjects.length > 0 ? (
             <Droppable droppableId="projects-list">
@@ -603,6 +659,7 @@ function ProjectListComponent({
                       tasks={tasks}
                       isDeletingProject={isDeletingProject}
                       index={index}
+                      minimized={minimized}
                     />
                   ))}
                   {provided.placeholder}
@@ -610,14 +667,16 @@ function ProjectListComponent({
               )}
             </Droppable>
           ) : (
-            <div className="text-center py-8">
-              <p className="text-gray-500">No projects found</p>
-              {searchQuery && (
-                <p className="text-sm text-gray-400 mt-2">
-                  Try adjusting your search terms
-                </p>
-              )}
-            </div>
+            !minimized && (
+              <div className="text-center py-8">
+                <p className="text-gray-500">No projects found</p>
+                {searchQuery && (
+                  <p className="text-sm text-gray-400 mt-2">
+                    Try adjusting your search terms
+                  </p>
+                )}
+              </div>
+            )
           )}
         </DragDropContext>
       </div>
