@@ -6,17 +6,56 @@ import {
   getDocs,
   collection
 } from 'firebase/firestore';
-import { getStorage } from 'firebase/storage';
-import { getAuth } from 'firebase/auth';
+import { getStorage, connectStorageEmulator } from 'firebase/storage';
+import { getAuth, connectAuthEmulator } from 'firebase/auth';
+// @ts-ignore - Import from local module without type declarations
+import { PROD_CONFIG, TEST_CONFIG, EMULATOR_PORTS, FirebaseConfig, ENV_FLAGS } from './firebaseConfig';
 
-const firebaseConfig = {
-  apiKey: "AIzaSyBu3Lvkp4s_RX6qNHpRPKimc3jwY5cPhgs",
-  authDomain: "structify-chris-cole.firebaseapp.com",
-  projectId: "structify-chris-cole",
-  storageBucket: "structify-chris-cole.firebasestorage.app",
-  messagingSenderId: "55459428968",
-  appId: "1:55459428968:web:56233aaec4e7699361d9dd"
-};
+// Global configuration flags - initialized from config
+let useTestConfig = ENV_FLAGS.useTestFirebase;
+let useEmulators = ENV_FLAGS.useEmulators;
+
+/**
+ * Configure Firebase to use either production or test environment
+ * @param options Configuration options
+ */
+export function configureFirebase(options: {
+  useTestProject?: boolean;
+  useEmulators?: boolean;
+}) {
+  if (options.useTestProject !== undefined) {
+    useTestConfig = options.useTestProject;
+  }
+  
+  if (options.useEmulators !== undefined) {
+    useEmulators = options.useEmulators;
+  }
+  
+  console.log(`Firebase configuration:
+    - Using ${useTestConfig ? 'TEST' : 'PRODUCTION'} project
+    - Emulators ${useEmulators ? 'ENABLED' : 'DISABLED'}
+  `);
+  
+  // Returning the current config is useful but we don't reinitialize Firebase here
+  // That would require restarting the application
+  return getCurrentConfig();
+}
+
+/**
+ * Get current Firebase configuration
+ */
+export function getCurrentConfig(): FirebaseConfig {
+  return useTestConfig ? TEST_CONFIG : PROD_CONFIG;
+}
+
+// Select the appropriate Firebase config
+const firebaseConfig = getCurrentConfig();
+
+// Log the active configuration
+console.log('Active Firebase configuration:', {
+  apiKey: firebaseConfig.apiKey,
+  projectId: firebaseConfig.projectId
+});
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
@@ -30,18 +69,21 @@ enableIndexedDbPersistence(db)
     console.error('Persistence failed:', err.code);
   });
 
-// Emulator connection (only in development)
-if (process.env.NODE_ENV === 'development') {
-  try {
-    connectFirestoreEmulator(db, 'localhost', 8080);
-    console.log('Connected to Firestore emulator');
-  } catch (error) {
-    console.log('Using production Firestore instance');
-  }
-}
-
+// Initialize other Firebase services
 export const storage = getStorage(app);
 export const auth = getAuth(app);
+
+// Connect to emulators if enabled
+if (useEmulators) {
+  try {
+    connectFirestoreEmulator(db, 'localhost', EMULATOR_PORTS.firestore);
+    connectAuthEmulator(auth, `http://localhost:${EMULATOR_PORTS.auth}`);
+    connectStorageEmulator(storage, 'localhost', EMULATOR_PORTS.storage);
+    console.log('Connected to Firebase emulators');
+  } catch (error) {
+    console.error('Failed to connect to emulators:', error);
+  }
+}
 
 console.log('Using Firebase project:', firebaseConfig.projectId);
 
