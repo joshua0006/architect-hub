@@ -1,51 +1,26 @@
 /**
- * Example showing how to use the test Firebase configuration
+ * Example showing how to use Firebase emulators configuration
  */
 import { configureFirebase } from '../lib/firebase';
-import { ENV_FLAGS } from '../lib/firebaseConfig';
 
 /**
- * Configure Firebase to use the test project
+ * Configure Firebase to use emulators
  * Call this function early in your application initialization
  * BEFORE any Firebase operations are performed
  */
-export function setupTestFirebase() {
-  // Configure Firebase to use the test project with emulators from env vars
+export function setupFirebaseEmulators() {
+  // Configure Firebase to use emulators
   configureFirebase({
-    useTestProject: true,
-    useEmulators: ENV_FLAGS.useEmulators,
-  });
-  
-  console.log('Firebase configured to use TEST project');
-  if (ENV_FLAGS.useEmulators) {
-    console.log('Firebase emulators ENABLED from environment variables');
-  }
-}
-
-/**
- * Configure Firebase to use the test project with local emulators
- * Requires running Firebase emulators locally:
- * firebase emulators:start
- */
-export function setupTestFirebaseWithEmulators() {
-  // Configure Firebase to use the test project with emulators enabled
-  configureFirebase({
-    useTestProject: true,
     useEmulators: true,
   });
-  
-  console.log('Firebase configured to use TEST project with emulators');
 }
 
 /**
- * Reset Firebase to use the production project
+ * Disable Firebase emulators
  */
-export function resetToProductionFirebase() {
-  // Configure Firebase to use the production project with emulators disabled
+export function disableFirebaseEmulators() {
+  // Configure Firebase to disable emulators
   configureFirebase({
-    useTestProject: false,
     useEmulators: false,
   });
-  
-  console.log('Firebase configured to use PRODUCTION project');
 } 

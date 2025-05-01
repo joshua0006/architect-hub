@@ -3,23 +3,7 @@ import { createRoot } from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
 import { initializeUploads } from './utils/uploadMiddleware';
-import { setupTestFirebase } from './examples/firebaseTestConfig';
-import { ENV_FLAGS, USE_TEST_ENVIRONMENT } from './lib/firebaseConfig';
-
-// Debug environment variables at startup
-console.log('==== ENVIRONMENT CONFIG ====');
-console.log('USE_TEST_ENVIRONMENT constant:', USE_TEST_ENVIRONMENT);
-console.log('Using test Firebase:', ENV_FLAGS.useTestFirebase);
-console.log('Using Firebase emulators:', ENV_FLAGS.useEmulators);
-console.log('==========================');
-
-// Configure Firebase environment using values from environment variables
-if (ENV_FLAGS.useTestFirebase) {
-  setupTestFirebase();
-  console.log('🧪 Using TEST Firebase environment');
-} else {
-  console.log('🚀 Using PRODUCTION Firebase environment');
-}
+import { ENV_FLAGS } from './lib/firebaseConfig';
 
 // Global error handlers
 window.addEventListener('unhandledrejection', (event) => {
