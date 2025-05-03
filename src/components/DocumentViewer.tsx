@@ -573,14 +573,55 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
 
   useEffect(() => {
     if (document.type === "pdf") {
-      fetch(document.url)
-        .then((res) => res.blob())
-        .then((blob) =>
-          setFile(new File([blob], document.name, { type: "application/pdf" }))
-        )
-        .catch((error) => console.error("Error loading PDF:", error));
+      let isMounted = true;
+      setLoading(true);
+      
+      const fetchPdf = async () => {
+        try {
+          console.log(`Fetching PDF from URL: ${document.url}`);
+          
+          // Add cache-busting parameter to avoid browser caching issues on refresh
+          const fetchUrl = `${document.url}${document.url.includes('?') ? '&' : '?'}_t=${Date.now()}`;
+          
+          const response = await fetch(fetchUrl);
+          
+          if (!response.ok) {
+            throw new Error(`Failed to fetch PDF: ${response.status} ${response.statusText}`);
+          }
+          
+          const blob = await response.blob();
+          
+          if (isMounted) {
+            console.log(`PDF fetched successfully, size: ${blob.size} bytes`);
+            setFile(new File([blob], document.name, { type: "application/pdf" }));
+            setLoading(false);
+          }
+        } catch (error) {
+          console.error("Error loading PDF:", error);
+          
+          if (isMounted) {
+            setLoading(false);
+            // Show toast notification for error
+            setToastMessage("Error loading PDF. Retrying...");
+            setShowToast(true);
+            
+            // Try again after a short delay
+            setTimeout(() => {
+              if (isMounted) {
+                fetchPdf();
+              }
+            }, 2000);
+          }
+        }
+      };
+      
+      fetchPdf();
+      
+      return () => {
+        isMounted = false;
+      };
     }
-  }, [document]);
+  }, [document.type, document.url, document.name]);
 
   useEffect(() => {
     // Check if we have a commentId in the URL
@@ -1460,26 +1501,7 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
                 Version {currentVersion} • Last modified{" "}
                 {formatDate(document.dateModified)}
               </p>
-              {/* Add folder path as breadcrumbs */}
-              {currentFolder && (
-                <div className="mt-1 flex items-center text-xs text-gray-500">
-                  <FolderOpen className="w-3 h-3 mr-1 flex-shrink-0" />
-                  <span className="flex items-center">
-                    <Home className="w-3 h-3 mr-1 cursor-pointer hover:text-blue-500" onClick={() => onNavigateToFolder?.()} />
-                    {folderPath.map((folder, idx) => (
-                      <span key={folder.id} className="flex items-center">
-                        {idx > 0 && <ChevronRight className="w-3 h-3 mx-1" />}
-                        <span 
-                          className="hover:text-blue-500 cursor-pointer"
-                          onClick={() => onNavigateToFolder?.(folder)}
-                        >
-                          {folder.name}
-                        </span>
-                      </span>
-                    ))}
-                  </span>
-                </div>
-              )}
+             
             </div>
           </div>
           <div className="flex items-center space-x-4">
@@ -1732,7 +1754,7 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
               onDragOver={(e) => e.preventDefault()}
               onDrop={(e) => e.preventDefault()}
             >
-              <PDFViewer file={document.url} documentId={document.id} />
+              <PDFViewer file={document.url} documentId={document.id} key={`pdf-${document.id}-${currentVersion}`} />
             </div>
           </div>
         ) : isHeicFile(document.name, document.metadata?.contentType) ? (
@@ -1741,7 +1763,7 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
               height: screenWidth < 1600 ? '63vh' : '71vh',
             }}>
             <HeicConverter 
-              url={document.url} 
+              url={`${document.url}?_t=${Date.now()}`} 
               alt={document.name} 
               className="max-w-full max-h-full object-contain" 
               onError={(err) => {
@@ -1760,7 +1782,7 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
               onDragOver={(e) => e.preventDefault()}
               onDrop={(e) => e.preventDefault()}
             >
-              <ImageViewer file={document.url} documentId={document.id} />
+              <ImageViewer file={`${document.url}?_t=${Date.now()}`} documentId={document.id} />
             </div>
           </div>
         ) : isVideo(document.name, document.metadata?.contentType) ? (
@@ -1769,7 +1791,7 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
               height: screenWidth < 1600 ? '63vh' : '71vh',
             }}>
             <video 
-              src={document.url}
+              src={`${document.url}?_t=${Date.now()}`}
               controls
               className="max-w-full max-h-full" 
               onError={() => console.error("Video loading error")}
@@ -1780,7 +1802,7 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
             <div className="flex flex-col items-center">
               <p className="mb-2 text-gray-700">{document.name}</p>
               <audio 
-                src={document.url} 
+                src={`${document.url}?_t=${Date.now()}`} 
                 controls 
                 className="w-full" 
                 onError={() => console.error("Audio loading error")}

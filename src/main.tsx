@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
 import { initializeUploads } from './utils/uploadMiddleware';
+import { ENV_FLAGS } from './lib/firebaseConfig';
 
 // Global error handlers
 window.addEventListener('unhandledrejection', (event) => {

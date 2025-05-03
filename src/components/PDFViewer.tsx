@@ -45,6 +45,14 @@ const pageCanvasCache = new Map<string, Map<number, ImageData>>();
 const pageCacheTimestamps = new Map<string, Map<number, number>>();
 const MAX_CACHED_PAGES = 20; // Maximum number of pages to keep in cache per document
 
+// Add a new buffer cache for prepared pages
+const pageBufferCache = new Map<number, {
+  canvas: HTMLCanvasElement;
+  viewport: any;
+  timestamp: number;
+  pageNumber: number;
+}>();
+
 // Function to determine if a PDF has mostly text (for better export strategy)
 async function isTextBasedPDF(pdfDocument: any) {
   try {
@@ -95,6 +103,17 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
   const initializationStartedRef = useRef<boolean>(false);
   const currentRenderingPageRef = useRef<number | null>(null);
   const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null); // Ref for controls visibility timeout
+  
+  // Add page buffer refs for double buffering
+  const pageBufferRef = useRef<{
+    canvas: HTMLCanvasElement;
+    viewport: any;
+    pageNumber: number;
+    timestamp: number;
+  } | null>(null);
+  const nextPageInProgress = useRef<boolean>(false);
+  const pageTransitionRef = useRef<boolean>(false);
+  const preloadingRef = useRef<Set<number>>(new Set());
 
   // Add annotations subscription ref
   const annotationsUnsubscribeRef = useRef<(() => void) | null>(null);
@@ -115,6 +134,14 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  
+  // Add a combined page state object for batched updates
+  const [pageState, setPageState] = useState({
+    currentPage: 1,
+    isRendering: false,
+    pageChangeInProgress: false,
+    renderComplete: false
+  });
   
   // Add screenWidth state
   const [screenWidth, setScreenWidth] = useState(window.innerWidth);
@@ -285,6 +312,91 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     return documentAnnotations.filter(annotation => annotation.pageNumber === pageNumber);
   }, []); // Remove dependency on annotationStore.documents to ensure we always get fresh data
 
+  // Add function to prepare a page for smoother transitions
+  const prepareNextPage = useCallback(async (pageNum: number, targetScale: number) => {
+    if (!pdf || preloadingRef.current.has(pageNum)) return null;
+    
+    // Mark this page as being preloaded
+    preloadingRef.current.add(pageNum);
+    
+    try {
+      // Check if we already have this page in buffer cache
+      if (pageBufferCache.has(pageNum)) {
+        const cachedPage = pageBufferCache.get(pageNum);
+        if (cachedPage) {
+          // Update timestamp to keep this page in cache longer
+          cachedPage.timestamp = Date.now();
+          // Remove from preloading set
+          preloadingRef.current.delete(pageNum);
+          return cachedPage;
+        }
+      }
+      
+      // Create off-screen canvas
+      const offscreenCanvas = document.createElement('canvas');
+      const offscreenCtx = offscreenCanvas.getContext('2d', { alpha: true });
+      if (!offscreenCtx) {
+        preloadingRef.current.delete(pageNum);
+        return null;
+      }
+      
+      // Get the page
+      const nextPage = await pdf.getPage(pageNum);
+      const viewport = nextPage.getViewport({ scale: targetScale });
+      
+      // Set dimensions with device pixel ratio for high-quality rendering
+      const devicePixelRatio = window.devicePixelRatio || 1;
+      offscreenCanvas.width = viewport.width * devicePixelRatio;
+      offscreenCanvas.height = viewport.height * devicePixelRatio;
+      
+      // Scale context to account for device pixel ratio
+      offscreenCtx.scale(devicePixelRatio, devicePixelRatio);
+      
+      // Clear canvas
+      offscreenCtx.clearRect(0, 0, viewport.width, viewport.height);
+      
+      // Enable high-quality image rendering
+      (offscreenCtx as any).imageSmoothingEnabled = true;
+      (offscreenCtx as any).imageSmoothingQuality = 'high';
+      
+      // Render to off-screen canvas
+      const renderTask = nextPage.render({
+        canvasContext: offscreenCtx,
+        viewport,
+        intent: "display"
+      });
+      
+      await renderTask.promise;
+      
+      // Create buffer object
+      const buffer = {
+        canvas: offscreenCanvas,
+        viewport,
+        pageNumber: pageNum,
+        timestamp: Date.now()
+      };
+      
+      // Cache the buffer
+      pageBufferCache.set(pageNum, buffer);
+      
+      // Cleanup preloading set
+      preloadingRef.current.delete(pageNum);
+      
+      return buffer;
+    } catch (error) {
+      // Ignore cancellation errors
+      if (error && typeof error === 'object' && 'name' in error && error.name === 'RenderingCancelledException') {
+        console.log(`[PDFViewer] Preloading of page ${pageNum} was cancelled`);
+      } else {
+        console.error(`[PDFViewer] Error preparing page ${pageNum}:`, error);
+      }
+      
+      // Cleanup preloading set
+      preloadingRef.current.delete(pageNum);
+      return null;
+    }
+  }, [pdf]);
+
   // Add this ref near the top with other refs
   const lastPageNavigationTimeRef = useRef<number>(0);
 
@@ -293,8 +405,8 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
 
   // Update the navigation handlers
   const handlePrevPage = useCallback(() => {
-    // Don't allow navigation while exporting
-    if (isExporting) {
+    // Don't allow navigation while exporting or transition is in progress
+    if (isExporting || nextPageInProgress.current) {
       return;
     }
     
@@ -304,8 +416,12 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
       return; // Already on first page
     }
     
+    // Set flags to prevent multiple navigation attempts
+    nextPageInProgress.current = true;
+    
     // Set navigation transition flag to block immediate rendering
     navigationTransitionRef.current = true;
+    pageTransitionRef.current = true;
 
     // Cancel any current render
     if (renderTaskRef.current) {
@@ -321,47 +437,52 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
       currentRenderingPageRef.current = null;
     }
     
-    
-    // Cancel any current render task robustly
-    if (renderTaskRef.current && typeof renderTaskRef.current.cancel === 'function') {
-      try {
-        renderTaskRef.current.cancel();
-      } catch (e) {
-        console.error('[PDFViewer] Error cancelling render task in handlePrevPage:', e);
-      }
-    }
-    renderTaskRef.current = null; // Ensure ref is cleared
-    
     // Track when we started this navigation attempt
     renderAttemptTimestampRef.current = Date.now();
+    lastPageNavigationTimeRef.current = Date.now();
     
-    // Clear render lock
-    renderLockRef.current = false;
+    // Batch state updates - this reduces render cycles
+    setPageState(prev => ({
+      ...prev,
+      currentPage: prevPage,
+      isRendering: true,
+      pageChangeInProgress: true,
+      renderComplete: false
+    }));
     
-    // Set flags to indicate page change is in progress
+    // Also update currentPage separately as it's used in many dependencies
+    setCurrentPage(prevPage);
+    
+    // Additional state updates that don't need to be batched
     setPageChangeInProgress(true);
+    setIsRendering(true);
 
-    // Clear any pending timeout to show controls (if applicable, though state is removed)
+    // Clear any pending timeout to show controls
     if (controlsTimeoutRef.current) {
       clearTimeout(controlsTimeoutRef.current);
       controlsTimeoutRef.current = null;
     }
-
-    // Reset rendering state
-    setIsRendering(false);
     
-    // Change the page
-    setCurrentPage(prevPage);
+    // Prepare the previous page in the background
+    // This will happen in parallel with the state change
+    prepareNextPage(prevPage, scale).then(buffer => {
+      if (buffer) {
+        // Store the prepared page in the buffer ref for fast rendering
+        pageBufferRef.current = buffer;
+      }
+    });
 
-    // Set a timeout to clear the transition flag after navigation is complete
+    // Set a timeout to clear the transition flags after navigation is complete
     setTimeout(() => {
       navigationTransitionRef.current = false;
+      pageTransitionRef.current = false;
+      nextPageInProgress.current = false;
     }, 300);
-  }, [currentPage, isExporting]);
+  }, [currentPage, isExporting, scale, prepareNextPage]);
 
   const handleNextPage = useCallback(() => {
-    // Don't allow navigation while exporting
-    if (isExporting) {
+    // Don't allow navigation while exporting or transition is in progress
+    if (isExporting || nextPageInProgress.current) {
       return;
     }
     
@@ -371,8 +492,12 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
       return; // Already on last page
     }
     
+    // Set flags to prevent multiple navigation attempts
+    nextPageInProgress.current = true;
+    
     // Set navigation transition flag to block immediate rendering
     navigationTransitionRef.current = true;
+    pageTransitionRef.current = true;
     
     // Cancel any current render task robustly
     if (renderTaskRef.current && typeof renderTaskRef.current.cancel === 'function') {
@@ -386,31 +511,49 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     
     // Track when we started this navigation attempt
     renderAttemptTimestampRef.current = Date.now();
+    lastPageNavigationTimeRef.current = Date.now();
     
     // Clear render lock
     renderLockRef.current = false;
     
-
-    // Set the page change flag
+    // Batch state updates - this reduces render cycles
+    setPageState(prev => ({
+      ...prev,
+      currentPage: nextPage,
+      isRendering: true,
+      pageChangeInProgress: true,
+      renderComplete: false
+    }));
+    
+    // Also update currentPage separately as it's used in many dependencies
+    setCurrentPage(nextPage);
+    
+    // Additional state updates that don't need to be batched
     setPageChangeInProgress(true);
+    setIsRendering(true);
 
-    // Clear any pending timeout to show controls (if applicable, though state is removed)
+    // Clear any pending timeout to show controls
     if (controlsTimeoutRef.current) {
       clearTimeout(controlsTimeoutRef.current);
       controlsTimeoutRef.current = null;
     }
-
-    // Reset rendering state
-    setIsRendering(false);
     
-    // Change the page
-    setCurrentPage(nextPage);
+    // Prepare the next page in the background
+    // This will happen in parallel with the state change
+    prepareNextPage(nextPage, scale).then(buffer => {
+      if (buffer) {
+        // Store the prepared page in the buffer ref for fast rendering
+        pageBufferRef.current = buffer;
+      }
+    });
 
-    // Set a timeout to clear the transition flag after navigation is complete
+    // Set a timeout to clear the transition flags after navigation is complete
     setTimeout(() => {
       navigationTransitionRef.current = false;
+      pageTransitionRef.current = false;
+      nextPageInProgress.current = false;
     }, 300);
-  }, [currentPage, pdf?.numPages, isExporting]);
+  }, [currentPage, pdf?.numPages, isExporting, scale, prepareNextPage]);
 
   // Add these refs near the top with other refs
   let hasLoggedRenderSkip = false;
@@ -440,6 +583,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
               renderTaskRef.current.cancel();
               renderTaskRef.current = null;
             } catch (error) {
+              console.error('[PDFViewer] Error cancelling render task:', error);
             }
           }
 
@@ -478,9 +622,13 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
         setPageChangeInProgress(false); // Reset page change state if we can't get context
         return;
       }
-
-      // Re-introduce quality multiplier
+      
+      // Check if we have a prepared buffer for this page
+      const isBufferedPage = pageBufferRef.current && pageBufferRef.current.pageNumber === currentPage;
+      
+      // Quality settings
       const qualityMultiplier = 1.0; // Keep original quality without enhancement
+      const devicePixelRatio = window.devicePixelRatio || 1;
 
       // Cancel any in-progress render tasks robustly
       if (renderTaskRef.current && typeof renderTaskRef.current.cancel === 'function') {
@@ -499,9 +647,81 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
       // Set state to indicate rendering is in progress
       setIsRendering(true);
       
-      // Log only when starting a new render (not for retries)
-
-      // Get the PDF page
+      // FAST PATH: Use the pre-rendered buffer if available
+      if (isBufferedPage) {
+        const buffer = pageBufferRef.current!;
+        
+        // Use the buffer's viewport
+        const bufferViewport = buffer.viewport;
+        
+        // Set canvas dimensions to match buffer
+        canvas.width = buffer.canvas.width;
+        canvas.height = buffer.canvas.height;
+        
+        // Set display dimensions
+        canvas.style.width = `${bufferViewport.width}px`;
+        canvas.style.height = `${bufferViewport.height}px`;
+        
+        // Clear the canvas before drawing the buffer content
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        // Draw the buffer content to the visible canvas (fast operation)
+        ctx.drawImage(buffer.canvas, 0, 0);
+        
+        // Reset render lock
+        renderLockRef.current = false;
+        currentRenderingPageRef.current = null;
+        
+        // Reset buffer
+        pageBufferRef.current = null;
+        
+        // Update states
+        setIsRendering(false);
+        setPageChangeInProgress(false);
+        setRenderComplete(true);
+        
+        // Get annotations for this page
+        const annotations = getAnnotationsForPage(documentId, currentPage);
+        setCurrentAnnotations(annotations);
+        
+        // Trigger annotation rendering by dispatching an event
+        document.dispatchEvent(
+          new CustomEvent('renderAnnotations', {
+            detail: { 
+              pageNumber: currentPage,
+              annotations 
+            },
+          })
+        );
+        
+        // Mark this page as rendered
+        if (!hasRenderedOnceRef.current[currentPage]) {
+          hasRenderedOnceRef.current[currentPage] = true;
+        }
+        renderedPagesRef.current.add(currentPage);
+        if (alreadyRenderedFiles.has(fileId)) {
+          alreadyRenderedFiles.get(fileId)?.add(currentPage);
+        }
+        
+        // Center the document with a slight delay to ensure browser has finished layout
+        setTimeout(() => {
+          scrollToCenterDocument();
+        }, 50);
+        
+        // Continue to preload adjacent pages for future navigation
+        setTimeout(() => {
+          if (currentPage < (pdf?.numPages || 0)) {
+            prepareNextPage(currentPage + 1, scale);
+          }
+          if (currentPage > 1) {
+            prepareNextPage(currentPage - 1, scale);
+          }
+        }, 100);
+        
+        return;
+      }
+      
+      // STANDARD PATH: Render directly from PDF if no buffer is available
       pdf.getPage(currentPage).then(
         (page) => {
           try {
@@ -531,9 +751,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
             // Calculate viewport considering quality multiplier
             viewport = page.getViewport({ scale: displayScale * qualityMultiplier });
 
-            // Get device pixel ratio for high-res displays
-            const devicePixelRatio = window.devicePixelRatio || 1; // Use actual device pixel ratio
-
             // Set canvas buffer size considering device pixel ratio
             canvas.width = viewport.width * devicePixelRatio;
             canvas.height = viewport.height * devicePixelRatio;
@@ -542,16 +759,12 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
             canvas.style.width = `${viewport.width / qualityMultiplier}px`;
             canvas.style.height = `${viewport.height / qualityMultiplier}px`;
             
-            // Enable high-quality image rendering on the context
-            // No high-quality image rendering settings to maintain original quality
-
             // Explicitly clear the canvas *before* scaling the context
             // Use the canvas buffer dimensions (already includes devicePixelRatio)
             ctx.clearRect(0, 0, canvas.width, canvas.height);
 
             // Scale the context to account for device pixel ratio
             ctx.scale(devicePixelRatio, devicePixelRatio);
-            // Removed textRendering attempt
 
             // Define render parameters with enhanced text rendering
             const renderContext = {
@@ -559,7 +772,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
               viewport: viewport,
               // Use print intent for better text quality at high zoom levels
               intent: "display" // Use standard quality for all zoom levels
-              // Removed enableWebGL: true
             };
 
             // Store the timestamp when render started
@@ -571,7 +783,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
             // Handle successful render
             renderTaskRef.current.promise.then(
               () => {
-                // Removed caching logic associated with qualityMultiplier
                 // Reset render lock
                 renderLockRef.current = false;
                 currentRenderingPageRef.current = null;
@@ -634,7 +845,16 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
                   alreadyRenderedFiles.get(fileId)?.add(currentPage);
                 }
                 
-                // Page change and rendering are complete
+                // Batch state updates for render completion to reduce flicker
+                // This will cause a single re-render instead of multiple
+                setPageState(prev => ({
+                  ...prev,
+                  pageChangeInProgress: false,
+                  isRendering: false,
+                  renderComplete: true
+                }));
+                
+                // Also update individual states for backwards compatibility
                 setPageChangeInProgress(false);
                 setIsRendering(false);
                 setRenderComplete(true);
@@ -644,6 +864,15 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
                   scrollToCenterDocument();
                 }, 50);
                 
+                // Preload adjacent pages for smoother navigation
+                setTimeout(() => {
+                  if (currentPage < (pdf?.numPages || 0)) {
+                    prepareNextPage(currentPage + 1, scale);
+                  }
+                  if (currentPage > 1) {
+                    prepareNextPage(currentPage - 1, scale);
+                  }
+                }, 100);
               },
               (error: Error | any) => {
                 // Check if this is a cancellation exception
@@ -725,10 +954,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
       setRenderAttempts(0); // Reset attempts
     }
   }, [
-    // Dependencies removed: currentPage, scale (read directly from state/refs inside)
     pdf,
-    // currentPage,
-    // scale,
     canvasRef,
     containerRef,
     fileId,
@@ -736,7 +962,10 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     annotationStore,
     pageChangeInProgress,
     scrollToCenterDocument,
-    // renderAttempts // Removed: State changes shouldn't affect function identity here
+    currentPage,
+    scale,
+    getAnnotationsForPage,
+    prepareNextPage
   ]);
 
   // Add an effect to clear cache when file changes
@@ -930,31 +1159,36 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
   // Mark viewer as ready only when the PDF is loaded AND the first page has rendered
   useEffect(() => {
     let loadingTimer: NodeJS.Timeout | null = null;
+    
+    // Only show forced loading overlay for initial load, not for page navigation
     if (pdf && initialPageRendered) {
       // Mark the viewer as ready
       setIsViewerReady(true);
       console.log('[PDFViewer] Viewer marked as ready (PDF loaded and initial page rendered).');
 
-      // Start the 2-second forced loading timer
-      loadingTimer = setTimeout(() => {
-        setShowForcedLoadingOverlay(false);
-        console.log('[PDFViewer] Forced loading overlay hidden after 2 seconds. Refreshing canvas and showing controls.');
-        // Refresh the canvas after the overlay is hidden
-        renderPdfPage();
-        // Controls will show based on `pdf` object availability
-      }, 2000); // 2000ms = 2 seconds
-
-      // Reset render state (might not be necessary here, but keep for now)
+      // Hide the forced loading overlay immediately after initial page is rendered
+      setShowForcedLoadingOverlay(false);
+      
+      // Reset render state
       setRenderComplete(false);
       setIsRendering(false);
 
+    } else if (pdf && !initialPageRendered && !pageChangeInProgress) {
+      // If PDF is loaded but initial page hasn't rendered yet, show short loading indicator
+      setIsViewerReady(false);
+      
+      // Only show loading overlay for a brief time
+      loadingTimer = setTimeout(() => {
+        setShowForcedLoadingOverlay(false);
+        // Force render the page after hiding the overlay
+        renderPdfPage();
+      }, 1000); // 1 second instead of 2 seconds
+      
     } else if (!pdf) {
       // If PDF is unloaded, viewer is not ready
       setIsViewerReady(false);
       setShowForcedLoadingOverlay(true); // Reset forced loading if PDF unloads
-      // Controls will hide automatically when `pdf` is null
     }
-    // If PDF is loaded but initial page hasn't rendered, isViewerReady remains false
 
     // Cleanup the timer if the component unmounts or dependencies change before timer finishes
     return () => {
@@ -962,7 +1196,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
         clearTimeout(loadingTimer);
       }
     };
-  }, [pdf, initialPageRendered, renderPdfPage]); // Depend on pdf, initial render state, and renderPdfPage
+  }, [pdf, initialPageRendered, pageChangeInProgress, renderPdfPage]);
 
   // Define function for fitting to width - placed at the top of other functions
   const handleFitToWidth = useCallback(() => {
@@ -2108,44 +2342,80 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     
     // Simple load process with retry
     const loadPdf = () => {
+      if (!file) {
+        console.error("No file provided to PDFViewer");
+        setRenderError(new Error("No file provided"));
+        return;
+      }
       
-      if (typeof file === "string") {
-        // For URL, fetch it first
-        fetch(file)
-          .then(response => {
-            if (!response.ok) {
-              throw new Error(`Failed to fetch PDF: ${response.status}`);
-            }
-            return response.blob();
-          })
-          .then(blob => {
-            const pdfFile = new File([blob], file.split('/').pop() || 'document.pdf', { type: 'application/pdf' });
-            setPdfFile(pdfFile);
-            setHasStartedLoading(true);
-          })
-          .catch(error => {
-            console.error('[PDFViewer] Error loading PDF from URL:', error);
-            setRenderError(error instanceof Error ? error : new Error(String(error)));
-            setIsInitialLoading(false); // Stop loading state on error
-            // Try once more with a different approach if it failed
-            setTimeout(() => {
-              try {
-                // The PDF will be loaded by usePDFDocument hook after setting the file
-                setPdfFile(new File([new Uint8Array(0)], 'fallback.pdf', { type: 'application/pdf' }));
-                setCurrentPage(1);
-                setHasStartedLoading(false);
-                setIsInitialLoading(false); // Stop loading state
-              } catch (e) {
-                console.error('[PDFViewer] Failed to recover:', e);
-                setRenderError(e instanceof Error ? e : new Error(String(e)));
-                setIsInitialLoading(false); // Stop loading state
+      // Reset error state before attempting to load
+      setRenderError(null);
+      setRenderAttempts(prev => prev + 1);
+      setIsInitialLoading(true);
+      setShowForcedLoadingOverlay(true);
+      setRenderComplete(false);
+      
+      // Clear any existing cache for this file if we're reloading after errors
+      if (renderAttempts > 1) {
+        if (pageCanvasCache.has(fileId)) {
+          console.log(`Clearing cache for file ${fileId} due to previous errors`);
+          pageCanvasCache.delete(fileId);
+          pageCacheTimestamps.delete(fileId);
+          cachedPagesRef.current.clear();
+        }
+      }
+      
+      console.log(`Loading PDF file (attempt ${renderAttempts + 1}): ${typeof file === 'string' ? file : file.name}`);
+      
+      try {
+        let pdfFile: File | Blob;
+        
+        if (typeof file === 'string') {
+          // Create a new URL with a cache-busting parameter
+          const url = new URL(file, window.location.origin);
+          url.searchParams.append('_t', Date.now().toString());
+          
+          // Fetch the file with fetch API to ensure we're not getting a cached version
+          fetch(url.toString(), { cache: 'no-store' })
+            .then(response => {
+              if (!response.ok) {
+                throw new Error(`Failed to fetch PDF: ${response.status} ${response.statusText}`);
               }
-            }, 500);
-          });
-      } else if (file instanceof File) {
-        // For File object, use it directly
-        setPdfFile(file);
-        setHasStartedLoading(true);
+              return response.blob();
+            })
+            .then(blob => {
+              // Create a new File object from the blob
+              setPdfFile(new File([blob], 'document.pdf', { type: 'application/pdf' }));
+            })
+            .catch(error => {
+              console.error("Error loading PDF from URL:", error);
+              setRenderError(error instanceof Error ? error : new Error(String(error)));
+              
+              // Retry after a delay if we haven't exceeded max attempts
+              if (renderAttempts < 3) {
+                console.log(`Retrying PDF load in 2 seconds (attempt ${renderAttempts + 1})`);
+                setTimeout(() => {
+                  loadPdf();
+                }, 2000);
+              }
+            });
+        } else {
+          // File is already a File object
+          setPdfFile(file);
+        }
+        
+        // Always show the loading overlay for at least 1 second
+        setTimeout(() => {
+          setShowForcedLoadingOverlay(false);
+        }, 1000);
+        
+      } catch (error) {
+        console.error("Error in loadPdf:", error);
+        setRenderError(error instanceof Error ? error : new Error(String(error)));
+        setIsInitialLoading(false);
+        
+        // Clear forced loading overlay after an error
+        setShowForcedLoadingOverlay(false);
       }
     };
     
@@ -2164,6 +2434,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
         
         // Update state to indicate file is loaded but not yet processed
         // PDF processing will proceed in the usePDFDocument and usePDFPage hooks
+        setHasStartedLoading(true);
         
         // Set initial scale based on container width
         if (containerRef.current) {
@@ -2180,7 +2451,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
         }
         
         // PDF loading state will be updated by the hooks
-        setIsInitialLoading(false);
+        // We should not set isInitialLoading to false here - that will happen when the PDF is actually loaded
       } catch (error) {
         console.error('[PDFViewer] Failed to initialize PDF:', error);
         setRenderError(error instanceof Error ? error : new Error('Failed to load PDF'));
@@ -2773,6 +3044,65 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     setContextMenu({ visible: false, position: { x: 0, y: 0 } });
   }, []);
 
+  // Add a style tag for page transitions
+  useEffect(() => {
+    const styleId = "page-transition-styles";
+    if (!document.getElementById(styleId)) {
+      const style = document.createElement("style");
+      style.id = styleId;
+      style.textContent = `
+        /* Styles for smooth page transitions */
+        .page-transitioning canvas {
+          transition: opacity 0.15s ease-out;
+        }
+        .page-transitioning .annotation-canvas-container canvas {
+          transition: opacity 0.15s ease-out;
+        }
+        .page-changing {
+          opacity: 0.9;
+        }
+        
+        /* Smoother transition for all canvas elements during state changes */
+        canvas {
+          will-change: transform, opacity;
+        }
+        
+        /* Reduce flicker by enabling GPU acceleration on transitions */
+        .pdf-viewer-container {
+          transform: translateZ(0);
+          backface-visibility: hidden;
+        }
+        
+        /* Fade animations */
+        @keyframes fadeIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+        
+        @keyframes fadeOut {
+          from { opacity: 1; }
+          to { opacity: 0; }
+        }
+        
+        .fade-in {
+          animation: fadeIn 0.3s ease-in-out;
+        }
+        
+        .fade-out {
+          animation: fadeOut 0.3s ease-in-out;
+        }
+      `;
+      document.head.appendChild(style);
+    }
+    
+    return () => {
+      const existingStyle = document.getElementById(styleId);
+      if (existingStyle) {
+        existingStyle.remove();
+      }
+    };
+  }, []);
+
   // Make sure we explicitly return a JSX element to satisfy the React.FC type
   return (
     <div 
@@ -2781,6 +3111,15 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
       data-current-tool={currentTool}
       data-cursor-state={isDragging ? "grabbing" : currentTool === "drag" ? "grab" : currentTool}
       onContextMenu={handleContextMenu}
+      style={{
+        // Force hardware acceleration to reduce flickering
+        transform: 'translateZ(0)',
+        backfaceVisibility: 'hidden',
+        // Improve touch behavior
+        touchAction: 'pan-y',
+        // Ensure smooth transitions
+        transition: 'all 0.15s ease-out'
+      }}
     >
       {isShortcutGuideOpen && (
         <KeyboardShortcutGuide
@@ -2844,7 +3183,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
           onContextMenu={handleContextMenu}
         >
           {/* Initial Loading Animation - before PDF processing has started */}
-          {isInitialLoading && !hasStartedLoading && !renderError && (
+          {isInitialLoading && !pdf && !renderError && (
             <div className="absolute inset-0 flex items-center justify-center z-50 bg-white">
               <div className="flex flex-col items-center max-w-md text-center p-8">
                 <div className="relative w-20 h-20 mb-4">
@@ -2940,15 +3279,15 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
           )}
           
           <div 
-            className={`pdf-viewer-container mx-auto ${isDragging ? grabCursorClassName : ""}`}
+            className={`pdf-viewer-container mx-auto ${isDragging ? grabCursorClassName : ""} ${pageChangeInProgress ? "page-transitioning" : ""}`}
             style={{
               width:  '100%',
               height: screenWidth < 1600 ? '40vh' : '45vh',
               position: 'relative',
               maxWidth: '100%',
               marginBottom: '20px',
-              opacity: isRendering ? 0.7 : 1,
-              transition: 'opacity 0.2s ease-in-out, width 0.15s ease-out, height 0.15s ease-out',
+              opacity: pageChangeInProgress ? 0.9 : 1, // Subtle opacity change during transitions
+              transition: 'opacity 0.15s ease-out, width 0.15s ease-out, height 0.15s ease-out',
               transformOrigin: 'top left',
               cursor: isDragging ? 'grabbing' : 
                 (((viewport?.width || 0) > (scrollContainerRef.current?.clientWidth || 0) || 
@@ -2961,11 +3300,12 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
               <>
                 <canvas
                   ref={canvasRef}
-                  className="absolute top-0 left-0 z-10"
+                  className={`absolute top-0 left-0 z-10 ${pageChangeInProgress ? "page-changing" : ""}`}
                   style={{
                     margin: '0 auto',
                     width: `${viewport.width}px`,
                     height: `${viewport.height}px`,
+                    transition: 'opacity 0.15s ease-out',
                   }}
                   onContextMenu={handleContextMenu}
                 />
@@ -2982,7 +3322,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
               </>
             )}
 
-            {/* Forced Loading Overlay (2 seconds after ready) */}
+            {/* Forced Loading Overlay (with smooth fade transition) */}
             {showForcedLoadingOverlay && isViewerReady && !renderError && (
               <div className="absolute inset-0 flex items-center justify-center z-40 bg-white bg-opacity-90 backdrop-blur-sm">
                  <div className="flex flex-col items-center max-w-md text-center p-8">
@@ -3822,4 +4162,48 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
       document.removeEventListener('showContextMenu', handleShowContextMenu as EventListener);
     };
   }, []);
+
+  // Add this effect after the usePDFPage hook
+  // Clear loading states when PDF is successfully loaded
+  useEffect(() => {
+    if (pdf && page) {
+      // PDF and page are loaded, so we should clear all loading states
+      setIsInitialLoading(false);
+      setHasStartedLoading(false);
+      setShowForcedLoadingOverlay(false);
+      console.log('[PDFViewer] PDF and page loaded successfully, clearing loading states');
+    }
+  }, [pdf, page]);
+
+  // Ensure that loading states are properly cleared once rendering is complete
+  useEffect(() => {
+    if (renderComplete && page) {
+      // When rendering is complete and page is available, clear all loading states
+      setIsInitialLoading(false);
+      setHasStartedLoading(false);
+      console.log('[PDFViewer] Render completed, clearing all loading states');
+    }
+  }, [renderComplete, page]);
+
+  // Add useEffect to preload adjacent pages
+  useEffect(() => {
+    if (!pdf || !isViewerReady) return;
+    
+    // Don't start preloading if we're in the middle of a page transition
+    if (pageChangeInProgress || navigationTransitionRef.current) return;
+    
+    const preloadTimeout = setTimeout(() => {
+      // Preload next page if not the last page
+      if (currentPage < pdf.numPages) {
+        prepareNextPage(currentPage + 1, scale);
+      }
+      
+      // Preload previous page if not the first page
+      if (currentPage > 1) {
+        prepareNextPage(currentPage - 1, scale);
+      }
+    }, 300); // Wait for current page to stabilize first
+    
+    return () => clearTimeout(preloadTimeout);
+  }, [currentPage, pdf, isViewerReady, pageChangeInProgress, scale, prepareNextPage]);
 };

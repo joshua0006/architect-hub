@@ -87,3 +87,77 @@ Each notification includes:
 - Link to the referenced document and comment
 - Metadata about the notification source
 - Read/unread status 
+
+## Environment Configuration
+
+This project uses environment variables for Firebase configuration.
+
+### Setup
+
+1. Create a `.env` file in the root directory of your project:
+
+```bash
+# Firebase Production Configuration
+VITE_FIREBASE_API_KEY=your_production_api_key
+VITE_FIREBASE_AUTH_DOMAIN=your_production_auth_domain
+VITE_FIREBASE_PROJECT_ID=your_production_project_id
+VITE_FIREBASE_STORAGE_BUCKET=your_production_storage_bucket
+VITE_FIREBASE_MESSAGING_SENDER_ID=your_production_messaging_sender_id
+VITE_FIREBASE_APP_ID=your_production_app_id
+
+# Firebase Test Configuration
+VITE_TEST_FIREBASE_API_KEY=your_test_api_key
+VITE_TEST_FIREBASE_AUTH_DOMAIN=your_test_auth_domain
+VITE_TEST_FIREBASE_PROJECT_ID=your_test_project_id
+VITE_TEST_FIREBASE_STORAGE_BUCKET=your_test_storage_bucket
+VITE_TEST_FIREBASE_MESSAGING_SENDER_ID=your_test_messaging_sender_id
+VITE_TEST_FIREBASE_APP_ID=your_test_app_id
+VITE_TEST_FIREBASE_MEASUREMENT_ID=your_test_measurement_id
+
+# Firebase Environment Selection
+# Set to "true" to use test Firebase project instead of production
+VITE_USE_TEST_FIREBASE=false
+
+# Set to "true" to use Firebase emulators
+VITE_USE_FIREBASE_EMULATORS=false
+```
+
+2. For development, create a `.env.development` file with:
+
+```bash
+# Use test environment in development
+VITE_USE_TEST_FIREBASE=true
+```
+
+3. For production, make sure to use a `.env.production` file with:
+
+```bash
+# Use production environment in production
+VITE_USE_TEST_FIREBASE=false
+VITE_USE_FIREBASE_EMULATORS=false
+```
+
+### Firebase Emulators
+
+To use Firebase emulators for local development:
+
+1. Install the Firebase CLI:
+```bash
+npm install -g firebase-tools
+```
+
+2. Set up Firebase emulators:
+```bash
+firebase init emulators
+```
+
+3. Start the emulators:
+```bash
+firebase emulators:start
+```
+
+4. Configure your `.env.development` file:
+```bash
+VITE_USE_TEST_FIREBASE=true
+VITE_USE_FIREBASE_EMULATORS=true
+``` 
