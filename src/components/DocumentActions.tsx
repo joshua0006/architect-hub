@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Plus, Upload, FolderPlus, X, Folder, File, MoreVertical, Share2, Copy, Move } from "lucide-react";
+import { Plus, Upload, FolderPlus, X, Folder, File, MoreVertical, Share2, Copy, Move, Download } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Document, Folder as FolderType } from "../types";
 import { useToast } from "../contexts/ToastContext";
@@ -59,6 +59,7 @@ export default function DocumentActions({
   const [fileOperation, setFileOperation] = useState<'copy' | 'move'>('copy');
   const [isProcessingFileOperation, setIsProcessingFileOperation] = useState(false);
   const [selectedDestinationFolderId, setSelectedDestinationFolderId] = useState<string>("");
+  const [showFileSelectionMode, setShowFileSelectionMode] = useState(false);
   const dragCounter = useRef(0);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -354,6 +355,17 @@ export default function DocumentActions({
     return writeAccess.write;
   }  
 
+  // Add function to handle bulk download
+  const handleBulkDownload = () => {
+    // Trigger an event to tell DocumentList to enter selection mode for download
+    const selectFilesEvent = new CustomEvent('select-files-for-download', {
+      bubbles: true,
+      detail: { mode: 'download' }
+    });
+    document.dispatchEvent(selectFilesEvent);
+    setShowDropdown(false);
+  };
+
   return (
     <div 
       className="relative" 
@@ -411,6 +423,21 @@ export default function DocumentActions({
             {hasFolderWritePermission() 
               ? "Upload" 
               : "You don't have permission!"}
+          </div>
+        </div>
+
+        {/* Bulk Download Button */}
+        <div className="group relative">
+          <button
+            onClick={handleBulkDownload}
+            className="px-3 py-2 flex items-center space-x-2 bg-slate-300 text-gray-700 rounded-md hover:bg-gray-200 transition-colors"
+            title="Download multiple files"
+          >
+            <Download className="w-5 h-5" />
+            <span className="hidden sm:inline">Bulk Download</span>
+          </button>
+          <div className="absolute top-full mb-2 left-1/2 transform -translate-x-1/2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap">
+            Download multiple files as ZIP
           </div>
         </div>
 
@@ -487,6 +514,15 @@ export default function DocumentActions({
                   <span>Share Upload Link</span>
                 </button>
               )}
+              
+              {/* Bulk Download option */}
+              <button
+                onClick={handleBulkDownload}
+                className="flex items-center space-x-3 px-4 py-2 text-sm w-full text-left hover:bg-gray-100 text-gray-700"
+              >
+                <Download className="w-5 h-5 text-gray-500" />
+                <span>Bulk Download</span>
+              </button>
               
               {/* Copy Files option */}
               <button

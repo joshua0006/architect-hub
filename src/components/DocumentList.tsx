@@ -26,6 +26,8 @@ import {
   FolderInput,
   Image,
   Video,
+  CheckCircle,
+  Circle,
 } from "lucide-react";
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { Document, Folder, Project } from "../types";
@@ -54,6 +56,9 @@ import { useNavigate } from 'react-router-dom';
 import { USER_UPDATE_EVENT } from '../services/userSubscriptionService';
 import { documentService } from '../services/documentService';
 import { formatDistanceToNow } from 'date-fns';
+// Import JSZip and FileSaver for bulk downloads
+import JSZip from 'jszip';
+import FileSaver from 'file-saver';
 
 // Local type definition for the DocumentViewer's Folder type
 interface ViewerFolder {
@@ -3343,6 +3348,146 @@ export default function DocumentList({
     };
   }, [currentFolder, rootFolder]);
 
+  // Add state for file selection mode
+  const [isSelectionMode, setIsSelectionMode] = useState(false);
+  const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
+  const [selectionMode, setSelectionMode] = useState<'download' | 'copy' | 'move' | null>(null);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState(0);
+  
+  // Add new function to toggle selection of a file
+  const toggleFileSelection = (fileId: string) => {
+    setSelectedFiles(prevSelected => {
+      const newSelected = new Set(prevSelected);
+      if (newSelected.has(fileId)) {
+        newSelected.delete(fileId);
+      } else {
+        newSelected.add(fileId);
+      }
+      return newSelected;
+    });
+  };
+  
+  // Add function to select all files
+  const selectAllFiles = () => {
+    const allFileIds = currentDocs.map(doc => doc.id);
+    setSelectedFiles(new Set(allFileIds));
+  };
+  
+  // Add function to deselect all files
+  const deselectAllFiles = () => {
+    setSelectedFiles(new Set());
+  };
+  
+  // Add function to exit selection mode
+  const exitSelectionMode = () => {
+    setIsSelectionMode(false);
+    setSelectedFiles(new Set());
+    setSelectionMode(null);
+  };
+  
+  // Add function to download selected files as ZIP
+  const downloadSelectedFiles = async () => {
+    // Check if any files are selected
+    if (selectedFiles.size === 0) {
+      showToast("Please select at least one file to download", "error");
+      return;
+    }
+    
+    try {
+      setIsDownloading(true);
+      setDownloadProgress(0);
+      
+      // Create a new ZIP file
+      const zip = new JSZip();
+      
+      // Get the selected documents
+      const filesToDownload = currentDocs.filter(doc => selectedFiles.has(doc.id));
+      
+      // For progress tracking
+      let filesProcessed = 0;
+      
+      // Fetch and add each file to the ZIP
+      for (const doc of filesToDownload) {
+        try {
+          // Fetch the file
+          const response = await fetch(doc.url);
+          if (!response.ok) {
+            throw new Error(`Failed to fetch ${doc.name}`);
+          }
+          
+          // Get the file as an array buffer
+          const fileData = await response.arrayBuffer();
+          
+          // Add to zip with the original file name
+          zip.file(doc.name, fileData);
+          
+          // Update progress
+          filesProcessed++;
+          setDownloadProgress(Math.round((filesProcessed / filesToDownload.length) * 100));
+        } catch (error) {
+          console.error(`Error processing file ${doc.name}:`, error);
+          showToast(`Failed to process ${doc.name}`, "error");
+        }
+      }
+      
+      // Generate the ZIP file with proper TypeScript typing
+      const zipContent = await zip.generateAsync({
+        type: "blob",
+        compression: "DEFLATE",
+        compressionOptions: {
+          level: 9
+        },
+        // Use any for metadata since JSZip types don't include onUpdate properly
+        onUpdate: (metadata: any) => {
+          if (metadata.percent) {
+            setDownloadProgress(Math.round(metadata.percent));
+          }
+        }
+      } as any); // Use type assertion to bypass TypeScript error
+      
+      // Create a folder name for the ZIP file
+      const folderName = currentFolder?.name || "documents";
+      const zipFileName = `${folderName}-${new Date().toISOString().slice(0, 10)}.zip`;
+      
+      // Save the ZIP file
+      FileSaver.saveAs(zipContent, zipFileName);
+      
+      // Show success message
+      showToast(`Downloaded ${selectedFiles.size} files as ${zipFileName}`, "success");
+      
+      // Exit selection mode
+      exitSelectionMode();
+    } catch (error) {
+      console.error("Error creating ZIP file:", error);
+      showToast("Failed to create ZIP file", "error");
+    } finally {
+      setIsDownloading(false);
+      setDownloadProgress(0);
+    }
+  };
+  
+  // Add event listener for the bulk download trigger
+  useEffect(() => {
+    const handleSelectFilesForDownload = (event: Event) => {
+      const customEvent = event as CustomEvent;
+      console.log('Select files for download event received:', customEvent.detail);
+      
+      // Enter selection mode for download
+      setIsSelectionMode(true);
+      setSelectionMode('download');
+      setSelectedFiles(new Set());
+    };
+    
+    // Listen for the select-files-for-download event
+    document.addEventListener('select-files-for-download', handleSelectFilesForDownload as EventListener);
+    
+    // Clean up event listener
+    return () => {
+      document.removeEventListener('select-files-for-download', handleSelectFilesForDownload as EventListener);
+    };
+  }, []);
+
   return (
     <div 
       ref={dropZoneRef}
@@ -3365,7 +3510,67 @@ export default function DocumentList({
             />
             
             {/* Header actions */}
-            {renderUploadButtons()}
+            {!isSelectionMode && renderUploadButtons()}
+            
+            {/* Selection mode controls */}
+            {isSelectionMode && (
+              <div className="flex items-center space-x-2">
+                <span className="text-sm font-medium text-gray-700">
+                  {selectedFiles.size} files selected
+                </span>
+                
+                {/* Selection actions */}
+                <div className="flex items-center space-x-2 ml-4">
+                 {/* Select All button */}
+<button
+  onClick={selectAllFiles}
+  className="px-3 py-2 text-blue-700 border border-blue-200 bg-blue-100 hover:text-blue-900 hover:bg-blue-200 rounded"
+>
+  Select All
+</button>
+
+{/* Deselect All button */}
+<button
+  onClick={deselectAllFiles}
+  className="px-3 py-2 text-red-700 border border-red-200 bg-red-100 hover:text-red-900 hover:bg-red-200 rounded"
+>
+  Deselect All
+</button>
+
+                  
+                  {/* Download button - only in download mode */}
+                  {selectionMode === 'download' && selectedFiles.size > 0 && (
+                    <button
+                      onClick={downloadSelectedFiles}
+                      disabled={isDownloading}
+                      className={`px-3 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 transition-colors flex items-center space-x-1 ${
+                        isDownloading ? 'opacity-70 cursor-not-allowed' : ''
+                      }`}
+                    >
+                      {isDownloading ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          <span>Processing...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Download className="w-4 h-4" />
+                          <span>Download ZIP</span>
+                        </>
+                      )}
+                    </button>
+                  )}
+                  
+                  {/* Cancel button */}
+                  <button
+                    onClick={exitSelectionMode}
+                    className="px-3 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </>
       )}
@@ -3717,10 +3922,38 @@ export default function DocumentList({
                     key={`doc-${doc.id || Math.random().toString(36)}`}
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
-                    className="flex items-center justify-between p-3 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                    className={`flex items-center justify-between p-3 bg-white border ${
+                      isSelectionMode && selectedFiles.has(doc.id) 
+                        ? 'border-primary-500 bg-primary-50' 
+                        : 'border-gray-200'
+                    } rounded-lg hover:bg-gray-50 transition-colors`}
                   >
+                    {/* Selection checkbox - only show in selection mode */}
+                    {isSelectionMode && (
+                      <div 
+                        className="flex-shrink-0 mr-3 cursor-pointer"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleFileSelection(doc.id);
+                        }}
+                      >
+                        {selectedFiles.has(doc.id) ? (
+                          <CheckCircle className="w-5 h-5 text-primary-600" />
+                        ) : (
+                          <Circle className="w-5 h-5 text-gray-400" />
+                        )}
+                      </div>
+                    )}
+                    
                     <button
-                      onClick={() => {
+                      onClick={(e) => {
+                        // In selection mode, toggle selection instead of previewing
+                        if (isSelectionMode) {
+                          e.preventDefault();
+                          toggleFileSelection(doc.id);
+                          return;
+                        }
+                        
                         // Close image preview popup if it's open
                         closeImagePreview();
                         
@@ -3778,7 +4011,7 @@ export default function DocumentList({
                         </p>
                       </div>
                     </button>
-                    {!isSharedView && (
+                    {!isSharedView && !isSelectionMode && (
                       <div className="flex items-center space-x-1">
                         {/* Only show edit button if user can edit documents */}
 
@@ -4364,6 +4597,39 @@ export default function DocumentList({
               <div className="absolute bottom-0 left-0 right-0 bg-black bg-opacity-60 text-white p-2 text-sm truncate">
                 {hoveredImageDoc?.name}
               </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      
+      {/* Download progress overlay */}
+      <AnimatePresence>
+        {isDownloading && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50"
+          >
+            <div className="bg-white rounded-lg shadow-lg p-6 w-full max-w-md">
+              <h2 className="text-xl font-semibold mb-4">Creating ZIP Archive</h2>
+              <div className="w-full bg-gray-200 rounded-full h-2.5 mb-4">
+                <div 
+                  className="bg-primary-600 h-2.5 rounded-full transition-all duration-300" 
+                  style={{ width: `${downloadProgress}%` }}
+                ></div>
+              </div>
+              
+              <div className="flex justify-between text-sm text-gray-500 mb-4">
+                <span>Archiving {selectedFiles.size} file{selectedFiles.size !== 1 ? 's' : ''}</span>
+                <span>{downloadProgress}%</span>
+              </div>
+              
+              <p className="text-center text-gray-600 text-sm">
+                {downloadProgress < 100 ? 
+                  "Please wait while your files are being processed..." : 
+                  "Archive complete! Download will start automatically."}
+              </p>
             </div>
           </motion.div>
         )}
