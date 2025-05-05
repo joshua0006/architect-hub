@@ -2759,8 +2759,17 @@ export default function DocumentList({
       setIsCopyingOrMoving(true);
       
       // First, get the source folder details to show in toast notification
-      const sourceFolderDetails = folders.find(f => f.id === source_folder) || 
-                                 await folderService.getById(source_folder);
+      let sourceFolderDetails: Folder | undefined = folders.find(f => f.id === source_folder);
+      
+      // If not found in local state, try to fetch it directly from the service
+      if (!sourceFolderDetails) {
+        try {
+          sourceFolderDetails = await folderService.getById(source_folder);
+        } catch (error) {
+          console.error("Error fetching folder details:", error);
+          throw new Error('Source folder not found');
+        }
+      }
       
       if (!sourceFolderDetails) {
         throw new Error('Source folder not found');
@@ -2782,10 +2791,11 @@ export default function DocumentList({
           });
         } else {
           // Use folderService to copy the folder
+          const destFolder = destination_folder || undefined;
           const copiedFolderId = await folderService.copyFolder(
             source_folder,
             destination_project_id,
-            destination_folder || undefined
+            destFolder
           );
           
           console.log(`Folder copied successfully. New folder ID: ${copiedFolderId}`);
@@ -2829,6 +2839,7 @@ export default function DocumentList({
           });
         } else {
           // Use folderService to move the folder
+          const destFolder = destination_folder || undefined;
           const movedFolderId = await folderService.moveFolder(
             source_folder,
             destination_project_id,
@@ -3126,7 +3137,37 @@ export default function DocumentList({
       setIsCopyingOrMoving(true);
       
       // First, get the source document details for toast notification
-      const sourceDocumentDetails = documents.find(d => d.id === source_document);
+      let sourceDocumentDetails = documents.find(d => d.id === source_document);
+      
+      // If not found in local state, try to fetch it directly from the service
+      if (!sourceDocumentDetails) {
+        try {
+          // Fetch document by ID from the appropriate folder, if we know which folder it belongs to
+          // We'll need to search in all folders' documents if we don't know the folder
+          const allProjectFolders = folders.filter(f => f.projectId === projectId);
+          let foundDoc = null;
+          
+          for (const folder of allProjectFolders) {
+            try {
+              const folderDocs = await documentService.getByFolderId(folder.id);
+              const doc = folderDocs.find(d => d.id === source_document);
+              if (doc) {
+                foundDoc = doc;
+                break;
+              }
+            } catch (err) {
+              console.log(`Error fetching docs for folder ${folder.id}:`, err);
+            }
+          }
+          
+          if (foundDoc) {
+            sourceDocumentDetails = foundDoc;
+          }
+        } catch (error) {
+          console.error("Error fetching document details:", error);
+          throw new Error('Source document not found');
+        }
+      }
       
       if (!sourceDocumentDetails) {
         throw new Error('Source document not found');
@@ -3148,7 +3189,7 @@ export default function DocumentList({
           name: sourceDocumentDetails.name,
           type: sourceDocumentDetails.type,
           dateModified: new Date().toISOString(),
-          folderId: destination_folder, // Ensure it's not undefined
+          folderId: destination_folder || "", // Use empty string if undefined
           version: 1,
           metadata: {
             ...sourceDocumentDetails.metadata,
@@ -3157,7 +3198,9 @@ export default function DocumentList({
         };
 
         // Use document service to create the new document
-        await documentService.create(destination_folder, newDocData, file);
+        // Ensure destination_folder is not undefined when passing to create
+        const destFolder = destination_folder || "";
+        await documentService.create(destFolder, newDocData, file);
         
         // Show success message
         showToast(`Document ${sourceDocumentName} copied successfully`, 'success');
@@ -3175,16 +3218,20 @@ export default function DocumentList({
           name: sourceDocumentDetails.name,
           type: sourceDocumentDetails.type,
           dateModified: new Date().toISOString(),
-          folderId: destination_folder, // Ensure it's not undefined
+          folderId: destination_folder || "", // Use empty string if undefined
           version: sourceDocumentDetails.version,
           metadata: sourceDocumentDetails.metadata
         };
 
         // Use document service to create the new document in destination
-        await documentService.create(destination_folder, newDocData, file);
+        // Ensure destination_folder is not undefined when passing to create
+        const destFolder = destination_folder || "";
+        await documentService.create(destFolder, newDocData, file);
         
         // Delete the original document after successful move
-        await documentService.delete(sourceFolderId, source_document);
+        // Ensure sourceFolderId is not undefined when passing to delete
+        const srcFolder = sourceFolderId || "";
+        await documentService.delete(srcFolder, source_document);
         
         // If the moved document was selected, deselect it
         if (selectedDocument && selectedDocument.id === source_document) {
@@ -3199,6 +3246,42 @@ export default function DocumentList({
       if (onRefresh) {
         console.log(`[DocumentList] Calling parent refresh`);
         await onRefresh();
+      }
+      
+      // Force refreshing document in the destination folder
+      if (destination_folder) {
+        await forceReloadDocuments(destination_folder);
+      } else {
+        // If destination is root, find root folder ID
+        const rootFolder = folders.find(folder => 
+          folder.projectId === destination_project_id && 
+          folder.metadata?.isRootFolder
+        );
+        
+        if (rootFolder) {
+          await forceReloadDocuments(rootFolder.id);
+        } else {
+          // If no root folder found, refresh all documents in the project
+          // Refresh all folders in the project to get their documents
+          const projectFolders = folders.filter(f => f.projectId === destination_project_id);
+          let allDocuments: Document[] = [];
+          
+          for (const folder of projectFolders) {
+            try {
+              const folderDocs = await documentService.getByFolderId(folder.id);
+              allDocuments = [...allDocuments, ...folderDocs];
+            } catch (err) {
+              console.log(`Error fetching docs for folder ${folder.id}:`, err);
+            }
+          }
+          
+          // Update local documents with the refreshed data
+          setLocalDocuments(prev => {
+            // Merge with existing documents from other projects
+            const existingFromOtherProjects = prev.filter(d => d.projectId !== destination_project_id);
+            return [...existingFromOtherProjects, ...allDocuments];
+          });
+        }
       }
       
       // Force immediate UI update
