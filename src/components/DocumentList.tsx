@@ -250,14 +250,23 @@ export default function DocumentList({
         }
       });
 
-  // Update local state when props change
+  // Update local state when props change, but avoid duplicate _root folders
+  useEffect(() => {
+    // Deduplicate folders based on ID to prevent multiple _root folders
+    const uniqueFolders = folders.reduce((acc, folder) => {
+      // If we don't already have this folder in our accumulator, add it
+      if (!acc.some(f => f.id === folder.id)) {
+        acc.push(folder);
+      }
+      return acc;
+    }, [] as Folder[]);
+    
+    setLocalFolders(uniqueFolders);
+  }, [folders]);
+  
   useEffect(() => {
     setLocalDocuments(documents);
   }, [documents]);
-  
-  useEffect(() => {
-    setLocalFolders(folders);
-  }, [folders]);
 
   // Component initialization - ensure documents are loaded on mount
   useEffect(() => {
@@ -2570,10 +2579,10 @@ export default function DocumentList({
   
   // Helper function to get folder name by ID
   const getFolderNameById = (folderId: string): string => {
-    if (!folderId) return "_root";
+    if (!folderId) return "Root";
     
     const folder = projectFolders[selectedDestinationProjectId]?.find(f => f.id === folderId);
-    return folder ? folder.name : "Unknown folder";
+    return folder ? (folder.name === '_root' ? 'Root' : folder.name) : "Unknown folder";
   };
   
   // Helper to build folder tree structure
@@ -2583,12 +2592,12 @@ export default function DocumentList({
       // Get all root folders (folders with no parent)
       const rootFolders = folders.filter(folder => folder.parentId === parentId);
       
-      // Only include _root folders that have children, or non-_root folders
+      // Only include '_root' folders that have children, or non-'_root' folders
       return rootFolders.filter(folder => {
         // If folder name is not '_root', always include it
         if (folder.name !== '_root') return true;
         
-        // Only include _root folders that have at least one child folder
+        // Only include '_root' (to be displayed as 'Root') folders that have at least one child folder
         return folders.some(f => f.parentId === folder.id);
       });
     }
@@ -2606,6 +2615,7 @@ export default function DocumentList({
         {folderItems.map(folder => {
           const hasChildren = folders.some(f => f.parentId === folder.id);
           const isExpanded = expandedFolders.has(folder.id);
+          const displayName = folder.name === '_root' ? 'Root' : folder.name;
           
           return (
             <div key={folder.id}>
@@ -2631,7 +2641,7 @@ export default function DocumentList({
                 )}
                 <FolderOpen className="w-4 h-4 mr-2 text-gray-400" />
                 <span className={`truncate ${selectedDestinationFolderId === folder.id ? 'font-medium text-blue-600' : 'text-gray-700'}`}>
-                  {folder.name}
+                  {displayName}
                 </span>
                 {selectedDestinationFolderId === folder.id && (
                   <Check className="w-4 h-4 ml-2 text-blue-600" />
@@ -3561,6 +3571,26 @@ export default function DocumentList({
     };
   }, []);
 
+  // Handle page refresh/cleanup
+  useEffect(() => {
+    // Clear duplicate _root folders on component mount and before unloading the page
+    const cleanupFolders = () => {
+      console.log('[DocumentList] Cleaning up folders to prevent duplicates');
+      // Reset local state on page reload
+      setLocalFolders([]);
+      setLocalDocuments([]);
+    };
+    
+    // Add event listener for beforeunload
+    window.addEventListener('beforeunload', cleanupFolders);
+    
+    // Return cleanup function
+    return () => {
+      window.removeEventListener('beforeunload', cleanupFolders);
+      cleanupFolders();
+    };
+  }, []);
+
   return (
     <div 
       ref={dropZoneRef}
@@ -4430,7 +4460,7 @@ export default function DocumentList({
                   <span className="truncate">
                     {selectedDestinationFolderId 
                       ? getFolderNameById(selectedDestinationFolderId)
-                      : "_root"
+                      : "Root"
                     }
                   </span>
                   <ChevronDown className="w-4 h-4 text-gray-400" />
@@ -4472,7 +4502,7 @@ export default function DocumentList({
             <div className="mt-2 text-xs text-gray-500">
               Selected destination: {selectedDestinationProjectId ? 
                 `${availableProjects.find(p => p.id === selectedDestinationProjectId)?.name || "Unknown"} / ${selectedDestinationFolderId ? 
-                  getFolderNameById(selectedDestinationFolderId) : "_root"}` 
+                  getFolderNameById(selectedDestinationFolderId) : "Root"}` 
                 : "Please select a destination"
               }
             </div>

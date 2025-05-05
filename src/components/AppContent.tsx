@@ -336,6 +336,9 @@ export default function AppContent() {
     removeFromProject,
   } = useTeamManager(sampleTeamMembers);
 
+  // Add a tracker to prevent duplicate _root folder creation on page refresh
+  const rootFolderCreationTracker = useRef<Record<string, boolean>>({});
+
   // Function to find the project containing a specific folder
   const findProjectForFolder = async (folderId: string): Promise<Project | undefined> => {
     try {
@@ -632,35 +635,52 @@ export default function AppContent() {
           console.log(`Found top-level folder ${topLevelFolder.id} as fallback, redirecting`);
           navigate(`/documents/projects/${projectId}/folders/${topLevelFolder.id}`, { replace: true });
         } else {
-          // As a last resort, attempt to create a _root folder
-          console.log(`No suitable folders found, creating _root folder for project ${projectId}`);
+          // Before creating a new root folder, check if we're currently loading or if we've already triggered creation
+          const isCreatingRootFolder = rootFolderCreationTracker.current[projectId];
           
-          // Import needed service
-          import('../services/folderTemplateService')
-            .then((module) => {
-              // Create the _root folder
-              module.folderTemplateService.createInvisibleRootFolder(projectId)
-                .then((newRootFolder: Folder) => {
-                  console.log(`Created new _root folder ${newRootFolder.id}, redirecting`);
-                  navigate(`/documents/projects/${projectId}/folders/${newRootFolder.id}`, {
-                    replace: true,
-                    state: { 
-                      folderName: selectedProject.name || "Project Documents",
-                      isRootFolder: true 
-                    }
+          if (!isCreatingRootFolder && !foldersLoading) {
+            // Mark that we're creating a root folder for this project to prevent duplicate creation
+            rootFolderCreationTracker.current[projectId] = true;
+            
+            // As a last resort, attempt to create a _root folder
+            console.log(`No suitable folders found, creating _root folder for project ${projectId}`);
+            
+            // Import needed service
+            import('../services/folderTemplateService')
+              .then((module) => {
+                // Create the _root folder
+                module.folderTemplateService.createInvisibleRootFolder(projectId)
+                  .then((newRootFolder: Folder) => {
+                    console.log(`Created new _root folder ${newRootFolder.id}, redirecting`);
+                    // Reset the tracker for this project after successful creation
+                    rootFolderCreationTracker.current[projectId] = false;
+                    
+                    navigate(`/documents/projects/${projectId}/folders/${newRootFolder.id}`, {
+                      replace: true,
+                      state: { 
+                        folderName: selectedProject.name || "Project Documents",
+                        isRootFolder: true 
+                      }
+                    });
+                  })
+                  .catch((error: Error) => {
+                    console.error('Failed to create _root folder:', error);
+                    // Reset the tracker for this project on error
+                    rootFolderCreationTracker.current[projectId] = false;
                   });
-                })
-                .catch((error: Error) => {
-                  console.error('Failed to create _root folder:', error);
-                });
-            })
-            .catch((error: Error) => {
-              console.error('Failed to import folderTemplateService:', error);
-            });
+              })
+              .catch((error: Error) => {
+                console.error('Failed to import folderTemplateService:', error);
+                // Reset the tracker for this project on error
+                rootFolderCreationTracker.current[projectId] = false;
+              });
+          } else {
+            console.log(`Already creating a root folder for project ${projectId} or folders are still loading, skipping creation`);
+          }
         }
       }
     }
-  }, [location.pathname, selectedProject, folders, navigate]);
+  }, [location.pathname, selectedProject, folders, navigate, foldersLoading]);
 
   // Handle project switching from navigation state
   useEffect(() => {
@@ -892,6 +912,62 @@ export default function AppContent() {
       throw new Error('Failed to update folder permission');
     }
   };
+
+  // Function to clean up duplicate _root folders for a project
+  const cleanupDuplicateRootFolders = async (projectId: string) => {
+    try {
+      if (!projectId) return;
+      
+      console.log(`Checking for duplicate _root folders for project ${projectId}`);
+      
+      // Find all _root folders for this project
+      const rootFolders = folders.filter(folder => 
+        folder.projectId === projectId && 
+        folder.metadata?.isRootFolder && 
+        folder.name === '_root'
+      );
+      
+      // If we have multiple _root folders, clean them up
+      if (rootFolders.length > 1) {
+        console.log(`Found ${rootFolders.length} _root folders for project ${projectId}, cleaning up`);
+        
+        // Use folderService to clean up duplicates
+        const primaryRootId = await folderService.cleanupDuplicateRootFolders(projectId);
+        
+        if (primaryRootId) {
+          console.log(`Cleanup complete, primary _root folder is ${primaryRootId}`);
+          // Wait a moment for database to sync
+          setTimeout(() => {
+            // The folders will be reloaded automatically via subscriptions,
+            // but we can force a refresh if needed
+            if (selectedProject && selectedProject.id === projectId) {
+              console.log('Forcing folder refresh after cleanup');
+              folderService.getByProjectId(projectId);
+            }
+          }, 500);
+        }
+      }
+    } catch (error) {
+      console.error('Error cleaning up duplicate root folders:', error);
+    }
+  };
+  
+  // Clean up duplicate _root folders when folders change
+  useEffect(() => {
+    if (selectedProject && folders.length > 0) {
+      // Count _root folders for this project
+      const rootFolderCount = folders.filter(folder => 
+        folder.projectId === selectedProject.id && 
+        folder.metadata?.isRootFolder && 
+        folder.name === '_root'
+      ).length;
+      
+      if (rootFolderCount > 1) {
+        console.log(`Multiple _root folders detected (${rootFolderCount}) for project ${selectedProject.id}`);
+        cleanupDuplicateRootFolders(selectedProject.id);
+      }
+    }
+  }, [selectedProject, folders]);
 
   return (
     <AnimatePresence mode="sync">
