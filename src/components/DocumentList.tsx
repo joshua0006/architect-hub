@@ -3419,8 +3419,81 @@ export default function DocumentList({
           // Get the file as an array buffer
           const fileData = await response.arrayBuffer();
           
-          // Add to zip with the original file name
-          zip.file(doc.name, fileData);
+          // Ensure the filename has the correct extension
+          let fileName = doc.name;
+          let determinedExtension = '';
+          
+          // First determine the correct extension, regardless of whether the filename already has one
+          
+          // 1. First try to extract extension from originalFilename in metadata if available
+          if (doc.metadata?.originalFilename) {
+            const originalExt = doc.metadata.originalFilename.split('.').pop()?.toLowerCase();
+            if (originalExt && originalExt !== doc.metadata.originalFilename) {
+              determinedExtension = originalExt;
+            }
+          }
+          
+          // 2. Check document metadata for content type if we don't have an extension yet
+          if (!determinedExtension && doc.metadata?.contentType) {
+            // Special handling for PDF files
+            if (doc.metadata.contentType === 'application/pdf') {
+              determinedExtension = 'pdf';
+            } else {
+              // Handle other content types
+              const mimeExtension = doc.metadata.contentType.split('/').pop();
+              if (mimeExtension && mimeExtension !== 'octet-stream') {
+                determinedExtension = mimeExtension;
+              }
+            }
+          }
+          
+          // 3. Get extension from document type if available
+          if (!determinedExtension && doc.type) {
+            if (doc.type === 'pdf') {
+              determinedExtension = 'pdf';
+            } else if (doc.type === 'dwg') {
+              determinedExtension = 'dwg';
+            } else if (doc.type === 'image') {
+              // Try to get image extension from URL or default to jpg
+              const urlExt = doc.url.split('.').pop()?.split('?')[0]?.toLowerCase();
+              determinedExtension = (urlExt && ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'].includes(urlExt)) ? urlExt : 'jpg';
+            }
+          }
+          
+          // 4. Get extension from URL if above methods didn't provide one
+          if (!determinedExtension) {
+            const urlExtension = doc.url.split('.').pop()?.split('?')[0]?.toLowerCase();
+            if (urlExtension) {
+              determinedExtension = urlExtension;
+            }
+          }
+          
+          // Final fallback for safety
+          if (!determinedExtension) {
+            // Use a default extension based on type or just 'doc' as absolute fallback
+            determinedExtension = doc.type === 'pdf' ? 'pdf' : 
+                                 doc.type === 'dwg' ? 'dwg' : 
+                                 doc.type === 'image' ? 'jpg' : 'doc';
+          }
+          
+          // Now format the filename to ensure it has the proper extension
+          
+          // Remove dots from the extension if any
+          if (determinedExtension.startsWith('.')) {
+            determinedExtension = determinedExtension.substring(1);
+          }
+          
+          // Remove any existing extension from the filename
+          const lastDotIndex = fileName.lastIndexOf('.');
+          if (lastDotIndex !== -1) {
+            fileName = fileName.substring(0, lastDotIndex);
+          }
+          
+          // Append the determined extension
+          const finalFileName = `${fileName}.${determinedExtension}`;
+          
+          // Add to zip with the proper file name and extension
+          zip.file(finalFileName, fileData);
           
           // Update progress
           filesProcessed++;
@@ -3438,20 +3511,20 @@ export default function DocumentList({
         compressionOptions: {
           level: 9
         },
-        // Use any for metadata since JSZip types don't include onUpdate properly
         onUpdate: (metadata: any) => {
           if (metadata.percent) {
             setDownloadProgress(Math.round(metadata.percent));
           }
         }
-      } as any); // Use type assertion to bypass TypeScript error
+      } as any); // Type assertion needed for onUpdate property
       
       // Create a folder name for the ZIP file
       const folderName = currentFolder?.name || "documents";
       const zipFileName = `${folderName}-${new Date().toISOString().slice(0, 10)}.zip`;
       
-      // Save the ZIP file
-      FileSaver.saveAs(zipContent, zipFileName);
+      // Save the ZIP file - ensure zipContent is a Blob
+      const blob = zipContent as Blob;
+      FileSaver.saveAs(blob, zipFileName);
       
       // Show success message
       showToast(`Downloaded ${selectedFiles.size} files as ${zipFileName}`, "success");
