@@ -11,6 +11,8 @@ import { User } from '../types/auth';
 import { UserRole } from '../contexts/AuthContext';
 
 export const authService = {
+
+
   async createUser(
     email: string,
     password: string,
