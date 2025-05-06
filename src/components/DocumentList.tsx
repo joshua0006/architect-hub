@@ -26,6 +26,8 @@ import {
   FolderInput,
   Image,
   Video,
+  CheckCircle,
+  Circle,
 } from "lucide-react";
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { Document, Folder, Project } from "../types";
@@ -54,6 +56,9 @@ import { useNavigate } from 'react-router-dom';
 import { USER_UPDATE_EVENT } from '../services/userSubscriptionService';
 import { documentService } from '../services/documentService';
 import { formatDistanceToNow } from 'date-fns';
+// Import JSZip and FileSaver for bulk downloads
+import JSZip from 'jszip';
+import FileSaver from 'file-saver';
 
 // Local type definition for the DocumentViewer's Folder type
 interface ViewerFolder {
@@ -245,14 +250,23 @@ export default function DocumentList({
         }
       });
 
-  // Update local state when props change
+  // Update local state when props change, but avoid duplicate _root folders
+  useEffect(() => {
+    // Deduplicate folders based on ID to prevent multiple _root folders
+    const uniqueFolders = folders.reduce((acc, folder) => {
+      // If we don't already have this folder in our accumulator, add it
+      if (!acc.some(f => f.id === folder.id)) {
+        acc.push(folder);
+      }
+      return acc;
+    }, [] as Folder[]);
+    
+    setLocalFolders(uniqueFolders);
+  }, [folders]);
+  
   useEffect(() => {
     setLocalDocuments(documents);
   }, [documents]);
-  
-  useEffect(() => {
-    setLocalFolders(folders);
-  }, [folders]);
 
   // Component initialization - ensure documents are loaded on mount
   useEffect(() => {
@@ -2565,10 +2579,10 @@ export default function DocumentList({
   
   // Helper function to get folder name by ID
   const getFolderNameById = (folderId: string): string => {
-    if (!folderId) return "_root";
+    if (!folderId) return "Root";
     
     const folder = projectFolders[selectedDestinationProjectId]?.find(f => f.id === folderId);
-    return folder ? folder.name : "Unknown folder";
+    return folder ? (folder.name === '_root' ? 'Root' : folder.name) : "Unknown folder";
   };
   
   // Helper to build folder tree structure
@@ -2578,12 +2592,12 @@ export default function DocumentList({
       // Get all root folders (folders with no parent)
       const rootFolders = folders.filter(folder => folder.parentId === parentId);
       
-      // Only include _root folders that have children, or non-_root folders
+      // Only include '_root' folders that have children, or non-'_root' folders
       return rootFolders.filter(folder => {
         // If folder name is not '_root', always include it
         if (folder.name !== '_root') return true;
         
-        // Only include _root folders that have at least one child folder
+        // Only include '_root' (to be displayed as 'Root') folders that have at least one child folder
         return folders.some(f => f.parentId === folder.id);
       });
     }
@@ -2601,6 +2615,7 @@ export default function DocumentList({
         {folderItems.map(folder => {
           const hasChildren = folders.some(f => f.parentId === folder.id);
           const isExpanded = expandedFolders.has(folder.id);
+          const displayName = folder.name === '_root' ? 'Root' : folder.name;
           
           return (
             <div key={folder.id}>
@@ -2626,7 +2641,7 @@ export default function DocumentList({
                 )}
                 <FolderOpen className="w-4 h-4 mr-2 text-gray-400" />
                 <span className={`truncate ${selectedDestinationFolderId === folder.id ? 'font-medium text-blue-600' : 'text-gray-700'}`}>
-                  {folder.name}
+                  {displayName}
                 </span>
                 {selectedDestinationFolderId === folder.id && (
                   <Check className="w-4 h-4 ml-2 text-blue-600" />
@@ -2744,8 +2759,17 @@ export default function DocumentList({
       setIsCopyingOrMoving(true);
       
       // First, get the source folder details to show in toast notification
-      const sourceFolderDetails = folders.find(f => f.id === source_folder) || 
-                                 await folderService.getById(source_folder);
+      let sourceFolderDetails: Folder | undefined = folders.find(f => f.id === source_folder);
+      
+      // If not found in local state, try to fetch it directly from the service
+      if (!sourceFolderDetails) {
+        try {
+          sourceFolderDetails = await folderService.getById(source_folder);
+        } catch (error) {
+          console.error("Error fetching folder details:", error);
+          throw new Error('Source folder not found');
+        }
+      }
       
       if (!sourceFolderDetails) {
         throw new Error('Source folder not found');
@@ -2767,10 +2791,11 @@ export default function DocumentList({
           });
         } else {
           // Use folderService to copy the folder
+          const destFolder = destination_folder || undefined;
           const copiedFolderId = await folderService.copyFolder(
             source_folder,
             destination_project_id,
-            destination_folder || undefined
+            destFolder
           );
           
           console.log(`Folder copied successfully. New folder ID: ${copiedFolderId}`);
@@ -2814,6 +2839,7 @@ export default function DocumentList({
           });
         } else {
           // Use folderService to move the folder
+          const destFolder = destination_folder || undefined;
           const movedFolderId = await folderService.moveFolder(
             source_folder,
             destination_project_id,
@@ -3111,7 +3137,37 @@ export default function DocumentList({
       setIsCopyingOrMoving(true);
       
       // First, get the source document details for toast notification
-      const sourceDocumentDetails = documents.find(d => d.id === source_document);
+      let sourceDocumentDetails = documents.find(d => d.id === source_document);
+      
+      // If not found in local state, try to fetch it directly from the service
+      if (!sourceDocumentDetails) {
+        try {
+          // Fetch document by ID from the appropriate folder, if we know which folder it belongs to
+          // We'll need to search in all folders' documents if we don't know the folder
+          const allProjectFolders = folders.filter(f => f.projectId === projectId);
+          let foundDoc = null;
+          
+          for (const folder of allProjectFolders) {
+            try {
+              const folderDocs = await documentService.getByFolderId(folder.id);
+              const doc = folderDocs.find(d => d.id === source_document);
+              if (doc) {
+                foundDoc = doc;
+                break;
+              }
+            } catch (err) {
+              console.log(`Error fetching docs for folder ${folder.id}:`, err);
+            }
+          }
+          
+          if (foundDoc) {
+            sourceDocumentDetails = foundDoc;
+          }
+        } catch (error) {
+          console.error("Error fetching document details:", error);
+          throw new Error('Source document not found');
+        }
+      }
       
       if (!sourceDocumentDetails) {
         throw new Error('Source document not found');
@@ -3133,7 +3189,7 @@ export default function DocumentList({
           name: sourceDocumentDetails.name,
           type: sourceDocumentDetails.type,
           dateModified: new Date().toISOString(),
-          folderId: destination_folder, // Ensure it's not undefined
+          folderId: destination_folder || "", // Use empty string if undefined
           version: 1,
           metadata: {
             ...sourceDocumentDetails.metadata,
@@ -3142,7 +3198,9 @@ export default function DocumentList({
         };
 
         // Use document service to create the new document
-        await documentService.create(destination_folder, newDocData, file);
+        // Ensure destination_folder is not undefined when passing to create
+        const destFolder = destination_folder || "";
+        await documentService.create(destFolder, newDocData, file);
         
         // Show success message
         showToast(`Document ${sourceDocumentName} copied successfully`, 'success');
@@ -3160,16 +3218,20 @@ export default function DocumentList({
           name: sourceDocumentDetails.name,
           type: sourceDocumentDetails.type,
           dateModified: new Date().toISOString(),
-          folderId: destination_folder, // Ensure it's not undefined
+          folderId: destination_folder || "", // Use empty string if undefined
           version: sourceDocumentDetails.version,
           metadata: sourceDocumentDetails.metadata
         };
 
         // Use document service to create the new document in destination
-        await documentService.create(destination_folder, newDocData, file);
+        // Ensure destination_folder is not undefined when passing to create
+        const destFolder = destination_folder || "";
+        await documentService.create(destFolder, newDocData, file);
         
         // Delete the original document after successful move
-        await documentService.delete(sourceFolderId, source_document);
+        // Ensure sourceFolderId is not undefined when passing to delete
+        const srcFolder = sourceFolderId || "";
+        await documentService.delete(srcFolder, source_document);
         
         // If the moved document was selected, deselect it
         if (selectedDocument && selectedDocument.id === source_document) {
@@ -3184,6 +3246,42 @@ export default function DocumentList({
       if (onRefresh) {
         console.log(`[DocumentList] Calling parent refresh`);
         await onRefresh();
+      }
+      
+      // Force refreshing document in the destination folder
+      if (destination_folder) {
+        await forceReloadDocuments(destination_folder);
+      } else {
+        // If destination is root, find root folder ID
+        const rootFolder = folders.find(folder => 
+          folder.projectId === destination_project_id && 
+          folder.metadata?.isRootFolder
+        );
+        
+        if (rootFolder) {
+          await forceReloadDocuments(rootFolder.id);
+        } else {
+          // If no root folder found, refresh all documents in the project
+          // Refresh all folders in the project to get their documents
+          const projectFolders = folders.filter(f => f.projectId === destination_project_id);
+          let allDocuments: Document[] = [];
+          
+          for (const folder of projectFolders) {
+            try {
+              const folderDocs = await documentService.getByFolderId(folder.id);
+              allDocuments = [...allDocuments, ...folderDocs];
+            } catch (err) {
+              console.log(`Error fetching docs for folder ${folder.id}:`, err);
+            }
+          }
+          
+          // Update local documents with the refreshed data
+          setLocalDocuments(prev => {
+            // Merge with existing documents from other projects
+            const existingFromOtherProjects = prev.filter(d => d.projectId !== destination_project_id);
+            return [...existingFromOtherProjects, ...allDocuments];
+          });
+        }
       }
       
       // Force immediate UI update
@@ -3343,6 +3441,239 @@ export default function DocumentList({
     };
   }, [currentFolder, rootFolder]);
 
+  // Add state for file selection mode
+  const [isSelectionMode, setIsSelectionMode] = useState(false);
+  const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
+  const [selectionMode, setSelectionMode] = useState<'download' | 'copy' | 'move' | null>(null);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState(0);
+  
+  // Add new function to toggle selection of a file
+  const toggleFileSelection = (fileId: string) => {
+    setSelectedFiles(prevSelected => {
+      const newSelected = new Set(prevSelected);
+      if (newSelected.has(fileId)) {
+        newSelected.delete(fileId);
+      } else {
+        newSelected.add(fileId);
+      }
+      return newSelected;
+    });
+  };
+  
+  // Add function to select all files
+  const selectAllFiles = () => {
+    const allFileIds = currentDocs.map(doc => doc.id);
+    setSelectedFiles(new Set(allFileIds));
+  };
+  
+  // Add function to deselect all files
+  const deselectAllFiles = () => {
+    setSelectedFiles(new Set());
+  };
+  
+  // Add function to exit selection mode
+  const exitSelectionMode = () => {
+    setIsSelectionMode(false);
+    setSelectedFiles(new Set());
+    setSelectionMode(null);
+  };
+  
+  // Add function to download selected files as ZIP
+  const downloadSelectedFiles = async () => {
+    // Check if any files are selected
+    if (selectedFiles.size === 0) {
+      showToast("Please select at least one file to download", "error");
+      return;
+    }
+    
+    try {
+      setIsDownloading(true);
+      setDownloadProgress(0);
+      
+      // Create a new ZIP file
+      const zip = new JSZip();
+      
+      // Get the selected documents
+      const filesToDownload = currentDocs.filter(doc => selectedFiles.has(doc.id));
+      
+      // For progress tracking
+      let filesProcessed = 0;
+      
+      // Fetch and add each file to the ZIP
+      for (const doc of filesToDownload) {
+        try {
+          // Fetch the file
+          const response = await fetch(doc.url);
+          if (!response.ok) {
+            throw new Error(`Failed to fetch ${doc.name}`);
+          }
+          
+          // Get the file as an array buffer
+          const fileData = await response.arrayBuffer();
+          
+          // Ensure the filename has the correct extension
+          let fileName = doc.name;
+          let determinedExtension = '';
+          
+          // First determine the correct extension, regardless of whether the filename already has one
+          
+          // 1. First try to extract extension from originalFilename in metadata if available
+          if (doc.metadata?.originalFilename) {
+            const originalExt = doc.metadata.originalFilename.split('.').pop()?.toLowerCase();
+            if (originalExt && originalExt !== doc.metadata.originalFilename) {
+              determinedExtension = originalExt;
+            }
+          }
+          
+          // 2. Check document metadata for content type if we don't have an extension yet
+          if (!determinedExtension && doc.metadata?.contentType) {
+            // Special handling for PDF files
+            if (doc.metadata.contentType === 'application/pdf') {
+              determinedExtension = 'pdf';
+            } else {
+              // Handle other content types
+              const mimeExtension = doc.metadata.contentType.split('/').pop();
+              if (mimeExtension && mimeExtension !== 'octet-stream') {
+                determinedExtension = mimeExtension;
+              }
+            }
+          }
+          
+          // 3. Get extension from document type if available
+          if (!determinedExtension && doc.type) {
+            if (doc.type === 'pdf') {
+              determinedExtension = 'pdf';
+            } else if (doc.type === 'dwg') {
+              determinedExtension = 'dwg';
+            } else if (doc.type === 'image') {
+              // Try to get image extension from URL or default to jpg
+              const urlExt = doc.url.split('.').pop()?.split('?')[0]?.toLowerCase();
+              determinedExtension = (urlExt && ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'].includes(urlExt)) ? urlExt : 'jpg';
+            }
+          }
+          
+          // 4. Get extension from URL if above methods didn't provide one
+          if (!determinedExtension) {
+            const urlExtension = doc.url.split('.').pop()?.split('?')[0]?.toLowerCase();
+            if (urlExtension) {
+              determinedExtension = urlExtension;
+            }
+          }
+          
+          // Final fallback for safety
+          if (!determinedExtension) {
+            // Use a default extension based on type or just 'doc' as absolute fallback
+            determinedExtension = doc.type === 'pdf' ? 'pdf' : 
+                                 doc.type === 'dwg' ? 'dwg' : 
+                                 doc.type === 'image' ? 'jpg' : 'doc';
+          }
+          
+          // Now format the filename to ensure it has the proper extension
+          
+          // Remove dots from the extension if any
+          if (determinedExtension.startsWith('.')) {
+            determinedExtension = determinedExtension.substring(1);
+          }
+          
+          // Remove any existing extension from the filename
+          const lastDotIndex = fileName.lastIndexOf('.');
+          if (lastDotIndex !== -1) {
+            fileName = fileName.substring(0, lastDotIndex);
+          }
+          
+          // Append the determined extension
+          const finalFileName = `${fileName}.${determinedExtension}`;
+          
+          // Add to zip with the proper file name and extension
+          zip.file(finalFileName, fileData);
+          
+          // Update progress
+          filesProcessed++;
+          setDownloadProgress(Math.round((filesProcessed / filesToDownload.length) * 100));
+        } catch (error) {
+          console.error(`Error processing file ${doc.name}:`, error);
+          showToast(`Failed to process ${doc.name}`, "error");
+        }
+      }
+      
+      // Generate the ZIP file with proper TypeScript typing
+      const zipContent = await zip.generateAsync({
+        type: "blob",
+        compression: "DEFLATE",
+        compressionOptions: {
+          level: 9
+        },
+        onUpdate: (metadata: any) => {
+          if (metadata.percent) {
+            setDownloadProgress(Math.round(metadata.percent));
+          }
+        }
+      } as any); // Type assertion needed for onUpdate property
+      
+      // Create a folder name for the ZIP file
+      const folderName = currentFolder?.name || "documents";
+      const zipFileName = `${folderName}-${new Date().toISOString().slice(0, 10)}.zip`;
+      
+      // Save the ZIP file - ensure zipContent is a Blob
+      const blob = zipContent as Blob;
+      FileSaver.saveAs(blob, zipFileName);
+      
+      // Show success message
+      showToast(`Downloaded ${selectedFiles.size} files as ${zipFileName}`, "success");
+      
+      // Exit selection mode
+      exitSelectionMode();
+    } catch (error) {
+      console.error("Error creating ZIP file:", error);
+      showToast("Failed to create ZIP file", "error");
+    } finally {
+      setIsDownloading(false);
+      setDownloadProgress(0);
+    }
+  };
+  
+  // Add event listener for the bulk download trigger
+  useEffect(() => {
+    const handleSelectFilesForDownload = (event: Event) => {
+      const customEvent = event as CustomEvent;
+      console.log('Select files for download event received:', customEvent.detail);
+      
+      // Enter selection mode for download
+      setIsSelectionMode(true);
+      setSelectionMode('download');
+      setSelectedFiles(new Set());
+    };
+    
+    // Listen for the select-files-for-download event
+    document.addEventListener('select-files-for-download', handleSelectFilesForDownload as EventListener);
+    
+    // Clean up event listener
+    return () => {
+      document.removeEventListener('select-files-for-download', handleSelectFilesForDownload as EventListener);
+    };
+  }, []);
+
+  // Handle page refresh/cleanup
+  useEffect(() => {
+    // Clear duplicate _root folders on component mount and before unloading the page
+    const cleanupFolders = () => {
+      console.log('[DocumentList] Cleaning up folders to prevent duplicates');
+      // Reset local state on page reload
+      setLocalFolders([]);
+      setLocalDocuments([]);
+    };
+    
+    // Add event listener for beforeunload
+    window.addEventListener('beforeunload', cleanupFolders);
+    
+    // Return cleanup function
+    return () => {
+      window.removeEventListener('beforeunload', cleanupFolders);
+      cleanupFolders();
+    };
+  }, []);
+
   return (
     <div 
       ref={dropZoneRef}
@@ -3365,7 +3696,67 @@ export default function DocumentList({
             />
             
             {/* Header actions */}
-            {renderUploadButtons()}
+            {!isSelectionMode && renderUploadButtons()}
+            
+            {/* Selection mode controls */}
+            {isSelectionMode && (
+              <div className="flex items-center space-x-2">
+                <span className="text-sm font-medium text-gray-700">
+                  {selectedFiles.size} files selected
+                </span>
+                
+                {/* Selection actions */}
+                <div className="flex items-center space-x-2 ml-4">
+                 {/* Select All button */}
+<button
+  onClick={selectAllFiles}
+  className="px-3 py-2 text-blue-700 border border-blue-200 bg-blue-100 hover:text-blue-900 hover:bg-blue-200 rounded"
+>
+  Select All
+</button>
+
+{/* Deselect All button */}
+<button
+  onClick={deselectAllFiles}
+  className="px-3 py-2 text-red-700 border border-red-200 bg-red-100 hover:text-red-900 hover:bg-red-200 rounded"
+>
+  Deselect All
+</button>
+
+                  
+                  {/* Download button - only in download mode */}
+                  {selectionMode === 'download' && selectedFiles.size > 0 && (
+                    <button
+                      onClick={downloadSelectedFiles}
+                      disabled={isDownloading}
+                      className={`px-3 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 transition-colors flex items-center space-x-1 ${
+                        isDownloading ? 'opacity-70 cursor-not-allowed' : ''
+                      }`}
+                    >
+                      {isDownloading ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          <span>Processing...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Download className="w-4 h-4" />
+                          <span>Download ZIP</span>
+                        </>
+                      )}
+                    </button>
+                  )}
+                  
+                  {/* Cancel button */}
+                  <button
+                    onClick={exitSelectionMode}
+                    className="px-3 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </>
       )}
@@ -3717,10 +4108,38 @@ export default function DocumentList({
                     key={`doc-${doc.id || Math.random().toString(36)}`}
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
-                    className="flex items-center justify-between p-3 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                    className={`flex items-center justify-between p-3 bg-white border ${
+                      isSelectionMode && selectedFiles.has(doc.id) 
+                        ? 'border-primary-500 bg-primary-50' 
+                        : 'border-gray-200'
+                    } rounded-lg hover:bg-gray-50 transition-colors`}
                   >
+                    {/* Selection checkbox - only show in selection mode */}
+                    {isSelectionMode && (
+                      <div 
+                        className="flex-shrink-0 mr-3 cursor-pointer"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleFileSelection(doc.id);
+                        }}
+                      >
+                        {selectedFiles.has(doc.id) ? (
+                          <CheckCircle className="w-5 h-5 text-primary-600" />
+                        ) : (
+                          <Circle className="w-5 h-5 text-gray-400" />
+                        )}
+                      </div>
+                    )}
+                    
                     <button
-                      onClick={() => {
+                      onClick={(e) => {
+                        // In selection mode, toggle selection instead of previewing
+                        if (isSelectionMode) {
+                          e.preventDefault();
+                          toggleFileSelection(doc.id);
+                          return;
+                        }
+                        
                         // Close image preview popup if it's open
                         closeImagePreview();
                         
@@ -3778,7 +4197,7 @@ export default function DocumentList({
                         </p>
                       </div>
                     </button>
-                    {!isSharedView && (
+                    {!isSharedView && !isSelectionMode && (
                       <div className="flex items-center space-x-1">
                         {/* Only show edit button if user can edit documents */}
 
@@ -4124,7 +4543,7 @@ export default function DocumentList({
                   <span className="truncate">
                     {selectedDestinationFolderId 
                       ? getFolderNameById(selectedDestinationFolderId)
-                      : "_root"
+                      : "Root"
                     }
                   </span>
                   <ChevronDown className="w-4 h-4 text-gray-400" />
@@ -4166,7 +4585,7 @@ export default function DocumentList({
             <div className="mt-2 text-xs text-gray-500">
               Selected destination: {selectedDestinationProjectId ? 
                 `${availableProjects.find(p => p.id === selectedDestinationProjectId)?.name || "Unknown"} / ${selectedDestinationFolderId ? 
-                  getFolderNameById(selectedDestinationFolderId) : "_root"}` 
+                  getFolderNameById(selectedDestinationFolderId) : "Root"}` 
                 : "Please select a destination"
               }
             </div>
@@ -4364,6 +4783,39 @@ export default function DocumentList({
               <div className="absolute bottom-0 left-0 right-0 bg-black bg-opacity-60 text-white p-2 text-sm truncate">
                 {hoveredImageDoc?.name}
               </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      
+      {/* Download progress overlay */}
+      <AnimatePresence>
+        {isDownloading && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50"
+          >
+            <div className="bg-white rounded-lg shadow-lg p-6 w-full max-w-md">
+              <h2 className="text-xl font-semibold mb-4">Creating ZIP Archive</h2>
+              <div className="w-full bg-gray-200 rounded-full h-2.5 mb-4">
+                <div 
+                  className="bg-primary-600 h-2.5 rounded-full transition-all duration-300" 
+                  style={{ width: `${downloadProgress}%` }}
+                ></div>
+              </div>
+              
+              <div className="flex justify-between text-sm text-gray-500 mb-4">
+                <span>Archiving {selectedFiles.size} file{selectedFiles.size !== 1 ? 's' : ''}</span>
+                <span>{downloadProgress}%</span>
+              </div>
+              
+              <p className="text-center text-gray-600 text-sm">
+                {downloadProgress < 100 ? 
+                  "Please wait while your files are being processed..." : 
+                  "Archive complete! Download will start automatically."}
+              </p>
             </div>
           </motion.div>
         )}

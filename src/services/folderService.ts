@@ -567,5 +567,88 @@ export const folderService = {
       console.error('Error moving folder:', error);
       throw error;
     }
+  },
+
+  /**
+   * Clean up duplicate _root folders for a project
+   * This can happen when a user refreshes the page multiple times
+   * @param projectId The project ID to clean up root folders for
+   * @returns Promise that resolves to the ID of the primary root folder that was kept
+   */
+  async cleanupDuplicateRootFolders(projectId: string): Promise<string | null> {
+    try {
+      console.log(`Cleaning up duplicate _root folders for project ${projectId}`);
+      
+      // Query to find all _root folders for this project
+      const q = query(
+        collection(db, COLLECTION),
+        where('projectId', '==', projectId),
+        where('name', '==', '_root'),
+        where('metadata.isRootFolder', '==', true)
+      );
+      
+      const snapshot = await getDocs(q);
+      const rootFolders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Folder));
+      
+      if (rootFolders.length <= 1) {
+        console.log(`No duplicate _root folders found for project ${projectId}`);
+        return rootFolders.length === 1 ? rootFolders[0].id : null;
+      }
+      
+      console.log(`Found ${rootFolders.length} _root folders for project ${projectId}, cleaning up duplicates`);
+      
+      // Sort folders by ID (as a fallback since createdAt might not be available in metadata)
+      rootFolders.sort((a, b) => a.id.localeCompare(b.id));
+      
+      // Keep the first folder, delete the rest
+      const primaryRootFolder = rootFolders[0];
+      const duplicateFolders = rootFolders.slice(1);
+      
+      // Get all documents from duplicate folders
+      for (const folder of duplicateFolders) {
+        // Get all documents in this duplicate folder
+        const documents = await documentService.getByFolderId(folder.id);
+        
+        // Move each document to the primary folder
+        for (const doc of documents) {
+          await documentService.update(doc.id, {
+            folderId: primaryRootFolder.id
+          });
+          console.log(`Moved document ${doc.id} from duplicate folder ${folder.id} to primary folder ${primaryRootFolder.id}`);
+        }
+        
+        // Get all subfolders that have this duplicate as parent
+        const subFoldersQuery = query(
+          collection(db, COLLECTION),
+          where('projectId', '==', projectId),
+          where('parentId', '==', folder.id)
+        );
+        
+        const subFoldersSnapshot = await getDocs(subFoldersQuery);
+        const subFolders = subFoldersSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Folder));
+        
+        // Update each subfolder to point to the primary root folder
+        for (const subFolder of subFolders) {
+          await updateDoc(doc(db, COLLECTION, subFolder.id), {
+            parentId: primaryRootFolder.id,
+            updatedAt: serverTimestamp()
+          });
+          console.log(`Updated subfolder ${subFolder.id} to point to primary folder ${primaryRootFolder.id}`);
+        }
+        
+        // Now delete the duplicate folder
+        await deleteDoc(doc(db, COLLECTION, folder.id));
+        console.log(`Deleted duplicate _root folder ${folder.id}`);
+      }
+      
+      // Trigger events to update UI - provide source for the triggerFolderUpdate
+      triggerFolderUpdate(projectId, primaryRootFolder.id, 'folderService');
+      triggerDocumentUpdate(primaryRootFolder.id);
+      
+      return primaryRootFolder.id;
+    } catch (error) {
+      console.error('Error cleaning up duplicate root folders:', error);
+      return null;
+    }
   }
 };

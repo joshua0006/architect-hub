@@ -144,6 +144,11 @@ export default function DocumentBreadcrumbs({
     }
   };
   
+  // Helper function to get display name for a folder
+  const getFolderDisplayName = (folder: Folder): string => {
+    return folder.name === '_root' ? 'Root' : folder.name;
+  };
+  
   // Function to render dropdown content
   const renderDropdownContent = () => {
     // For collapsed breadcrumbs, we show hidden middle items in dropdown
@@ -164,7 +169,7 @@ export default function DocumentBreadcrumbs({
             className="flex items-center w-full px-4 py-2 text-sm text-left text-gray-700 hover:bg-gray-100"
           >
             <FolderOpen className="w-4 h-4 text-gray-400 mr-2 flex-shrink-0" />
-            <span className="truncate">{folder.name}</span>
+            <span className="truncate">{getFolderDisplayName(folder)}</span>
           </button>
         ))}
       </div>
@@ -228,7 +233,7 @@ export default function DocumentBreadcrumbs({
                         className="flex items-center space-x-1.5 px-2 py-1 rounded-md transition-colors whitespace-nowrap hover:text-gray-900 hover:bg-gray-100"
                       >
                         <FolderOpen className="w-4 h-4 text-gray-400" />
-                        <span>{breadcrumbPath[0].name}</span>
+                        <span>{getFolderDisplayName(breadcrumbPath[0])}</span>
                       </button>
                     </div>
                     
@@ -266,7 +271,7 @@ export default function DocumentBreadcrumbs({
                     className="flex items-center space-x-1.5 px-2 py-1 rounded-md transition-colors whitespace-nowrap hover:text-gray-900 hover:bg-gray-100"
                   >
                     <FolderOpen className="w-4 h-4 text-gray-400" />
-                    <span>{breadcrumbPath[breadcrumbPath.length - 1].name}</span>
+                    <span>{getFolderDisplayName(breadcrumbPath[breadcrumbPath.length - 1])}</span>
                   </button>
                 </div>
               </>
@@ -285,7 +290,7 @@ export default function DocumentBreadcrumbs({
                       className="flex items-center space-x-1.5 px-2 py-1 rounded-md transition-colors whitespace-nowrap hover:text-gray-900 hover:bg-gray-100"
                     >
                       <FolderOpen className="w-4 h-4 text-gray-400" />
-                      <span>{folder.name}</span>
+                      <span>{getFolderDisplayName(folder)}</span>
                     </button>
                   </div>
                 </React.Fragment>
