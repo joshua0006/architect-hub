@@ -8,7 +8,7 @@ import Layout from '../components/Layout';
 import { Timestamp } from 'firebase/firestore';
 import { CreateUserDto } from '../services/cloudFunctionService';
 import {cloudFunctionService} from '../services/cloudFunctionService';
-
+import toast, { Toaster } from 'react-hot-toast';
 export default function AdminPage() {
   const { user } = useAuth();
   const [users, setUsers] = useState<User[]>([]);
@@ -215,6 +215,7 @@ export default function AdminPage() {
           updatedAt: new Date().toISOString()
         }
       })) as User[];
+      toast.success('Successfully created new User!')
       setUsers(authUsers);
       setFilteredUsers(authUsers);
     } catch (err) {
@@ -342,6 +343,10 @@ export default function AdminPage() {
 
   return (
     <Layout>
+      <Toaster
+        position="top-center"
+        reverseOrder={false}
+      />
       <div className="container mx-auto px-4 py-8">
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center space-x-2">
