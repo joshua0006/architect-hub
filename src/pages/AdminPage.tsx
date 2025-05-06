@@ -6,6 +6,8 @@ import { userService } from '../services/userService';
 import { authService } from '../services/authService';
 import Layout from '../components/Layout';
 import { Timestamp } from 'firebase/firestore';
+import { CreateUserDto } from '../services/cloudFunctionService';
+import {cloudFunctionService} from '../services/cloudFunctionService';
 
 export default function AdminPage() {
   const { user } = useAuth();
@@ -157,14 +159,23 @@ export default function AdminPage() {
         setLoading(false);
         return;
       }
+
+      const createUserDto: CreateUserDto = {
+        email: newUser.email,
+        displayName: newUser.displayName,
+        role: newUser.role as UserRole,
+        password: newUser.password
+      }
+
+      await cloudFunctionService.createUser(createUserDto);
       
       // Create user without signing out the admin
-      await authService.createUserWithoutSignIn(
-        newUser.email,
-        newUser.password,
-        newUser.displayName,
-        newUser.role as UserRole
-      );
+      // await authService.createUserWithoutSignIn(
+      //   newUser.email,
+      //   newUser.password,
+      //   newUser.displayName,
+      //   newUser.role as UserRole
+      // );
       
       // Reset form
       setNewUser({
