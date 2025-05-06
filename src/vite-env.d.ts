@@ -27,6 +27,9 @@ interface ImportMetaEnv {
   readonly VITE_FIREBASE_FIRESTORE_EMULATOR_PORT?: string;
   readonly VITE_FIREBASE_AUTH_EMULATOR_PORT?: string;
   readonly VITE_FIREBASE_STORAGE_EMULATOR_PORT?: string;
+
+  // CLOUD FUNCTION
+  readonly VITE_FIREBASE_CF_URL?: string;
 }
 
 interface ImportMeta {

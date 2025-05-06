@@ -158,7 +158,7 @@ export default function DocumentActions({
       if (onRefresh) {
         await onRefresh();
       }
-      
+                                                                                                                                                                                                                                                                                      
       // Dispatch event for successful upload - this will be listened for by DocumentList
       const uploadSuccessEvent = new CustomEvent('document-upload-success', {
         bubbles: true,
