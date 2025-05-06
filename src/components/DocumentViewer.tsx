@@ -44,7 +44,7 @@ import {
 import { db } from "../lib/firebase";
 import { storage } from "../lib/firebase";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
-import { PDFViewer } from "./PDFViewer";
+import { PDFViewer, resetPDFViewerState } from "./PDFViewer";
 import { Toolbar } from "./Toolbar";
 import { Button } from "./ui/button";
 import { MediaViewer, isImage, isVideo, isAudio, isPDF, getMediaTypeInfo } from "../utils/mediaUtils";
@@ -68,6 +68,7 @@ import { DocumentVersion, DocumentComment } from "../types";
 import { NOTIFICATION_DOCUMENT_UPDATE_EVENT } from './NotificationIcon';
 import HeicConverter from './HeicConverter';
 import { ImageViewer } from "./ImageViewer";
+import { useAnnotationStore } from '../store/useAnnotationStore';
 
 interface Document {
   id: string;
@@ -569,6 +570,17 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
     );
 
     return () => unsubscribe();
+  }, [document.id]);
+
+  // Add this effect to reset PDF viewer state when document ID changes
+  useEffect(() => {
+    // Reset the file state when document ID changes
+    setFile(null);
+    
+    // Reset all PDF viewer caches to prevent page mix-up between documents
+    resetPDFViewerState();
+    
+    console.log(`Document changed to: ${document.id}`);
   }, [document.id]);
 
   useEffect(() => {
@@ -1450,6 +1462,24 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
     setCurrentDocName(document.name);
   }, [document.name]);
 
+  // Add effect to handle version changes for the same document
+  useEffect(() => {
+    if (document.id && currentVersion) {
+      // Reset the file state when version changes
+      setFile(null);
+      
+      // Reset PDF viewer caches for version changes
+      resetPDFViewerState();
+      
+      console.log(`Document ${document.id} version changed to: ${currentVersion}`);
+      
+      // Force reload if it's a PDF
+      if (document.type === "pdf") {
+        setLoading(true);
+      }
+    }
+  }, [currentVersion, document.id, document.type]);
+
   return (
     <div className={`flex flex-col ${isFullscreen ? 'fixed inset-0 z-50 bg-white' : 'h-full'}`}>
       {/* Add style tag for highlight animation */}
@@ -1754,7 +1784,7 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
               onDragOver={(e) => e.preventDefault()}
               onDrop={(e) => e.preventDefault()}
             >
-              <PDFViewer file={document.url} documentId={document.id} key={`pdf-${document.id}-${currentVersion}`} />
+              <PDFViewer file={file || document.url} documentId={document.id} key={`pdf-${document.id}-${currentVersion}`} />
             </div>
           </div>
         ) : isHeicFile(document.name, document.metadata?.contentType) ? (

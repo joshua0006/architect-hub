@@ -53,6 +53,21 @@ const pageBufferCache = new Map<number, {
   pageNumber: number;
 }>();
 
+// Track the last opened document ID
+let lastDocumentId: string | null = null;
+
+// Export this function to allow clearing caches from outside
+export function resetPDFViewerState() {
+  // Clear all caches and state
+  alreadyRenderedFiles.clear();
+  fileLoadTimestamps.clear();
+  pageCanvasCache.clear();
+  pageCacheTimestamps.clear();
+  pageBufferCache.clear();
+  currentlyRenderingFile = null;
+  console.log('[PDFViewer] Global state reset performed');
+}
+
 // Function to determine if a PDF has mostly text (for better export strategy)
 async function isTextBasedPDF(pdfDocument: any) {
   try {
@@ -84,6 +99,48 @@ async function isTextBasedPDF(pdfDocument: any) {
     console.error("Error checking PDF type:", error);
     return false; // Default to treating as image-based
   }
+}
+
+// Add a function to generate a strongly unique file identifier that includes document ID
+function generateUniqueFileId(file: File | string, documentId?: string): string {
+  // Include document ID in the file identifier if available
+  const docIdPrefix = documentId ? `doc_${documentId}_` : '';
+  
+  if (typeof file === 'string') {
+    // For URL-based files, add a timestamp to ensure uniqueness
+    return `${docIdPrefix}url_${file}_${Date.now()}`;
+  } else {
+    // For File objects, combine name, size, and last modified for uniqueness
+    return `${docIdPrefix}file_${file.name}_${file.size}_${file.lastModified}`;
+  }
+}
+
+// Add a function to clear all caches for a specific file
+function clearCachesForFile(fileId: string): void {
+  // Clear the rendered pages tracking
+  alreadyRenderedFiles.delete(fileId);
+  
+  // Clear the file load timestamp
+  fileLoadTimestamps.delete(fileId);
+  
+  // Clear all keys from pageCanvasCache that start with this fileId
+  const cacheKeysToDelete = Array.from(pageCanvasCache.keys())
+    .filter(key => key.startsWith(fileId));
+  
+  cacheKeysToDelete.forEach(key => {
+    pageCanvasCache.delete(key);
+  });
+  
+  // Clear timestamp caches too
+  const timestampKeysToDelete = Array.from(pageCacheTimestamps.keys())
+    .filter(key => key.startsWith(fileId));
+  
+  timestampKeysToDelete.forEach(key => {
+    pageCacheTimestamps.delete(key);
+  });
+  
+  // Clear the buffer cache completely since it might contain pages from the previous file
+  pageBufferCache.clear();
 }
 
 export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
@@ -189,13 +246,13 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     position: { x: 0, y: 0 }
   });
 
-  // Early file identification
+  // Early file identification - replace the existing implementation with our improved one
   const fileId = useMemo(() => {
     if (!file) {
       return "empty_file";
     }
-    return typeof file === 'string' ? file : `${file.name}_${file.size}_${file.lastModified}`;
-  }, [file]);
+    return generateUniqueFileId(file, documentId);
+  }, [file, documentId]);
 
   // PDF document and page hooks
   const { pdf, error: pdfError, isLoading: isPdfLoading } = usePDFDocument(pdfFile);
@@ -970,16 +1027,24 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
 
   // Add an effect to clear cache when file changes
   useEffect(() => {
+    // Clear all caches for the previous file when file changes
+    if (fileId) {
+      clearCachesForFile(fileId);
+      
+      // Reset all cached state
+      hasRenderedOnceRef.current = {};
+      renderedPagesRef.current.clear();
+      cachedPagesRef.current.clear();
+      pdfVerifiedRef.current = false;
+      
+      console.log(`[PDFViewer] Cleared caches for file ID: ${fileId}`);
+    }
+    
     return () => {
-      // If this component is unmounting, clear this document's cache
-      const fileSpecificKeys = Array.from(pageCanvasCache.keys())
-        .filter(key => key.startsWith(fileId || ''));
-      
-      fileSpecificKeys.forEach(key => {
-        pageCanvasCache.delete(key);
-        pageCacheTimestamps.delete(key);
-      });
-      
+      // When component unmounts, also clear caches for the current file
+      if (fileId) {
+        clearCachesForFile(fileId);
+      }
     };
   }, [fileId]);
 
@@ -2324,21 +2389,48 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
 
   // Initialize PDFjs and load document when file changes
   useEffect(() => {
-    let currentFileId = Math.random().toString(36).substring(2, 9);
+    let currentFileId = generateUniqueFileId(file, documentId);
     
     // Reset all state for a fresh load
-    // PDF and page state are managed by custom hooks (usePDFDocument and usePDFPage)
     setCurrentPage(1);
     setCurrentAnnotations([]);
     setIsViewerReady(false);
     setHasStartedLoading(false);
     setRenderError(null);
-    setIsInitialLoading(true); // Start with loading state
-    setShowForcedLoadingOverlay(true); // Reset forced loading overlay on file change
+    setIsInitialLoading(true);
+    setShowForcedLoadingOverlay(true);
+    
+    // Clear all caches for the current file to ensure fresh load
+    clearCachesForFile(currentFileId);
 
     // Reset render tracking
     hasRenderedOnceRef.current = {};
     renderedPagesRef.current.clear();
+    lastRenderedPageRef.current = 0;
+    renderLockRef.current = false;
+    currentRenderingPageRef.current = null;
+    
+    // Clear render tasks if any exist
+    if (renderTaskRef.current) {
+      try {
+        renderTaskRef.current.cancel();
+      } catch (err) {
+        console.warn('[PDFViewer] Error cancelling render task:', err);
+      }
+      renderTaskRef.current = null;
+    }
+    
+    // Reset navigation states
+    navigationTransitionRef.current = false;
+    pageTransitionRef.current = false;
+    
+    // Reset buffer state
+    pageBufferRef.current = null;
+    nextPageInProgress.current = false;
+    
+    // Set current rendering file to track across components
+    currentlyRenderingFile = currentFileId;
+    console.log(`[PDFViewer] Loading new PDF file: ${currentFileId}`);
     
     // Simple load process with retry
     const loadPdf = () => {
@@ -2474,9 +2566,12 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
         renderTaskRef.current = null;
       }
       
+      // Clear the current rendering file
+      currentlyRenderingFile = null;
+      
       setIsInitialLoading(false); // Ensure loading state is reset on unmount
     };
-  }, [file]); // Only depend on file to prevent loops
+  }, [file, documentId, fileId]); // Only depend on file to prevent loops
 
   // Effect to handle PDF document loading and verification
   useEffect(() => {
@@ -3425,23 +3520,49 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
   useEffect(() => {
     // Only run this effect if we already have a different PDF loaded
     if (pdf && (pdfFile || hasStartedLoading)) {
-
+      console.log(`[PDFViewer] Document changed, resetting state for new document ID: ${documentId}`);
+      
+      // Generate a new file ID
+      const newFileId = generateUniqueFileId(file, documentId);
+      
+      // Clear caches for the current file
+      clearCachesForFile(newFileId);
+      
       // Reset render tracking
       hasRenderedOnceRef.current = {};
       renderedPagesRef.current.clear();
       pdfVerifiedRef.current = false;
-
-      // Clear cached data for this document if it exists
-      if (fileId) {
-        alreadyRenderedFiles.delete(fileId);
+      cachedPagesRef.current.clear();
+      currentRenderingPageRef.current = null;
+      lastRenderedPageRef.current = 0;
+      
+      // Cancel any existing render task
+      if (renderTaskRef.current) {
+        try {
+          renderTaskRef.current.cancel();
+        } catch (err) {
+          console.warn('[PDFViewer] Error cancelling render task:', err);
+        }
+        renderTaskRef.current = null;
       }
-
+      
+      // Reset render lock
+      renderLockRef.current = false;
+      
       // Reset state
       setCurrentPage(1);
       setIsInitialLoading(true);
       setRenderComplete(false);
       setIsRendering(false);
-      setShowForcedLoadingOverlay(true); // Reset forced loading overlay on document change
+      setShowForcedLoadingOverlay(true);
+      
+      // Clear any existing buffer
+      pageBufferRef.current = null;
+      
+      // Reset navigation states
+      navigationTransitionRef.current = false;
+      pageTransitionRef.current = false;
+      nextPageInProgress.current = false;
 
       // Force the file to be reloaded
       if (typeof file === 'string') {
@@ -3465,7 +3586,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
         setPdfFile(file);
       }
     }
-  }, [documentId]); // Only depend on documentId to prevent unnecessary rerenders
+  }, [documentId, file]); // Depend on both documentId and file to ensure proper resets
 
   // Add a new function for small file size download
   const downloadCompressedPDF = useCallback(async () => {
@@ -4206,4 +4327,48 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     
     return () => clearTimeout(preloadTimeout);
   }, [currentPage, pdf, isViewerReady, pageChangeInProgress, scale, prepareNextPage]);
+
+  // Add this effect specifically for document ID changes
+  useEffect(() => {
+    // Check if the document ID has changed
+    if (lastDocumentId !== null && lastDocumentId !== documentId) {
+      console.log(`[PDFViewer] Document ID changed from ${lastDocumentId} to ${documentId}, forcing complete reset`);
+      
+      // Clear all caches
+      alreadyRenderedFiles.clear();
+      fileLoadTimestamps.clear();
+      pageCanvasCache.clear();
+      pageCacheTimestamps.clear();
+      pageBufferCache.clear();
+      
+      // Reset render tracking
+      hasRenderedOnceRef.current = {};
+      renderedPagesRef.current.clear();
+      
+      // Cancel any current render task
+      if (renderTaskRef.current) {
+        try {
+          renderTaskRef.current.cancel();
+        } catch (err) {
+          console.warn('[PDFViewer] Error cancelling render task during document change:', err);
+        }
+        renderTaskRef.current = null;
+      }
+      
+      // Reset all state
+      setCurrentPage(1);
+      setIsViewerReady(false);
+      setIsInitialLoading(true);
+      setRenderComplete(false);
+      setIsRendering(false);
+      
+      // Reset navigation flags
+      navigationTransitionRef.current = false;
+      pageTransitionRef.current = false;
+      nextPageInProgress.current = false;
+    }
+    
+    // Update the lastDocumentId
+    lastDocumentId = documentId;
+  }, [documentId]);
 };
