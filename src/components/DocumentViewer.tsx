@@ -44,7 +44,7 @@ import {
 import { db } from "../lib/firebase";
 import { storage } from "../lib/firebase";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
-import { PDFViewer, resetPDFViewerState } from "./PDFViewer";
+import { PDFViewer, resetPDFViewerState, loadAnnotationsForDocument } from "./PDFViewer";
 import { Toolbar } from "./Toolbar";
 import { Button } from "./ui/button";
 import { MediaViewer, isImage, isVideo, isAudio, isPDF, getMediaTypeInfo } from "../utils/mediaUtils";
@@ -579,6 +579,11 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
     
     // Reset all PDF viewer caches to prevent page mix-up between documents
     resetPDFViewerState();
+    
+    // Load annotations for the document
+    if (document.id) {
+      loadAnnotationsForDocument(document.id);
+    }
     
     console.log(`Document changed to: ${document.id}`);
   }, [document.id]);
@@ -1470,6 +1475,9 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
       
       // Reset PDF viewer caches for version changes
       resetPDFViewerState();
+      
+      // Ensure annotations are also loaded for the new version
+      loadAnnotationsForDocument(document.id);
       
       console.log(`Document ${document.id} version changed to: ${currentVersion}`);
       

@@ -874,6 +874,8 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
                         }
                       });
                       console.log('[PDFViewer] Cleared annotation canvas due to empty annotations array');
+                    } else {
+                      console.log(`[PDFViewer] Will render ${annotations.length} annotations for page ${currentPage}`);
                     }
                   }
                 } catch (err) {
@@ -2595,6 +2597,20 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
           
           // Set the document ID in the annotation store to load annotations
           annotationStore.setCurrentDocument(documentId);
+          
+          // Explicitly force loading annotations from Firebase to ensure they're up to date
+          annotationStore.loadFromFirebase(documentId)
+            .then(() => {
+              console.log(`[PDFViewer] Successfully loaded annotations for document: ${documentId}`);
+              
+              // Force a refresh of annotations
+              document.dispatchEvent(new CustomEvent('annotationRefresh', {
+                detail: { documentId }
+              }));
+            })
+            .catch(error => {
+              console.error(`[PDFViewer] Error loading annotations: ${error}`);
+            });
           
           // Force render of first page with annotations (if renderPdfPage exists)
           if (typeof renderPdfPage === 'function') {
@@ -4366,9 +4382,87 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
       navigationTransitionRef.current = false;
       pageTransitionRef.current = false;
       nextPageInProgress.current = false;
+      
+      // Force load annotations for the new document
+      try {
+        const store = useAnnotationStore.getState();
+        store.setCurrentDocument(documentId);
+        store.loadFromFirebase(documentId)
+          .then(() => {
+            console.log(`[PDFViewer] Successfully loaded annotations for new document: ${documentId}`);
+          })
+          .catch(error => {
+            console.error(`[PDFViewer] Error loading annotations for new document: ${documentId}`, error);
+          });
+      } catch (error) {
+        console.error(`[PDFViewer] Error setting up annotations for new document: ${error}`);
+      }
     }
     
     // Update the lastDocumentId
     lastDocumentId = documentId;
   }, [documentId]);
 };
+
+// Add a function to force load annotations for the current document
+export function loadAnnotationsForDocument(documentId: string, forceRender: boolean = true) {
+  if (!documentId) return;
+  
+  try {
+    // Get the annotation store
+    const store = useAnnotationStore.getState();
+    
+    // Set this as the current document in the store
+    store.setCurrentDocument(documentId);
+    
+    // Force a loading of annotations from Firebase
+    store.loadFromFirebase(documentId)
+      .then(() => {
+        console.log(`[PDFViewer] Successfully loaded annotations for document: ${documentId}`);
+        
+        // Trigger a refresh event to ensure annotations are rendered
+        document.dispatchEvent(new CustomEvent('annotationRefresh', {
+          detail: { documentId }
+        }));
+        
+        // Get the annotations for all pages if forced rendering is required
+        if (forceRender) {
+          const documentAnnotations = store.documents[documentId]?.annotations || [];
+          console.log(`[PDFViewer] Loaded ${documentAnnotations.length} annotations for document ${documentId}`);
+          
+          // Force render annotations by dispatching events for each page
+          const pageNumbers = new Set(documentAnnotations.map(a => a.pageNumber));
+          
+          pageNumbers.forEach(pageNumber => {
+            const pageAnnotations = documentAnnotations.filter(a => a.pageNumber === pageNumber);
+            
+            // Dispatch an annotationChanged event to trigger rendering
+            document.dispatchEvent(new CustomEvent('annotationChanged', {
+              detail: {
+                documentId,
+                pageNumber,
+                annotations: pageAnnotations,
+                source: 'loadedFromFirebase',
+                forceRender: true
+              }
+            }));
+            
+            // Also dispatch renderAnnotations event for the AnnotationCanvas component
+            document.dispatchEvent(new CustomEvent('renderAnnotations', {
+              detail: {
+                pageNumber,
+                annotations: pageAnnotations
+              }
+            }));
+            
+            console.log(`[PDFViewer] Triggered rendering for ${pageAnnotations.length} annotations on page ${pageNumber}`);
+          });
+        }
+      })
+      .catch(error => {
+        console.error(`[PDFViewer] Error loading annotations for document: ${documentId}`, error);
+      });
+  } catch (error) {
+    console.error(`[PDFViewer] Error in loadAnnotationsForDocument: ${error}`);
+  }
+}
