@@ -430,7 +430,7 @@ export default function AdminPage() {
                   >
                     <option value={UserRole.ADMIN}>Admin</option>
                     <option value={UserRole.STAFF}>Staff</option>
-                    <option value={UserRole.CONTRACTOR}>Contractor</option>
+                    <option value={UserRole.CONTRACTOR}>Consultant</option>
                     <option value={UserRole.CLIENT}>Client</option>
                   </select>
                 </div>
@@ -502,7 +502,7 @@ export default function AdminPage() {
                           onClick={() => handleRoleFilterChange(role as UserRole)}
                         >
                           <span className={`inline-block px-2 py-1 rounded-full text-xs font-medium ${getRoleBadgeColor(role)}`}>
-                            {role}
+                            {role === UserRole.CONTRACTOR ? 'Consultant' : role}
                           </span>
                         </li>
                       ))}
@@ -593,7 +593,7 @@ export default function AdminPage() {
                                 </>
                               ) : (
                                 <>
-                                  <span className="text-xs font-medium">{user.role}</span>
+                                  <span className="text-xs font-medium">{user.role === UserRole.CONTRACTOR ? 'Consultant' : user.role}</span>
                                   <ChevronDown className="w-3 h-3" />
                                 </>
                               )}
@@ -609,7 +609,7 @@ export default function AdminPage() {
                                       onClick={() => handleRoleSelection(user.id, role as UserRole)}
                                     >
                                       <span className={`inline-block w-full px-2 py-1 rounded-full text-xs font-medium ${getRoleBadgeColor(role)}`}>
-                                        {role}
+                                        {role === UserRole.CONTRACTOR ? 'Consultant' : role}
                                       </span>
                                     </li>
                                   ))}
