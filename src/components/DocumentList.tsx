@@ -28,6 +28,9 @@ import {
   Video,
   CheckCircle,
   Circle,
+  CheckSquare,
+  FilePlus,
+  Undo,
 } from "lucide-react";
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { Document, Folder, Project } from "../types";
@@ -59,6 +62,8 @@ import { formatDistanceToNow } from 'date-fns';
 // Import JSZip and FileSaver for bulk downloads
 import JSZip from 'jszip';
 import FileSaver from 'file-saver';
+// Add import for the FileSelectionManager component and its hook
+import FileSelectionManager, { useFileSelection } from './FileSelectionManager';
 
 // Local type definition for the DocumentViewer's Folder type
 interface ViewerFolder {
@@ -941,64 +946,49 @@ export default function DocumentList({
 
     const handleSaveChanges = async () => {
       if (!popupItem || !editNameField.trim()) return;
-
-      const originalName = popupItem.name;
-      const newName = editNameField.trim();
-      let nameChanged = newName !== originalName;
-
-      // Check if the permission selected now is different from the one present when the popup opened
-      let permissionChanged = user?.role === 'Staff' && selectedPermission !== initialPermissionOnPopupOpen;
-
-      let renamePromise: Promise<void> = Promise.resolve();
-      let permissionPromise: Promise<void> = Promise.resolve();
-
-      // --- Rename Logic ---
-      if (nameChanged) {
-        setIsSavingName(true); // Start loading state for name save
-        if (popupItem.type === 'folder') {
-          renamePromise = onUpdateFolder(popupItem.id, newName);
-        } else {
-          renamePromise = onUpdateDocument(popupItem.id, { name: newName });
+      
+      console.log(`Attempting to save changes for ${popupItem.type} [${popupItem.id}]`);
+      let nameChanged = false;
+      let permissionChanged = false;
+      
+      try {
+        // Process name change first
+        if (editNameField !== popupItem.name) {
+          setIsSavingName(true);
+          nameChanged = true;
+          console.log(`Renaming ${popupItem.type} from "${popupItem.name}" to "${editNameField}"`);
+          
+          if (popupItem.type === 'folder') {
+            await onUpdateFolder(popupItem.id, editNameField);
+          } else {
+            await onUpdateDocument(popupItem.id, { name: editNameField });
+          }
         }
-      }
-
-      // --- Permission Logic ---
-      if (permissionChanged) {
-        setIsSavingPermission(true); // Start loading state for permission save
-        if (popupItem.type === 'folder' && onUpdateFolderPermission) {
-          permissionPromise = onUpdateFolderPermission(popupItem.id, selectedPermission);
-        } else if (popupItem.type === 'document' && onUpdateDocumentPermission) {
-          permissionPromise = onUpdateDocumentPermission(popupItem.id, selectedPermission);
-        } else {
-          // Fallback direct update (less ideal as it bypasses parent logic)
-          console.warn("Using fallback permission update for", popupItem.type);
+        
+        // Then process permission change
+        if (selectedPermission !== initialPermissionOnPopupOpen) {
+          setIsSavingPermission(true);
+          permissionChanged = true;
+          console.log(`Changing permission for ${popupItem.type} [${popupItem.id}] from ${initialPermissionOnPopupOpen} to ${selectedPermission}`);
+          
+          // Get reference to the item
           const itemRef = doc(db, popupItem.type === 'folder' ? 'folders' : 'documents', popupItem.id);
-          permissionPromise = updateDoc(itemRef, {
+          
+          // Update the permission
+          await updateDoc(itemRef, {
             'metadata.access': selectedPermission,
             'updatedAt': new Date().toISOString()
           });
         }
-      }
-
-      try {
-        // Wait for both promises
-        await Promise.all([renamePromise, permissionPromise]);
-
-        // Show success toast only if something actually changed
-        if (nameChanged || permissionChanged) {
-           showToast(`${popupItem.type === 'folder' ? 'Folder' : 'File'} updated successfully`, 'success');
-        }
-
-        // Close popup and refresh if needed
+        
+        // Close the popup if successful
+        showToast(`${popupItem.type === 'folder' ? 'Folder' : 'File'} updated successfully`, 'success');
         closePopup();
-        if ((nameChanged || permissionChanged) && onRefresh) {
-          await onRefresh();
-        }
       } catch (error) {
-        console.error("Error saving changes:", error);
+        console.error('Error updating item:', error);
         showToast(`Failed to update ${popupItem.type}`, 'error');
-      } finally {
-        // Ensure loading state is turned off even if there's an error
+        
+        // Reset saving states
         if (permissionChanged) {
           setIsSavingPermission(false);
         }
@@ -2764,7 +2754,12 @@ export default function DocumentList({
       // If not found in local state, try to fetch it directly from the service
       if (!sourceFolderDetails) {
         try {
-          sourceFolderDetails = await folderService.getById(source_folder);
+          const folderResult = await folderService.getById(source_folder);
+          if (folderResult) {
+            sourceFolderDetails = folderResult;
+          } else {
+            throw new Error('Source folder not found');
+          }
         } catch (error) {
           console.error("Error fetching folder details:", error);
           throw new Error('Source folder not found');
@@ -3447,232 +3442,320 @@ export default function DocumentList({
   const [selectionMode, setSelectionMode] = useState<'download' | 'copy' | 'move' | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
-  
-  // Add new function to toggle selection of a file
-  const toggleFileSelection = (fileId: string) => {
-    setSelectedFiles(prevSelected => {
-      const newSelected = new Set(prevSelected);
-      if (newSelected.has(fileId)) {
-        newSelected.delete(fileId);
+  const [movingFiles, setMovingFiles] = useState(false);
+  const [moveProgress, setMoveProgress] = useState(0);
+  const [draggedItems, setDraggedItems] = useState<string[]>([]);
+  const [dropTargetFolder, setDragTargetFolder] = useState<string | null>(null);
+  const [fileBeingDragged, setFileBeingDragged] = useState<string | null>(null);
+  const [showMoveConfirmation, setShowMoveConfirmation] = useState(false);
+  const [moveTargetFolder, setMoveTargetFolder] = useState<{ id: string, name: string } | null>(null);
+  const [draggedFiles, setDraggedFiles] = useState<string[]>([]);
+  const [moveInProgress, setMoveInProgress] = useState(false);
+
+  // Toggle file selection - select or deselect a file
+  const toggleFileSelection = (fileId: string, event?: React.MouseEvent) => {
+    if (event) {
+      event.stopPropagation();
+    }
+    
+    setSelectedFiles(prev => {
+      const newSelection = new Set(prev);
+      if (newSelection.has(fileId)) {
+        newSelection.delete(fileId);
       } else {
-        newSelected.add(fileId);
+        newSelection.add(fileId);
       }
-      return newSelected;
+      
+      // If selection is empty, exit selection mode
+      if (newSelection.size === 0) {
+        setIsSelectionMode(false);
+      } else {
+        setIsSelectionMode(true);
+      }
+      
+      return newSelection;
     });
   };
   
-  // Add function to select all files
+  // Select all files in the current view
   const selectAllFiles = () => {
-    const allFileIds = currentDocs.map(doc => doc.id);
-    setSelectedFiles(new Set(allFileIds));
+    const newSelection = new Set<string>();
+    
+    // Add all visible document IDs to selection
+    const { filteredDocs } = filteredAndSortedItems();
+    filteredDocs.forEach(doc => {
+      if (doc.id) {
+        newSelection.add(doc.id);
+      }
+    });
+    
+    setSelectedFiles(newSelection);
+    if (newSelection.size > 0) {
+      setIsSelectionMode(true);
+    }
   };
   
-  // Add function to deselect all files
+  // Deselect all files
   const deselectAllFiles = () => {
     setSelectedFiles(new Set());
-  };
-  
-  // Add function to exit selection mode
-  const exitSelectionMode = () => {
     setIsSelectionMode(false);
-    setSelectedFiles(new Set());
-    setSelectionMode(null);
   };
   
-  // Add function to download selected files as ZIP
+  // Exit selection mode
+  const exitSelectionMode = () => {
+    setSelectedFiles(new Set());
+    setIsSelectionMode(false);
+  };
+  
+  // Download all selected files as a zip archive
   const downloadSelectedFiles = async () => {
-    // Check if any files are selected
     if (selectedFiles.size === 0) {
-      showToast("Please select at least one file to download", "error");
+      showToast("No files selected for download", "error");
       return;
     }
     
     try {
-      setIsDownloading(true);
-      setDownloadProgress(0);
-      
-      // Create a new ZIP file
       const zip = new JSZip();
+      const selectedDocs = currentDocs.filter(doc => selectedFiles.has(doc.id));
       
-      // Get the selected documents
-      const filesToDownload = currentDocs.filter(doc => selectedFiles.has(doc.id));
+      // Show toast while processing
+      showToast(`Preparing ${selectedFiles.size} files for download...`);
       
-      // For progress tracking
-      let filesProcessed = 0;
+      // Track progress for large downloads
+      let processed = 0;
       
-      // Fetch and add each file to the ZIP
-      for (const doc of filesToDownload) {
+      // Process each file
+      for (const doc of selectedDocs) {
         try {
           // Fetch the file
           const response = await fetch(doc.url);
+          
           if (!response.ok) {
-            throw new Error(`Failed to fetch ${doc.name}`);
+            console.error(`Failed to fetch file ${doc.name}: ${response.status} ${response.statusText}`);
+            continue;
           }
           
-          // Get the file as an array buffer
-          const fileData = await response.arrayBuffer();
+          // Get the blob data
+          const blob = await response.blob();
           
-          // Ensure the filename has the correct extension
-          let fileName = doc.name;
-          let determinedExtension = '';
+          // Add file to zip
+          zip.file(doc.name, blob);
           
-          // First determine the correct extension, regardless of whether the filename already has one
-          
-          // 1. First try to extract extension from originalFilename in metadata if available
-          if (doc.metadata?.originalFilename) {
-            const originalExt = doc.metadata.originalFilename.split('.').pop()?.toLowerCase();
-            if (originalExt && originalExt !== doc.metadata.originalFilename) {
-              determinedExtension = originalExt;
-            }
+          // Update progress for large downloads
+          processed++;
+          if (selectedDocs.length > 5 && processed % 5 === 0) {
+            showToast(`Preparing download: ${processed}/${selectedDocs.length} files processed...`);
           }
-          
-          // 2. Check document metadata for content type if we don't have an extension yet
-          if (!determinedExtension && doc.metadata?.contentType) {
-            // Special handling for PDF files
-            if (doc.metadata.contentType === 'application/pdf') {
-              determinedExtension = 'pdf';
-            } else {
-              // Handle other content types
-              const mimeExtension = doc.metadata.contentType.split('/').pop();
-              if (mimeExtension && mimeExtension !== 'octet-stream') {
-                determinedExtension = mimeExtension;
-              }
-            }
-          }
-          
-          // 3. Get extension from document type if available
-          if (!determinedExtension && doc.type) {
-            if (doc.type === 'pdf') {
-              determinedExtension = 'pdf';
-            } else if (doc.type === 'dwg') {
-              determinedExtension = 'dwg';
-            } else if (doc.type === 'image') {
-              // Try to get image extension from URL or default to jpg
-              const urlExt = doc.url.split('.').pop()?.split('?')[0]?.toLowerCase();
-              determinedExtension = (urlExt && ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'].includes(urlExt)) ? urlExt : 'jpg';
-            }
-          }
-          
-          // 4. Get extension from URL if above methods didn't provide one
-          if (!determinedExtension) {
-            const urlExtension = doc.url.split('.').pop()?.split('?')[0]?.toLowerCase();
-            if (urlExtension) {
-              determinedExtension = urlExtension;
-            }
-          }
-          
-          // Final fallback for safety
-          if (!determinedExtension) {
-            // Use a default extension based on type or just 'doc' as absolute fallback
-            determinedExtension = doc.type === 'pdf' ? 'pdf' : 
-                                 doc.type === 'dwg' ? 'dwg' : 
-                                 doc.type === 'image' ? 'jpg' : 'doc';
-          }
-          
-          // Now format the filename to ensure it has the proper extension
-          
-          // Remove dots from the extension if any
-          if (determinedExtension.startsWith('.')) {
-            determinedExtension = determinedExtension.substring(1);
-          }
-          
-          // Remove any existing extension from the filename
-          const lastDotIndex = fileName.lastIndexOf('.');
-          if (lastDotIndex !== -1) {
-            fileName = fileName.substring(0, lastDotIndex);
-          }
-          
-          // Append the determined extension
-          const finalFileName = `${fileName}.${determinedExtension}`;
-          
-          // Add to zip with the proper file name and extension
-          zip.file(finalFileName, fileData);
-          
-          // Update progress
-          filesProcessed++;
-          setDownloadProgress(Math.round((filesProcessed / filesToDownload.length) * 100));
-        } catch (error) {
-          console.error(`Error processing file ${doc.name}:`, error);
-          showToast(`Failed to process ${doc.name}`, "error");
+        } catch (fileError) {
+          console.error(`Error processing file ${doc.name}:`, fileError);
         }
       }
       
-      // Generate the ZIP file with proper TypeScript typing
-      const zipContent = await zip.generateAsync({
-        type: "blob",
-        compression: "DEFLATE",
-        compressionOptions: {
-          level: 9
-        },
-        onUpdate: (metadata: any) => {
-          if (metadata.percent) {
-            setDownloadProgress(Math.round(metadata.percent));
-          }
-        }
-      } as any); // Type assertion needed for onUpdate property
+      // Generate the zip file
+      showToast("Creating download package...");
+      const content = await zip.generateAsync({ type: "blob" });
       
-      // Create a folder name for the ZIP file
-      const folderName = currentFolder?.name || "documents";
-      const zipFileName = `${folderName}-${new Date().toISOString().slice(0, 10)}.zip`;
+      // Save the zip file
+      const zipName = `${selectedProject?.name || 'documents'}-files-${new Date().toISOString().slice(0,10)}.zip`;
+      FileSaver.saveAs(content, zipName);
       
-      // Save the ZIP file - ensure zipContent is a Blob
-      const blob = zipContent as Blob;
-      FileSaver.saveAs(blob, zipFileName);
+      showToast(`${selectedFiles.size} files downloaded successfully`, "success");
       
-      // Show success message
-      showToast(`Downloaded ${selectedFiles.size} files as ${zipFileName}`, "success");
-      
-      // Exit selection mode
+      // Exit selection mode after successful download
       exitSelectionMode();
     } catch (error) {
-      console.error("Error creating ZIP file:", error);
-      showToast("Failed to create ZIP file", "error");
-    } finally {
-      setIsDownloading(false);
-      setDownloadProgress(0);
+      console.error("Error downloading selected files:", error);
+      showToast("Failed to download selected files", "error");
     }
   };
   
-  // Add event listener for the bulk download trigger
-  useEffect(() => {
-    const handleSelectFilesForDownload = (event: Event) => {
+  // Move selected files to a different folder
+  const moveSelectedFiles = async () => {
+    if (selectedFiles.size === 0) {
+      showToast("No files selected to move", "error");
+      return;
+    }
+    
+    // Set up the copy/move dialog for multiple files
+    setDocumentToCopyOrMove(null);
+    setFolderToCopyOrMove(null);
+    setCopyMoveAction('move');
+    setShowCopyMoveDialog(true);
+    
+    // Listen for dialog close/completion
+    const handleSelectFilesForOperation = (event: Event) => {
       const customEvent = event as CustomEvent;
-      console.log('Select files for download event received:', customEvent.detail);
+      const { action, success } = customEvent.detail;
       
-      // Enter selection mode for download
-      setIsSelectionMode(true);
-      setSelectionMode('download');
-      setSelectedFiles(new Set());
+      if (action === 'move' && success) {
+        // Clear selection after successful move
+        exitSelectionMode();
+        
+        // Show success message
+        showToast(`${selectedFiles.size} files moved successfully`, "success");
+        
+        // Refresh the current view
+        if (onRefresh) {
+          onRefresh();
+        }
+      }
+      
+      // Remove event listener
+      document.removeEventListener(FOLDER_OPERATION_SUCCESS_EVENT, handleSelectFilesForOperation as EventListener);
     };
     
-    // Listen for the select-files-for-download event
-    document.addEventListener('select-files-for-download', handleSelectFilesForDownload as EventListener);
+    // Add event listener
+    document.addEventListener(FOLDER_OPERATION_SUCCESS_EVENT, handleSelectFilesForOperation as EventListener);
+  };
+  
+  // Copy selected files to a different folder
+  const copySelectedFiles = async () => {
+    if (selectedFiles.size === 0) {
+      showToast("No files selected to copy", "error");
+      return;
+    }
     
-    // Clean up event listener
-    return () => {
-      document.removeEventListener('select-files-for-download', handleSelectFilesForDownload as EventListener);
+    // Set up the copy/move dialog for multiple files
+    setDocumentToCopyOrMove(null);
+    setFolderToCopyOrMove(null);
+    setCopyMoveAction('copy');
+    setShowCopyMoveDialog(true);
+    
+    // Listen for dialog close/completion
+    const handleSelectFilesForOperation = (event: Event) => {
+      const customEvent = event as CustomEvent;
+      const { action, success } = customEvent.detail;
+      
+      if (action === 'copy' && success) {
+        // Clear selection after successful copy
+        exitSelectionMode();
+        
+        // Show success message
+        showToast(`${selectedFiles.size} files copied successfully`, "success");
+        
+        // Refresh the current view
+        if (onRefresh) {
+          onRefresh();
+        }
+      }
+      
+      // Remove event listener
+      document.removeEventListener(FOLDER_OPERATION_SUCCESS_EVENT, handleSelectFilesForOperation as EventListener);
     };
-  }, []);
+    
+    // Add event listener
+    document.addEventListener(FOLDER_OPERATION_SUCCESS_EVENT, handleSelectFilesForOperation as EventListener);
+  };
+  
+  // Handle file drag start
+  const handleFileDragStart = (e: React.DragEvent<HTMLDivElement>, docId: string) => {
+    e.stopPropagation();
+    e.dataTransfer.setData('text/plain', docId);
+    
+    // Mark which files are being dragged
+    setDraggedFiles([docId]);
+    
+    // Visual cue for dragging
+    const target = e.currentTarget;
+    target.classList.add('opacity-50');
+    
+    // Clean up after drag ends
+    const handleDragEnd = () => {
+      target.classList.remove('opacity-50');
+      target.removeEventListener('dragend', handleDragEnd);
+    };
+    
+    target.addEventListener('dragend', handleDragEnd);
+  };
+  
+  // Handle folder drag over - provide visual feedback when dragging over a folder
+  const handleFolderDragOver = (e: React.DragEvent<HTMLDivElement>, folderId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'move';
+    
+    // Visual feedback - highlight target folder
+    setDragTargetFolder(folderId);
+  };
+  
+  // Handle folder drag leave
+  const handleFolderDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    // Remove highlight
+    setDragTargetFolder(null);
+  };
+  
+  // Handle folder drop - move files to the target folder
+  const handleFolderDrop = async (e: React.DragEvent<HTMLDivElement>, targetFolderId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    // Clear visual feedback
+    setDragTargetFolder(null);
+    
+    if (draggedFiles.length === 0) {
+      return;
+    }
+    
+    // Get folder name for confirmation
+    const targetFolder = folders.find(f => f.id === targetFolderId);
+    if (!targetFolder) return;
+    
+    // Show confirmation dialog
+    setMoveTargetFolder({ id: targetFolderId, name: targetFolder.name });
+    setShowMoveConfirmation(true);
+  };
 
-  // Handle page refresh/cleanup
-  useEffect(() => {
-    // Clear duplicate _root folders on component mount and before unloading the page
-    const cleanupFolders = () => {
-      console.log('[DocumentList] Cleaning up folders to prevent duplicates');
-      // Reset local state on page reload
-      setLocalFolders([]);
-      setLocalDocuments([]);
-    };
+  // Function to execute the file move operation
+  const moveFilesToFolder = async (targetFolderId: string) => {
+    if (draggedFiles.length === 0) return;
     
-    // Add event listener for beforeunload
-    window.addEventListener('beforeunload', cleanupFolders);
+    setMoveInProgress(true);
     
-    // Return cleanup function
-    return () => {
-      window.removeEventListener('beforeunload', cleanupFolders);
-      cleanupFolders();
-    };
-  }, []);
+    try {
+      // Use toast from context
+      showToast(`Moving ${draggedFiles.length} files...`);
+      
+      for (const docId of draggedFiles) {
+        const doc = documents.find(d => d.id === docId);
+        if (!doc) continue;
+        
+        // Skip if file is already in target folder
+        if (doc.folderId === targetFolderId) {
+          showToast("File is already in this folder");
+          continue;
+        }
+        
+        showToast(`Moving ${doc.name}...`);
+        
+        // Update document location
+        if (onUpdateDocument) {
+          await onUpdateDocument(docId, {
+            folderId: targetFolderId
+          });
+        }
+      }
+      
+      // Refresh data after move
+      if (onRefresh) {
+        await onRefresh();
+      }
+      
+      // Clear selection after move
+      setSelectedFiles(new Set());
+      setIsSelectionMode(false);
+      setDraggedFiles([]);
+      
+      showToast("Files moved successfully");
+    } catch (error) {
+      console.error("Error moving files:", error);
+      showToast("Error moving files", "error");
+    } finally {
+      setMoveInProgress(false);
+    }
+  };
 
   return (
     <div 
@@ -3708,20 +3791,20 @@ export default function DocumentList({
                 {/* Selection actions */}
                 <div className="flex items-center space-x-2 ml-4">
                  {/* Select All button */}
-<button
-  onClick={selectAllFiles}
-  className="px-3 py-2 text-blue-700 border border-blue-200 bg-blue-100 hover:text-blue-900 hover:bg-blue-200 rounded"
->
-  Select All
-</button>
+                <button
+                  onClick={selectAllFiles}
+                  className="px-3 py-2 text-blue-700 border border-blue-200 bg-blue-100 hover:text-blue-900 hover:bg-blue-200 rounded"
+                >
+                  Select All
+                </button>
 
-{/* Deselect All button */}
-<button
-  onClick={deselectAllFiles}
-  className="px-3 py-2 text-red-700 border border-red-200 bg-red-100 hover:text-red-900 hover:bg-red-200 rounded"
->
-  Deselect All
-</button>
+                {/* Deselect All button */}
+                <button
+                  onClick={deselectAllFiles}
+                  className="px-3 py-2 text-red-700 border border-red-200 bg-red-100 hover:text-red-900 hover:bg-red-200 rounded"
+                >
+                  Deselect All
+                </button>
 
                   
                   {/* Download button - only in download mode */}
@@ -3742,6 +3825,52 @@ export default function DocumentList({
                         <>
                           <Download className="w-4 h-4" />
                           <span>Download ZIP</span>
+                        </>
+                      )}
+                    </button>
+                  )}
+                  
+                  {/* Move button - only in move mode */}
+                  {selectionMode === 'move' && selectedFiles.size > 0 && (
+                    <button
+                      onClick={() => setShowCopyMoveDialog(true)}
+                      disabled={movingFiles}
+                      className={`px-3 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 transition-colors flex items-center space-x-1 ${
+                        movingFiles ? 'opacity-70 cursor-not-allowed' : ''
+                      }`}
+                    >
+                      {movingFiles ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          <span>Processing...</span>
+                        </>
+                      ) : (
+                        <>
+                          <FolderInput className="w-4 h-4" />
+                          <span>Move Files</span>
+                        </>
+                      )}
+                    </button>
+                  )}
+                  
+                  {/* Copy button - only in copy mode */}
+                  {selectionMode === 'copy' && selectedFiles.size > 0 && (
+                    <button
+                      onClick={() => setShowCopyMoveDialog(true)}
+                      disabled={movingFiles}
+                      className={`px-3 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 transition-colors flex items-center space-x-1 ${
+                        movingFiles ? 'opacity-70 cursor-not-allowed' : ''
+                      }`}
+                    >
+                      {movingFiles ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          <span>Processing...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-4 h-4" />
+                          <span>Copy Files</span>
                         </>
                       )}
                     </button>
@@ -3800,7 +3929,7 @@ export default function DocumentList({
                 />
                 <Search className="absolute left-3 top-2.5 w-5 h-5 text-gray-400" />
                 {searchQuery && (
-                  <motion.button
+                  <button
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
@@ -3808,7 +3937,7 @@ export default function DocumentList({
                     onClick={() => setSearchQuery("")}
                   >
                     Clear
-                  </motion.button>
+                  </button>
                 )}
               </div>
               
@@ -3825,9 +3954,9 @@ export default function DocumentList({
                   <ChevronDown className="w-4 h-4" />
                 </button>
                 
-                <AnimatePresence>
+                <>
                   {showFilterDropdown && (
-                    <motion.div
+                    <div
                       initial={{ opacity: 0, y: -10 }}
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: -10 }}
@@ -3871,9 +4000,9 @@ export default function DocumentList({
                           <span>Files Only</span>
                         </button>
                       </div>
-                    </motion.div>
+                    </div>
                   )}
-                </AnimatePresence>
+                </>
               </div>
               
               {/* Sort Dropdown */}
@@ -3889,9 +4018,9 @@ export default function DocumentList({
                   <ChevronDown className="w-4 h-4" />
                 </button>
                 
-                <AnimatePresence>
+                <>
                   {showSortDropdown && (
-                    <motion.div
+                    <div
                       initial={{ opacity: 0, y: -10 }}
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: -10 }}
@@ -3930,36 +4059,36 @@ export default function DocumentList({
                           <span>Toggle Order ({sortOrder === 'asc' ? 'Ascending' : 'Descending'})</span>
                         </button>
                       </div>
-                    </motion.div>
+                    </div>
                   )}
-                </AnimatePresence>
+                </>
               </div>
             </div>
             
             {searchQuery && (
-              <motion.div
+              <div
                 initial={{ opacity: 0, y: -10 }}
                 animate={{ opacity: 1, y: 0 }}
                 className="text-sm text-gray-500"
               >
                 Found {subFolders.length + currentDocs.length} items
                 {viewFilter !== 'all' && ` (${viewFilter === 'folders' ? `${subFolders.length} folders` : `${currentDocs.length} files`})`}
-              </motion.div>
+              </div>
             )}
           </div>
 
-          <AnimatePresence mode="wait">
+          <>
             {loading || isReloading ? (
-              <motion.div
+              <div
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
                 className="flex items-center justify-center py-12"
               >
                 <Loader2 className="w-8 h-8 animate-spin text-primary-500" />
-              </motion.div>
+              </div>
             ) : (
-              <motion.div
+              <div
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
@@ -3967,11 +4096,16 @@ export default function DocumentList({
                 style={{paddingTop: '1.5rem', paddingBottom: '1.5rem'}}
               >
                 {subFolders.map((folder, index) => (
-                  <motion.div
+                  <div
                     key={`folder-${folder.id || Math.random().toString(36)}`}
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
-                    className="flex items-center justify-between p-3 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                    className={`flex items-center justify-between p-3 bg-white border ${
+                      dropTargetFolder === folder.id ? 'border-primary-500 bg-primary-50' : 'border-gray-200'
+                    } rounded-lg hover:bg-gray-50 transition-colors`}
+                    onDragOver={(e) => handleFolderDragOver(e, folder.id)}
+                    onDragLeave={handleFolderDragLeave}
+                    onDrop={(e) => handleFolderDrop(e, folder.id)}
                   >
                     <button
                       onClick={() => onFolderSelect?.(folder)}
@@ -4100,11 +4234,11 @@ export default function DocumentList({
                           </div>
                       </div>
                     )}
-                  </motion.div>
+                  </div>
                 ))}
 
                 {currentDocs.map((doc) => ( 
-                  <motion.div
+                  <div
                     key={`doc-${doc.id || Math.random().toString(36)}`}
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
@@ -4112,7 +4246,11 @@ export default function DocumentList({
                       isSelectionMode && selectedFiles.has(doc.id) 
                         ? 'border-primary-500 bg-primary-50' 
                         : 'border-gray-200'
-                    } rounded-lg hover:bg-gray-50 transition-colors`}
+                    } rounded-lg hover:bg-gray-50 transition-colors ${
+                      draggedItems.includes(doc.id) ? 'opacity-50' : ''
+                    }`}
+                    draggable={!isSharedView}
+                    onDragStart={(e: React.DragEvent<HTMLDivElement>) => handleFileDragStart(e, doc.id)}
                   >
                     {/* Selection checkbox - only show in selection mode */}
                     {isSelectionMode && (
@@ -4328,11 +4466,11 @@ export default function DocumentList({
                         )}
                       </div>
                     )}
-                  </motion.div>
+                  </div>
                 ))}
 
                 {subFolders.length === 0 && currentDocs.length === 0 && (
-                  <motion.div
+                  <div
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     className="text-center py-12"
@@ -4345,18 +4483,18 @@ export default function DocumentList({
                         Try adjusting your search terms or filters
                       </p>
                     )}
-                  </motion.div>
+                  </div>
                 )}
-              </motion.div>
+              </div>
             )}
-          </AnimatePresence>
+          </>
         </>
       )}
 
       {/* Drag and drop overlay */}
-      <AnimatePresence>
+      <>
         {showDragOverlay && hasUploadPermission() && !selectedDocument && (
-          <motion.div
+          <div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -4377,9 +4515,9 @@ export default function DocumentList({
                 Folder structure will be preserved on upload
               </div>
             </div>
-          </motion.div>
+          </div>
         )}
-      </AnimatePresence>
+      </>
 
       {renderEditPopup()}
       {renderSharePopup()}
@@ -4684,9 +4822,9 @@ export default function DocumentList({
       />
 
       {/* Drag and drop overlay */}
-      <AnimatePresence>
+      <>
         {showDragOverlay && (
-          <motion.div
+          <div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -4701,14 +4839,14 @@ export default function DocumentList({
                 Drop {draggedFileCount === 1 ? 'your file' : `your ${draggedFileCount} files`} anywhere to start uploading
               </p>
             </div>
-          </motion.div>
+          </div>
         )}
-      </AnimatePresence>
+      </>
 
       {/* Loading indicator for uploads */}
-      <AnimatePresence>
+      <>
         {isUploading && (
-          <motion.div
+          <div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -4746,14 +4884,14 @@ export default function DocumentList({
                   "Upload complete!"}
               </p>
             </div>
-          </motion.div>
+          </div>
         )}
-      </AnimatePresence>
+      </>
 
       {/* Large image preview popup */}
-      <AnimatePresence>
+      <>
         {showPreviewPopup && hoveredImageDoc && (
-          <motion.div
+          <div
             initial={{ opacity: 0, scale: 0.8 }}
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.8 }}
@@ -4784,14 +4922,14 @@ export default function DocumentList({
                 {hoveredImageDoc?.name}
               </div>
             </div>
-          </motion.div>
+          </div>
         )}
-      </AnimatePresence>
+      </>
       
       {/* Download progress overlay */}
-      <AnimatePresence>
+      <>
         {isDownloading && (
-          <motion.div
+          <div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -4817,9 +4955,286 @@ export default function DocumentList({
                   "Archive complete! Download will start automatically."}
               </p>
             </div>
-          </motion.div>
+          </div>
         )}
-      </AnimatePresence>
+      </>
+
+      {/* Add multi-file move dialog */}
+      <>
+        {showCopyMoveDialog && (selectionMode === 'move' || selectionMode === 'copy') && selectedFiles.size > 0 && (
+          <div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4"
+          >
+            <div className="bg-white rounded-lg shadow-lg p-6 w-full max-w-md">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-semibold">
+                  {selectionMode === 'copy' ? 'Copy' : 'Move'} {selectedFiles.size} Files
+                </h2>
+                <button
+                  onClick={() => setShowCopyMoveDialog(false)}
+                  className="text-gray-500 hover:text-gray-700 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              
+              <p className="text-gray-600 mb-4">
+                Select destination folder:
+              </p>
+              
+              {/* Project selection */}
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Destination Project
+                </label>
+                
+                <div className="relative">
+                  <button
+                    className="w-full flex items-center justify-between px-3 py-2 border border-gray-300 rounded-md shadow-sm bg-white text-left focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    onClick={() => setShowProjectDropdown(!showProjectDropdown)}
+                  >
+                    <span className="truncate">
+                      {selectedDestinationProjectId 
+                        ? availableProjects.find(p => p.id === selectedDestinationProjectId)?.name || "Unknown project"
+                        : "Select a project"
+                      }
+                    </span>
+                    <ChevronDown className="w-4 h-4 text-gray-400" />
+                  </button>
+                  
+                  {showProjectDropdown && (
+                    <div 
+                      ref={projectDropdownRef}
+                      className="fixed z-50 mt-1 bg-white shadow-lg rounded-md py-1 max-h-60 overflow-auto" 
+                      style={{
+                        width: 'calc(100% - 48px)',
+                        left: '50%',
+                        transform: 'translateX(-50%)'
+                      }}
+                    >
+                      {isLoadingProjects ? (
+                        <div className="flex justify-center items-center p-4">
+                          <Loader2 className="w-5 h-5 text-blue-600 animate-spin" />
+                          <span className="ml-2 text-gray-600">Loading projects...</span>
+                        </div>
+                      ) : (
+                        availableProjects.map(project => (
+                          <button
+                            key={project.id}
+                            className={`w-full text-left px-4 py-2 hover:bg-gray-100 ${
+                              selectedDestinationProjectId === project.id ? 'bg-blue-50 text-blue-600' : 'text-gray-900'
+                            }`}
+                            onClick={() => handleDestinationProjectChange(project.id)}
+                          >
+                            {project.name}
+                          </button>
+                        ))
+                      )}
+                      
+                      {!isLoadingProjects && availableProjects.length === 0 && (
+                        <div className="px-4 py-2 text-gray-500 text-sm">
+                          No projects available
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+              
+              {/* Folder selection */}
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Destination Folder
+                </label>
+                
+                <div className="relative">
+                  <button
+                    className="w-full flex items-center justify-between px-3 py-2 border border-gray-300 rounded-md shadow-sm bg-white text-left focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    onClick={(e) => {
+                      e.stopPropagation(); // Prevent event propagation
+                      if (selectedDestinationProjectId) {
+                        setShowFolderDropdown(!showFolderDropdown);
+                      } else {
+                        showToast("Please select a project first", "error");
+                      }
+                    }}
+                    disabled={!selectedDestinationProjectId}
+                  >
+                    <span className="truncate">
+                      {selectedDestinationFolderId 
+                        ? getFolderNameById(selectedDestinationFolderId)
+                        : "Root"
+                      }
+                    </span>
+                    <ChevronDown className="w-4 h-4 text-gray-400" />
+                  </button>
+                  
+                  {showFolderDropdown && selectedDestinationProjectId && (
+                    <div 
+                      ref={folderDropdownRef}
+                      className="fixed z-50 mt-1 bg-white shadow-lg rounded-md py-1 max-h-[300px] overflow-auto" 
+                      style={{
+                        width: 'calc(100% - 48px)',
+                        left: '50%',
+                        transform: 'translateX(-50%)'
+                      }}
+                    >
+                      {isLoadingFolders ? (
+                        <div className="flex justify-center items-center p-4">
+                          <Loader2 className="w-5 h-5 text-blue-600 animate-spin" />
+                          <span className="ml-2 text-gray-600">Loading folders...</span>
+                        </div>
+                      ) : (
+                        <>
+                          {/* Folder tree - directly display folders */}
+                          {renderFolderTree(projectFolders[selectedDestinationProjectId] || [], undefined, 0)}
+                          
+                          {/* No folders message */}
+                          {(projectFolders[selectedDestinationProjectId]?.length === 0) && (
+                            <div className="px-4 py-2 text-gray-500 text-sm">
+                              No folders available
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+              
+              <div className="mt-2 text-xs text-gray-500">
+                Selected destination: {selectedDestinationProjectId ? 
+                  `${availableProjects.find(p => p.id === selectedDestinationProjectId)?.name || "Unknown"} / ${selectedDestinationFolderId ? 
+                    getFolderNameById(selectedDestinationFolderId) : "Root"}` 
+                  : "Please select a destination"
+                }
+              </div>
+            </div>
+            
+            {/* Footer */}
+            <div className="flex justify-end gap-3 p-4 border-t border-gray-200/80 bg-gray-50/80 flex-shrink-0">
+              <button
+                onClick={() => {
+                  setShowCopyMoveDialog(false);
+                  setFolderToCopyOrMove(null);
+                  setDocumentToCopyOrMove(null);
+                  setDestinationFolder("");
+                  setSelectedDestinationProjectId("");
+                  setSelectedDestinationFolderId("");
+                }}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 
+                           rounded-lg shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 
+                           focus:ring-blue-500/50 transition-all duration-200"
+                disabled={isCopyingOrMoving}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  if (folderToCopyOrMove && selectedDestinationProjectId && !isCopyingOrMoving) {
+                    copyOrMoveFolder(
+                      folderToCopyOrMove.id, 
+                      selectedDestinationProjectId,
+                      selectedDestinationFolderId,
+                      copyMoveAction
+                    );
+                  } else if (documentToCopyOrMove && selectedDestinationProjectId && !isCopyingOrMoving) {
+                    copyOrMoveDocument(
+                      documentToCopyOrMove.id,
+                      selectedDestinationProjectId,
+                      selectedDestinationFolderId,
+                      copyMoveAction
+                    );
+                  }
+                }}
+                disabled={!selectedDestinationProjectId || isCopyingOrMoving}
+                className={`px-4 py-2 text-sm font-medium text-white rounded-lg shadow-sm 
+                            focus:outline-none focus:ring-2 focus:ring-offset-1
+                            transition-all duration-200 flex items-center justify-center min-w-[80px]
+                            ${!selectedDestinationProjectId || isCopyingOrMoving ? 'bg-blue-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 active:bg-blue-800 focus:ring-blue-500/50'}`}
+              >
+                {isCopyingOrMoving ? (
+                  <>
+                    <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    {copyMoveAction === 'copy' ? "Copying..." : "Moving..."}
+                  </>
+                ) : (
+                  <>{copyMoveAction === 'copy' ? "Copy" : "Move"}</>
+                )}
+              </button>
+            </div>
+          </div>
+        )}
+      </>
+
+      {/* Move confirmation dialog */}
+      <>
+        {showMoveConfirmation && moveTargetFolder && (
+          <div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4"
+          >
+            <div className="bg-white rounded-lg shadow-xl overflow-hidden max-w-md w-full">
+              <div className="p-6">
+                <h3 className="text-lg font-medium text-gray-900 mb-2">Move Files</h3>
+                <p className="text-gray-600">
+                  Move {draggedFiles.length} {draggedFiles.length === 1 ? 'file' : 'files'} to folder "{moveTargetFolder.name}"?
+                </p>
+              </div>
+              <div className="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
+                <button
+                  type="button"
+                  onClick={() => {
+                    moveFilesToFolder(moveTargetFolder.id);
+                    setShowMoveConfirmation(false);
+                    setMoveTargetFolder(null);
+                  }}
+                  disabled={moveInProgress}
+                  className={`w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 
+                              ${moveInProgress ? 'bg-blue-400' : 'bg-blue-600 hover:bg-blue-700'} 
+                              text-base font-medium text-white focus:outline-none focus:ring-2 focus:ring-offset-2 
+                              focus:ring-blue-500 sm:ml-3 sm:w-auto sm:text-sm`}
+                >
+                  {moveInProgress ? (
+                    <>
+                      <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      Moving...
+                    </>
+                  ) : (
+                    'Move'
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowMoveConfirmation(false);
+                    setMoveTargetFolder(null);
+                  }}
+                  disabled={moveInProgress}
+                  className="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 
+                            bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 
+                            focus:ring-offset-2 focus:ring-blue-500 sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </>
+
+      {/* Breadcrumbs are already included at the top of the component */}
     </div>
   );
 }
