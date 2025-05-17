@@ -219,22 +219,20 @@ export const NotificationIcon: React.FC = () => {
     });
     document.dispatchEvent(customEvent);
     
-    // Give a short delay to ensure the event is processed before navigation
-    setTimeout(() => {
-      navigate(taskUrl, { 
-        state: { 
-          fromNotification: true,
-          highlightTaskId: taskId,
-          highlightSubtaskId: subtaskId,
-          isSubtaskAssignment,
-          isSubtaskRelated,
-          parentTaskId: isSubtaskRelated ? taskId : undefined,
-          parentTaskTitle: isSubtaskRelated ? notification.metadata?.parentTaskTitle : undefined,
-          timestamp: Date.now()
-        },
-        replace: true // Use replace to avoid history stacking
-      });
-    }, 100);
+    // Navigate immediately without delay
+    navigate(taskUrl, { 
+      state: { 
+        fromNotification: true,
+        highlightTaskId: taskId,
+        highlightSubtaskId: subtaskId,
+        isSubtaskAssignment,
+        isSubtaskRelated,
+        parentTaskId: isSubtaskRelated ? taskId : undefined,
+        parentTaskTitle: isSubtaskRelated ? notification.metadata?.parentTaskTitle : undefined,
+        timestamp: Date.now()
+      },
+      replace: true // Use replace to avoid history stacking
+    });
   };
   
   // Function to deduplicate notifications by ID - memoized to prevent recreating

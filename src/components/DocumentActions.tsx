@@ -30,6 +30,7 @@ interface DocumentActionsProps {
     destinationFolderId: string,
     action: 'copy' | 'move'
   ) => Promise<void>;
+  allowRootUploads?: boolean; // Allow upload directly to root with no folder ID
 }
 
 export default function DocumentActions({
@@ -43,6 +44,7 @@ export default function DocumentActions({
   onRefresh,
   onShare,
   onCopyOrMoveFile,
+  allowRootUploads = false,
 }: DocumentActionsProps) {
   const [showDropdown, setShowDropdown] = useState(false);
   const [showFolderInput, setShowFolderInput] = useState(false);
@@ -129,8 +131,16 @@ export default function DocumentActions({
     try {
       setIsUploading(true);
       
-      // Determine target folder ID - use root folder as fallback if available
-      const targetFolderId = currentFolderId || rootFolderId;
+      // Determine target folder ID
+      // If allowRootUploads is true and no folder is selected, we can pass undefined for root directory uploads
+      // Otherwise use currentFolderId or rootFolderId as fallback
+      let targetFolderId = currentFolderId || rootFolderId;
+      
+      // If we're allowing root uploads and no folder is selected or visible
+      if (allowRootUploads && !currentFolderId) {
+        // We can leave targetFolderId as undefined for root directory uploads
+        targetFolderId = undefined;
+      }
       
       if (files.length === 1) {
         // Single file upload
@@ -169,7 +179,7 @@ export default function DocumentActions({
         }
       });
       document.dispatchEvent(uploadSuccessEvent);
-      console.log(`[Document Actions] Dispatched upload success event for folder: ${targetFolderId}`);
+      console.log(`[Document Actions] Dispatched upload success event for folder: ${targetFolderId || 'root'}`);
       
       // Reset the input
       if (fileInputRef.current) {

@@ -35,11 +35,22 @@ export const documentService = {
   // Get all documents in a folder
   async getByFolderId(folderId: string): Promise<Document[]> {
     try {
-      // Query documents where folderId matches
-      const q = query(
-        collection(db, 'documents'),
-        where('folderId', '==', folderId)
-      );
+      let q;
+      
+      if (folderId) {
+        // Query documents with specific folder ID
+        q = query(
+          collection(db, 'documents'),
+          where('folderId', '==', folderId)
+        );
+      } else {
+        // For root directory (empty string folderId), get documents with empty folderId
+        q = query(
+          collection(db, 'documents'),
+          where('folderId', '==', '')
+        );
+      }
+      
       const snapshot = await getDocs(q);
       
       return snapshot.docs
@@ -60,7 +71,7 @@ export const documentService = {
     callback: (documents: Document[]) => void
   ): (() => void) {
     // Generate a unique subscription ID for tracking
-    const subscriptionId = `docs-${folderId}-${Date.now()}`;
+    const subscriptionId = `docs-${folderId || 'root'}-${Date.now()}`;
     console.log(`[Document Subscription] Creating subscription ${subscriptionId}`);
     
     // Prevent multiple subscriptions
@@ -75,13 +86,24 @@ export const documentService = {
     const MIN_CALLBACK_INTERVAL = 1000; // 1 second minimum between callbacks
     
     // Create a query for documents in this folder
-    const q = query(
-      collection(db, 'documents'),
-      where('folderId', '==', folderId),
-      orderBy('updatedAt', 'desc')
-    );
+    let q;
+    if (folderId) {
+      // For specific folder ID
+      q = query(
+        collection(db, 'documents'),
+        where('folderId', '==', folderId),
+        orderBy('updatedAt', 'desc')
+      );
+    } else {
+      // For root directory (empty string folderId)
+      q = query(
+        collection(db, 'documents'),
+        where('folderId', '==', ''),
+        orderBy('updatedAt', 'desc')
+      );
+    }
     
-    console.log(`[Document Subscription] Setting up real-time subscription for folder ${folderId}`);
+    console.log(`[Document Subscription] Setting up real-time subscription for folder ${folderId || 'root'}`);
     
     // Process incoming document snapshots
     const processSnapshot = (snapshot: any) => {
@@ -95,7 +117,7 @@ export const documentService = {
         
         // Check if we have any documents
         if (snapshot.empty) {
-          console.log(`[Document Subscription] No documents found for folder ${folderId}`);
+          console.log(`[Document Subscription] No documents found for folder ${folderId || 'root'}`);
           callback([]);
           return;
         }
@@ -112,7 +134,7 @@ export const documentService = {
           });
         
         if (documents.length === 0) {
-          console.log(`[Document Subscription] No valid documents in snapshot for folder ${folderId}`);
+          console.log(`[Document Subscription] No valid documents in snapshot for folder ${folderId || 'root'}`);
           callback([]);
           return;
         }
@@ -162,7 +184,11 @@ export const documentService = {
       // Generate unique filename
       const timestamp = Date.now();
       const uniqueFilename = `${timestamp}-${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
-      const storagePath = `documents/${folderId}/${uniqueFilename}`;
+      
+      // For root directory uploads, use a different storage path structure
+      const storagePath = folderId 
+        ? `documents/${folderId}/${uniqueFilename}` 
+        : `documents/root/${uniqueFilename}`;
 
       let url: string;
 
@@ -173,7 +199,7 @@ export const documentService = {
           contentType: file.type,
           customMetadata: {
             originalFilename: file.name,
-            folderId,
+            folderId: folderId || 'root',
             version: '1'
           }
         };
@@ -194,7 +220,7 @@ export const documentService = {
           projectId: document.projectId,
           name: document.name,
           type: document.type,
-          folderId: folderId,
+          folderId: document.folderId, // This can be an empty string for root
           version: 1,
           dateModified: new Date().toISOString(),
           url,
@@ -230,17 +256,19 @@ export const documentService = {
           // Continue even if version creation fails
         }
 
-        // Update folder metadata
-        try {
-          const folderRef = doc(db, 'folders', folderId);
-          await updateDoc(folderRef, {
-            'metadata.documentCount': increment(1),
-            'metadata.lastUpdated': serverTimestamp()
-          });
-          console.log(`Folder metadata updated`);
-        } catch (folderUpdateError) {
-          console.warn('Error updating folder metadata (non-critical):', folderUpdateError);
-          // Continue even if folder metadata update fails
+        // Update folder metadata if we have a valid folder ID
+        if (folderId) {
+          try {
+            const folderRef = doc(db, 'folders', folderId);
+            await updateDoc(folderRef, {
+              'metadata.documentCount': increment(1),
+              'metadata.lastUpdated': serverTimestamp()
+            });
+            console.log(`Folder metadata updated`);
+          } catch (folderUpdateError) {
+            console.warn('Error updating folder metadata (non-critical):', folderUpdateError);
+            // Continue even if folder metadata update fails
+          }
         }
 
         return {
@@ -248,7 +276,7 @@ export const documentService = {
           projectId: document.projectId,
           name: document.name,
           type: document.type,
-          folderId,
+          folderId: document.folderId,
           version: 1,
           dateModified: new Date().toISOString(),
           url

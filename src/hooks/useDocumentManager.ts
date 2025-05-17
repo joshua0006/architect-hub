@@ -10,7 +10,8 @@ export function useDocumentManager(projectId: string) {
   const [currentFolderId, setCurrentFolderId] = useState<string | undefined>();
 
   useEffect(() => {
-    if (projectId && currentFolderId) {
+    if (projectId) {
+      // Load documents from both the current folder and root directory
       loadDocuments();
     } else {
       setDocuments([]);
@@ -19,14 +20,23 @@ export function useDocumentManager(projectId: string) {
   }, [projectId, currentFolderId]);
 
   const loadDocuments = async () => {
-    if (!currentFolderId) return;
-    
     try {
       setLoading(true);
-      console.log('Loading documents for folder:', currentFolderId);
-      const docs = await documentService.getByFolderId(currentFolderId);
-      console.log('Loaded documents:', docs);
-      setDocuments(docs.filter(doc => doc.url && doc.name));
+      
+      if (currentFolderId) {
+        // When in a specific folder, load documents from that folder
+        console.log('Loading documents for folder:', currentFolderId);
+        const docs = await documentService.getByFolderId(currentFolderId);
+        console.log('Loaded documents:', docs);
+        setDocuments(docs.filter(doc => doc.url && doc.name));
+      } else {
+        // When at root level, load documents with empty folderId
+        console.log('Loading documents from root directory');
+        const docs = await documentService.getByFolderId('');
+        console.log('Loaded root documents:', docs);
+        setDocuments(docs.filter(doc => doc.url && doc.name));
+      }
+      
       setError(null);
     } catch (err) {
       console.error('Error loading documents:', err);
@@ -44,25 +54,25 @@ export function useDocumentManager(projectId: string) {
   ) => {
     try {
       const targetFolderId = folderId || currentFolderId;
-      if (!targetFolderId) {
-        throw new Error('No folder selected');
-      }
+      
+      // Handle root directory uploads - targetFolderId may be undefined
+      console.log('Creating document:', { name, type, folderId: targetFolderId || 'root directory' });
 
-      console.log('Creating document:', { name, type, folderId: targetFolderId });
-
-      // First, verify the folder exists
-      const folder = await folderService.getById(targetFolderId);
-      if (!folder) {
-        throw new Error('Folder not found');
+      // If a folder ID is provided, verify it exists
+      if (targetFolderId) {
+        const folder = await folderService.getById(targetFolderId);
+        if (!folder) {
+          throw new Error('Folder not found');
+        }
       }
 
       const newDoc = await documentService.create(
-        targetFolderId,
+        targetFolderId || '', // Pass empty string for root directory
         {
           projectId,
           name,
           type,
-          folderId: targetFolderId,
+          folderId: targetFolderId || '', // Empty string indicates root directory
           version: 1,
           dateModified: new Date().toISOString()
         },
@@ -72,7 +82,9 @@ export function useDocumentManager(projectId: string) {
       console.log('Created document:', newDoc);
       
       // Reload documents after creating a new one
-      await loadDocuments();
+      if (currentFolderId === targetFolderId) {
+        await loadDocuments();
+      }
       
       return newDoc;
     } catch (err) {
