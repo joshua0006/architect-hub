@@ -64,6 +64,7 @@ import JSZip from 'jszip';
 import FileSaver from 'file-saver';
 // Add import for the FileSelectionManager component and its hook
 import FileSelectionManager, { useFileSelection } from './FileSelectionManager';
+import heic2any from 'heic2any';
 
 // Local type definition for the DocumentViewer's Folder type
 interface ViewerFolder {
@@ -155,6 +156,7 @@ export default function DocumentList({
     name: string;
   } | null>(null);
   const [loading, setLoading] = useState(false);
+  const [rootLoading, setRootLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [viewFilter, setViewFilter] = useState<"all" | "folders" | "files">(
     "all"
@@ -165,6 +167,15 @@ export default function DocumentList({
   const [showSortDropdown, setShowSortDropdown] = useState(false);
   const filterRef = useRef<HTMLDivElement>(null);
   const sortRef = useRef<HTMLDivElement>(null);
+  
+  // Add state for notification-triggered navigation loading
+  const [isNotificationLoading, setIsNotificationLoading] = useState(false);
+  const [notificationLoadingTarget, setNotificationLoadingTarget] = useState<{
+    fileId?: string;
+    folderId?: string;
+    fileName?: string;
+  } | null>(null);
+  const [isProcessingNotification, setIsProcessingNotification] = useState(false);
   
   // Add new state for rename dialog
   const [renameDialogOpen, setRenameDialogOpen] = useState(false);
@@ -225,14 +236,41 @@ export default function DocumentList({
   // Identify the invisible root folder if present
   const rootFolder = displayFolders.find(folder => folder.metadata?.isRootFolder);
   
-  // Filter out invisible folders from display
-  const visibleFolders = displayFolders.filter(folder => !folder.metadata?.isHidden);
+  // Filter out invisible folders from display and always hide _root folders
+  const visibleFolders = displayFolders.filter(folder => {
+    // Skip hidden folders
+    if (folder.metadata?.isHidden) return false;
+    
+    // Always hide _root folders from the UI completely
+    if (folder.name === '_root') return false;
+    
+    return true;
+  });
 
   // When filtering folders by parent, if we're at the top level (currentFolder is undefined), 
   // also include folders whose parent is the invisible root folder
   const allFolders = isSharedView 
     ? sharedFolders || [] 
     : visibleFolders.filter(folder => {
+        // Skip showing the root folder itself in the list - it should be invisible
+        if (folder.name === '_root' || folder.metadata?.isRootFolder) return false;
+        
+        // During notification processing, be extra strict about which folders to show
+        if (isProcessingNotification) {
+          // Always exclude _root folders during notification processing
+          if (folder.name === '_root') return false;
+          
+          // If we have a specific folder target in the notification, only show relevant folders
+          if (notificationLoadingTarget?.folderId) {
+            // If in root view, only show folders at root level
+            if (!currentFolder) {
+              return folder.parentId === undefined || (rootFolder && folder.parentId === rootFolder.id);
+            }
+            // Otherwise only show folders in current folder
+            return folder.parentId === currentFolder?.id;
+          }
+        }
+        
         if (!currentFolder) {
           // At top level, include folders whose parent is undefined OR whose parent is the root folder
           return folder.parentId === undefined || (rootFolder && folder.parentId === rootFolder.id);
@@ -242,18 +280,23 @@ export default function DocumentList({
         }
       });
 
-  // When in the invisible root folder, show all files with that folder ID
-  const allDocs = isSharedView 
-    ? sharedDocuments || [] 
-    : localDocuments.filter(doc => {
-        if (!currentFolder && rootFolder) {
-          // At top level, include files that are in the invisible root folder
-          return doc.folderId === rootFolder.id;
-        } else {
-          // In a subfolder, normal filtering applies
-          return doc.folderId === currentFolder?.id;
-        }
-      });
+    // Show all documents based on folder context
+    const allDocs = isSharedView 
+      ? sharedDocuments || [] 
+      : localDocuments.filter(doc => {
+          if (!currentFolder) {
+            // At top level, include files with no folder or in the invisible root folder
+            if (rootFolder) {
+              return doc.folderId === rootFolder.id || !doc.folderId;
+            } else {
+              // If no root folder exists, show files with no folder ID
+              return !doc.folderId;
+            }
+          } else {
+            // In a specific folder, only show files for that folder
+            return doc.folderId === currentFolder.id;
+          }
+        });
 
   // Update local state when props change, but avoid duplicate _root folders
   useEffect(() => {
@@ -276,8 +319,41 @@ export default function DocumentList({
   // Component initialization - ensure documents are loaded on mount
   useEffect(() => {
     const initializeComponentData = async () => {
+      // Check if we're at root level and have a root folder
+      if (!currentFolder && rootFolder && !isSharedView) {
+        console.log(`[DocumentList] At root level with root folder: ${rootFolder.id}, initializing data`);
+        
+        try {
+          // Set loading states
+          setLoading(true);
+          setRootLoading(true);
+          setIsReloading(true);
+          
+          // Force load documents for root folder
+          if (localDocuments.length === 0) {
+            console.log(`[DocumentList] No documents in state, loading from service for root folder`);
+            const docs = await documentService.getByFolderId(rootFolder.id);
+            if (docs.length > 0) {
+              console.log(`[DocumentList] Loaded ${docs.length} documents during initialization for root folder`);
+              setLocalDocuments(docs);
+            }
+          }
+          
+          // Call parent refresh if available
+          if (onRefresh) {
+            console.log('[DocumentList] Calling parent refresh during root initialization');
+            await onRefresh();
+          }
+        } catch (error) {
+          console.error('[DocumentList] Error initializing root folder data:', error);
+        } finally {
+          setLoading(false);
+          setRootLoading(false);
+          setIsReloading(false);
+        }
+      }
       // Only proceed if we have a currentFolder and we're not in shared view
-      if (currentFolder && !isSharedView) {
+      else if (currentFolder && !isSharedView) {
         console.log(`[DocumentList] Component mounted, initializing data for folder: ${currentFolder.id}`);
         
         try {
@@ -318,6 +394,10 @@ export default function DocumentList({
         console.log('[DocumentList] Window focused, refreshing data');
         setIsReloading(true);
         onRefresh().finally(() => setIsReloading(false));
+      } else if (!currentFolder && rootFolder && onRefresh) {
+        console.log('[DocumentList] Window focused at root level, refreshing data');
+        setRootLoading(true);
+        onRefresh().finally(() => setRootLoading(false));
       }
     };
     
@@ -410,8 +490,9 @@ export default function DocumentList({
     // Apply search filter for folders
     let filteredFolders = isSharedView
       ? (sharedFolders || [])
-      : displayFolders.filter(folder =>
+      : visibleFolders.filter(folder =>
           folder.parentId === currentFolder?.id && // Only filter direct children of current folder
+          folder.name !== '_root' && // Always exclude _root folders
           folder.name && typeof folder.name === 'string' ?
           folder.name.toLowerCase().includes(searchQuery.toLowerCase()) :
           false
@@ -700,6 +781,9 @@ export default function DocumentList({
         selectedDocument={selectedDocument}
         onNavigate={handleBreadcrumbNavigation}
         onDocumentClick={() => selectedDocument && onPreview(selectedDocument)}
+        onUpdateDocument={onUpdateDocument}
+        onRefresh={onRefresh}
+        showToast={(message: string, type?: "success" | "error" | "info" | "warning") => showToast(message, type as "success" | "error")}
       />
     );
   };
@@ -788,11 +872,27 @@ export default function DocumentList({
     const handleNotificationUpdate = (event: CustomEvent) => {
       console.log('Notification document update event received:', event.detail);
       
-      const { fileId, folderId, notificationType, forceDirect } = event.detail;
+      const { fileId, folderId, notificationType, forceDirect, fileName } = event.detail;
+
+      // Flag that we're processing a notification immediately to prevent UI flickers and hide _root folders
+      setIsProcessingNotification(true);
       
-      // Handle forced direct navigation (from cross-project notifications)
-      // No longer check if projectId matches - we always process all notifications
-      // since we are now handling direct navigation across projects
+      // Always set notification loading state for any notification type
+      setIsNotificationLoading(true);
+      setNotificationLoadingTarget({
+        fileId,
+        folderId,
+        fileName
+      });
+      console.log('Starting notification processing:', { fileId, folderId, fileName });
+      
+      // Set a safety timeout to clear loading states if something goes wrong
+      const safetyTimeout = setTimeout(() => {
+        setIsNotificationLoading(false);
+        setNotificationLoadingTarget(null);
+        setIsProcessingNotification(false);
+        console.log('Safety timeout triggered to clear notification loading states');
+      }, 5000); // 5 seconds max wait time
       
       // If we have a refresh function, call it to update the document list
       if (onRefresh) {
@@ -805,6 +905,19 @@ export default function DocumentList({
               console.log('Navigating to file from notification:', fileToSelect.name ? fileToSelect.name : 'unnamed file');
               if (onPreview) {
                 onPreview(fileToSelect);
+                // Clear loading state once file preview is initiated
+                clearTimeout(safetyTimeout);
+                setTimeout(() => {
+                  setIsNotificationLoading(false);
+                  setNotificationLoadingTarget(null);
+                  setIsProcessingNotification(false);
+                }, 500);
+              } else {
+                // Clear loading state if preview function not available
+                clearTimeout(safetyTimeout);
+                setIsNotificationLoading(false);
+                setNotificationLoadingTarget(null);
+                setIsProcessingNotification(false);
               }
             } else {
               console.log('File not found in current document list, may need to fetch');
@@ -824,12 +937,49 @@ export default function DocumentList({
                     if (updatedFileToSelect && onPreview) {
                       console.log('Found file after folder navigation:', updatedFileToSelect.name ? updatedFileToSelect.name : 'unnamed file');
                       onPreview(updatedFileToSelect);
+                      
+                      // Clear loading state after navigation is complete
+                      clearTimeout(safetyTimeout);
+                      setTimeout(() => {
+                        setIsNotificationLoading(false);
+                        setNotificationLoadingTarget(null);
+                        setIsProcessingNotification(false);
+                      }, 300);
                     } else {
                       console.log('File still not found after folder navigation');
+                      clearTimeout(safetyTimeout);
+                      setIsNotificationLoading(false);
+                      setNotificationLoadingTarget(null);
+                      setIsProcessingNotification(false);
+                      
+                      // Show a toast message to the user
+                      if (showToast) {
+                        showToast('The file you\'re looking for could not be found. It may have been moved or deleted.', 'error');
+                      }
                     }
-                  }, 500);
+                  }, 1000); // Extended timeout for folder navigation
                 } else {
                   console.log('Target folder not found in current folder list');
+                  clearTimeout(safetyTimeout);
+                  setIsNotificationLoading(false);
+                  setNotificationLoadingTarget(null);
+                  setIsProcessingNotification(false);
+                  
+                  // Show a toast message to the user
+                  if (showToast) {
+                    showToast('The folder containing this file could not be found. It may have been moved or deleted.', 'error');
+                  }
+                }
+              } else {
+                // If we can't find the file and there's no folder to navigate to, clear loading states
+                clearTimeout(safetyTimeout);
+                setIsNotificationLoading(false);
+                setNotificationLoadingTarget(null);
+                setIsProcessingNotification(false);
+                
+                // Show a toast message to the user
+                if (showToast) {
+                  showToast('The file you\'re looking for could not be found. It may have been moved or deleted.', 'error');
                 }
               }
             }
@@ -839,11 +989,51 @@ export default function DocumentList({
             if (targetFolder && onFolderSelect) {
               console.log('Navigating to folder from notification:', targetFolder?.name || 'unnamed folder');
               onFolderSelect(targetFolder);
+              
+              // Clear loading state after folder navigation is complete
+              clearTimeout(safetyTimeout);
+              setTimeout(() => {
+                setIsNotificationLoading(false);
+                setNotificationLoadingTarget(null);
+                setIsProcessingNotification(false);
+              }, 500);
             } else {
               console.log('Target folder not found in current folder list');
+              clearTimeout(safetyTimeout);
+              setIsNotificationLoading(false);
+              setNotificationLoadingTarget(null);
+              setIsProcessingNotification(false);
+              
+              // Show a toast message to the user
+              if (showToast) {
+                showToast('The folder you\'re looking for could not be found. It may have been moved or deleted.', 'error');
+              }
             }
+          } else {
+            // No navigation happened, clear loading state
+            clearTimeout(safetyTimeout);
+            setIsNotificationLoading(false);
+            setNotificationLoadingTarget(null);
+            setIsProcessingNotification(false);
+          }
+        }).catch(error => {
+          console.error('Error handling notification update:', error);
+          clearTimeout(safetyTimeout);
+          setIsNotificationLoading(false);
+          setNotificationLoadingTarget(null);
+          setIsProcessingNotification(false);
+          
+          // Show a toast message to the user
+          if (showToast) {
+            showToast('There was an error loading the content. Please try again.', 'error');
           }
         });
+      } else {
+        // No refresh function available, clear loading state
+        clearTimeout(safetyTimeout);
+        setIsNotificationLoading(false);
+        setNotificationLoadingTarget(null);
+        setIsProcessingNotification(false);
       }
     };
     
@@ -1433,6 +1623,86 @@ export default function DocumentList({
     return fileGroups.flat();
   };
 
+  // Convert HEIC file to JPEG before upload
+  const convertHeicToJpeg = async (file: File): Promise<File> => {
+    // Only convert if it's a HEIC file
+    if (!file.name.toLowerCase().endsWith('.heic') && 
+        !file.type.toLowerCase().includes('image/heic')) {
+      return file;
+    }
+    
+    try {
+      console.log(`Converting HEIC file: ${file.name} to JPEG`);
+      setIsUploading(true);
+      
+      // Create a toast notification
+      showToast(`Converting ${file.name} to JPG format...`, "success");
+      
+      // Convert HEIC to JPEG using heic2any library
+      const jpegBlob = await heic2any({
+        blob: file,
+        toType: 'image/jpeg',
+        quality: 0.9  // Maintain good quality
+      }) as Blob;
+      
+      // Create new file name (replace .heic with .jpg)
+      const newFileName = file.name.replace(/\.heic$/i, '.jpg');
+      
+      // Create a new File object from the JPEG blob
+      const jpegFile = new File(
+        [jpegBlob], 
+        newFileName, 
+        { type: 'image/jpeg', lastModified: file.lastModified }
+      );
+      
+      console.log(`Successfully converted ${file.name} to ${jpegFile.name}`);
+      showToast(`Successfully converted ${file.name} to JPG format`, "success");
+      
+      return jpegFile;
+    } catch (error) {
+      console.error(`Error converting HEIC file: ${file.name}`, error);
+      showToast(`Failed to convert ${file.name} to JPG. Uploading original file.`, "error");
+      
+      // Return the original file if conversion fails
+      return file;
+    }
+  };
+  
+  // Process files to convert any HEIC files to JPEG before upload
+  const processFilesBeforeUpload = async (files: File[]): Promise<File[]> => {
+    if (!files || files.length === 0) return files;
+    
+    try {
+      const processedFiles: File[] = [];
+      
+      // Process each file - convert HEIC to JPEG
+      for (const file of files) {
+        try {
+          // Check if it's a HEIC file
+          if (file.name.toLowerCase().endsWith('.heic') || 
+              file.type.toLowerCase().includes('image/heic')) {
+            // Convert HEIC to JPEG
+            const jpegFile = await convertHeicToJpeg(file);
+            processedFiles.push(jpegFile);
+          } else {
+            // Not a HEIC file, keep as is
+            processedFiles.push(file);
+          }
+        } catch (error) {
+          console.error(`Error processing file ${file.name}:`, error);
+          // Add the original file if there's an error
+          processedFiles.push(file);
+        }
+      }
+      
+      return processedFiles;
+    } catch (error) {
+      console.error('Error processing files before upload:', error);
+      // Return original files if there's an error in the overall process
+      return files;
+    }
+  };
+
   // Handle file upload logic - single or batch
   const handleFileUpload = async (files: File[]) => {
     if (!files || files.length === 0 || !hasUploadPermission()) {
@@ -1446,31 +1716,28 @@ export default function DocumentList({
       setIsUploading(true);
       setUploadProgress(0);
 
-      // Determine the target folder ID - if we're at the project level with no visible folder selected,
-      // use the invisible root folder ID if available
+      // Process files - convert HEIC to JPEG
+      const processedFiles = await processFilesBeforeUpload(files);
+
+      // Determine the target folder ID - use currentFolder.id if in a folder,
+      // use rootFolder.id if at project level with an invisible root folder,
+      // or null/undefined if uploading directly to root with no folder
       const targetFolderId = currentFolder?.id || (rootFolder?.id);
       
-      if (!targetFolderId) {
-        console.error("No target folder ID available for file upload");
-        showToast("Upload failed: No valid upload location", "error");
-        setIsUploading(false);
-        return;
-      }
-      
-      if (files.length === 1) {
+      if (processedFiles.length === 1) {
         // Single file upload - unchanged
-        const file = files[0];
+        const file = processedFiles[0];
         const fileName = file.name;
         
         // Determine file type from extension
         let fileType: "pdf" | "dwg" | "other" | "image" = "other";
         const extension = file.name.split('.').pop()?.toLowerCase();
-        if (extension === 'pdf') {
-          fileType = "pdf";
-        } else if (extension === 'dwg') {
-          fileType = "dwg";
-        } else if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg'].includes(extension || '')) {
-          fileType = "image";
+              if (extension === 'pdf') {
+        fileType = "pdf";
+      } else if (extension === 'dwg') {
+        fileType = "dwg";
+      } else if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg', 'heic'].includes(extension || '')) {
+        fileType = "image";
         }
         
         // Simulate progress updates
@@ -1498,7 +1765,7 @@ export default function DocumentList({
         }
       } else if (onCreateMultipleDocuments) {
         // Try to use the batch upload if available
-        console.log(`Uploading ${files.length} files using batch method`);
+        console.log(`Uploading ${processedFiles.length} files using batch method`);
         
         // Simulate progress updates
         const progressInterval = setInterval(() => {
@@ -1509,17 +1776,17 @@ export default function DocumentList({
         }, 300);
         
         try {
-          // Make sure we're passing a valid array to the createMultipleDocuments function
-          await onCreateMultipleDocuments(files, currentFolder?.id);
-          setUploadedFiles(prev => ({...prev, success: files.length}));
-          showToast(`${files.length} files uploaded successfully`, "success");
+          // Pass the targetFolderId which might be undefined for root directory
+          await onCreateMultipleDocuments(processedFiles, targetFolderId);
+          setUploadedFiles(prev => ({...prev, success: processedFiles.length}));
+          showToast(`${processedFiles.length} files uploaded successfully`, "success");
         } catch (error) {
           console.error("Error in multiple file upload:", error);
           console.log("Falling back to individual file upload method");
           clearInterval(progressInterval);
           
           // If batch upload fails, fall back to individual upload
-          return handleMultipleFileUpload(files);
+          return handleMultipleFileUpload(processedFiles);
         } finally {
           clearInterval(progressInterval);
           setUploadProgress(100);
@@ -1527,7 +1794,7 @@ export default function DocumentList({
       } else {
         // No multiple document upload handler available
         console.log("Multiple document batch upload not available, using individual upload method");
-        return handleMultipleFileUpload(files);
+        return handleMultipleFileUpload(processedFiles);
       }
       
       if (onRefresh) {
@@ -1642,7 +1909,7 @@ export default function DocumentList({
         failed: 0
       });
       
-      // Process the files for upload
+      // Process the files for upload - HEIC files will be automatically converted by handleFileUpload
       if (droppedFiles.length === 1) {
         handleFileUpload(droppedFiles);
       } else {
@@ -1766,25 +2033,23 @@ export default function DocumentList({
       return;
     }
 
-    // Determine the target folder ID - if we're at the project level with no visible folder selected,
-    // use the invisible root folder ID if available
+    // Process files - convert HEIC to JPEG
+    const processedFiles = await processFilesBeforeUpload(files);
+
+    // Determine the target folder ID - use currentFolder.id if in a folder,
+    // use rootFolder.id if at project level with an invisible root folder,
+    // or undefined if uploading directly to root with no folder
     const targetFolderId = currentFolder?.id || (rootFolder?.id);
     
-    if (!targetFolderId) {
-      console.error("No target folder ID available for file upload");
-      showToast("Upload failed: No valid upload location", "error");
-      return;
-    }
-
-    console.log(`Processing ${files.length} files individually to folder ${targetFolderId}`);
+    console.log(`Processing ${processedFiles.length} files individually to ${targetFolderId ? `folder ${targetFolderId}` : 'root directory'}`);
     setIsUploading(true);
     setUploadProgress(0);
     
     // Reset counters if not already set
     setUploadedFiles(prev => {
-      if (prev.total !== files.length) {
+      if (prev.total !== processedFiles.length) {
         return {
-          total: files.length,
+          total: processedFiles.length,
           success: 0,
           failed: 0
         };
@@ -1801,10 +2066,10 @@ export default function DocumentList({
     let failCount = 0;
     
     // Calculate progress increment per file
-    const progressIncrement = 100 / files.length;
+    const progressIncrement = 100 / processedFiles.length;
     
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
+    for (let i = 0; i < processedFiles.length; i++) {
+      const file = processedFiles[i];
       const fileName = file.name;
       
       // Check if the file should be skipped (e.g., system files, .DS_Store)
@@ -1825,7 +2090,7 @@ export default function DocumentList({
         fileType = "pdf";
       } else if (extension === 'dwg') {
         fileType = "dwg";
-      } else if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg'].includes(extension || '')) {
+      } else if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg', 'heic'].includes(extension || '')) {
         fileType = "image";
       } else {
         // Check if it's a valid document file
@@ -1837,7 +2102,7 @@ export default function DocumentList({
       
       try {
         // Check if file has path information (from folder upload)
-        let targetFolderId = currentFolder?.id;
+        let uploadTargetFolderId = targetFolderId; // Use the parent-determined folder ID by default
         
         if ('path' in file) {
           const filePath = (file as any).path;
@@ -1855,13 +2120,13 @@ export default function DocumentList({
             // Check if we've already created this folder path
             if (folderPathMap[folderPath]) {
               // Use the existing folder ID
-              targetFolderId = folderPathMap[folderPath];
-              console.log(`Using existing folder at path ${folderPath} with ID: ${targetFolderId}`);
+              uploadTargetFolderId = folderPathMap[folderPath];
+              console.log(`Using existing folder at path ${folderPath} with ID: ${uploadTargetFolderId}`);
             } else {
               // Need to create the folder structure
               console.log(`Creating folder structure for: ${folderPath}`);
               
-              let currentPathId = currentFolder?.id;
+              let currentPathId = targetFolderId; // Start from the parent folder (might be undefined for root)
               // Build the folder structure one level at a time
               for (let j = 0; j < pathParts.length - 1; j++) {
                 const folderName = pathParts[j];
@@ -1905,22 +2170,22 @@ export default function DocumentList({
               // Set the target folder ID to the deepest folder we were able to create
               // Only if currentPathId is valid
               if (currentPathId) {
-                targetFolderId = currentPathId;
+                uploadTargetFolderId = currentPathId;
                 folderPathMap[folderPath] = currentPathId;
               }
             }
             
             // Now upload the file to the correct folder
-            console.log(`Uploading file "${displayName}" to folder ID: ${targetFolderId || 'root folder'}`);
+            console.log(`Uploading file "${displayName}" to folder ID: ${uploadTargetFolderId || 'root folder'}`);
             if (onCreateDocument) {
-              await onCreateDocument(displayName, fileType, file, targetFolderId);
+              await onCreateDocument(displayName, fileType, file, uploadTargetFolderId);
             } else {
               throw new Error("Document creation is not available");
             }
           } else {
             // No folders in path, just upload the file
             if (onCreateDocument) {
-              await onCreateDocument(fileName, fileType, file, targetFolderId);
+              await onCreateDocument(fileName, fileType, file, uploadTargetFolderId);
             } else {
               throw new Error("Document creation is not available");
             }
@@ -1928,7 +2193,7 @@ export default function DocumentList({
         } else {
           // No path information, just upload the file to current folder or root folder
           if (onCreateDocument) {
-            await onCreateDocument(fileName, fileType, file, targetFolderId);
+            await onCreateDocument(fileName, fileType, file, uploadTargetFolderId);
           } else {
             throw new Error("Document creation is not available");
           }
@@ -1954,7 +2219,7 @@ export default function DocumentList({
     
     // Show completion message
     if (successCount > 0) {
-      showToast(`${successCount} of ${files.length} files uploaded successfully`, 
+      showToast(`${successCount} of ${processedFiles.length} files uploaded successfully`, 
         failCount > 0 ? "error" : "success");
     } else {
       showToast("Failed to upload any files", "error");
@@ -1972,35 +2237,37 @@ export default function DocumentList({
     }, 800);
   };
 
-  const renderUploadButtons = () => {
-    if (!hasUploadPermission()) {
-      return null;
-    }
-    
-    // Create a properly typed wrapper function that always returns a function, never undefined
-    const createDocumentHandler = onCreateDocument ? 
-      (name: string, type: "pdf" | "dwg" | "other" | "image", file: File, folderId?: string) => 
-        onCreateDocument(name, type, file, folderId) : 
-      // Fallback implementation that shows an error message
-      ((name: string, type: "pdf" | "dwg" | "other" | "image", file: File, folderId?: string): Promise<void> => {
-        showToast("Document creation is not available", "error");
-        return Promise.reject(new Error("Document creation is not available"));
-      }) as (name: string, type: "pdf" | "dwg" | "other" | "image", file: File, folderId?: string) => Promise<void>;
-    
-    return (
-      <DocumentActions
-        projectId={projectId}
-        currentFolderId={currentFolder?.id}
-        rootFolderId={rootFolder?.id}
-        folders={folders}
-        onCreateFolder={onCreateFolder}
-        onCreateDocument={createDocumentHandler}
-        onCreateMultipleDocuments={onCreateMultipleDocuments}
-        onRefresh={onRefresh}
-        onShare={onShare}
-      />
-    );
-  };
+    const renderUploadButtons = () => {
+      if (!hasUploadPermission()) {
+        return null;
+      }
+      
+      // Create a properly typed wrapper function that always returns a function, never undefined
+      const createDocumentHandler = onCreateDocument ? 
+        (name: string, type: "pdf" | "dwg" | "other" | "image", file: File, folderId?: string) => 
+          onCreateDocument(name, type, file, folderId) : 
+        // Fallback implementation that shows an error message
+        ((name: string, type: "pdf" | "dwg" | "other" | "image", file: File, folderId?: string): Promise<void> => {
+          showToast("Document creation is not available", "error");
+          return Promise.reject(new Error("Document creation is not available"));
+        }) as (name: string, type: "pdf" | "dwg" | "other" | "image", file: File, folderId?: string) => Promise<void>;
+      
+      // Modified to allow uploads to root directory by passing optional folder IDs
+      return (
+        <DocumentActions
+          projectId={projectId}
+          currentFolderId={currentFolder?.id}
+          rootFolderId={rootFolder?.id}
+          folders={folders}
+          onCreateFolder={onCreateFolder}
+          onCreateDocument={createDocumentHandler}
+          onCreateMultipleDocuments={onCreateMultipleDocuments}
+          onRefresh={onRefresh}
+          onShare={onShare}
+          allowRootUploads={true} // Enable uploads to root directory
+        />
+      );
+    };
 
   // Get sort by label for display
   const getSortByLabel = () => {
@@ -2033,6 +2300,56 @@ export default function DocumentList({
 
   // Setup real-time document subscription
   useEffect(() => {
+    // Handle subscription for root folder when at top level
+    if (!currentFolder && rootFolder && !isSharedView) {
+      // Cleanup any existing subscription
+      if (unsubscribeDocRef.current) {
+        console.log('[Document List] Cleaning up document subscription due to folder change');
+        unsubscribeDocRef.current();
+        unsubscribeDocRef.current = null;
+        hasActiveDocSubscription.current = false;
+      }
+
+      console.log(`[Document List] Setting up real-time document subscription for root folder: ${rootFolder.id}`);
+      setRootLoading(true);
+
+      try {
+        // Set up the subscription for the root folder
+        const unsubscribe = subscribeToFolderDocuments(rootFolder.id, (updatedDocuments) => {
+          console.log(`[Document List] Received ${updatedDocuments.length} documents from real-time update for root folder`);
+          setLocalDocuments(updatedDocuments);
+          setRootLoading(false);
+        });
+
+        // Store the unsubscribe function
+        unsubscribeDocRef.current = unsubscribe;
+        hasActiveDocSubscription.current = true;
+      } catch (error) {
+        console.error(`[Document List] Error setting up document subscription for root folder ${rootFolder.id}:`, error);
+        
+        // If subscription fails, try to get documents directly as fallback
+        documentService.getByFolderId(rootFolder.id)
+          .then(docs => {
+            console.log(`[Document List] Fallback loading retrieved ${docs.length} documents for root folder`);
+            setLocalDocuments(docs);
+            setRootLoading(false);
+          })
+          .catch(err => {
+            console.error('[Document List] Fallback document loading failed for root folder:', err);
+            setRootLoading(false);
+          });
+      }
+
+      return () => {
+        if (unsubscribeDocRef.current) {
+          console.log('[Document List] Cleaning up root folder document subscription');
+          unsubscribeDocRef.current();
+          unsubscribeDocRef.current = null;
+          hasActiveDocSubscription.current = false;
+        }
+      };
+    }
+    
     // Only set up subscription if we have a currentFolder and we're not in shared view
     if (!currentFolder || isSharedView) {
       // Cleanup any existing subscription
@@ -2086,7 +2403,7 @@ export default function DocumentList({
         hasActiveDocSubscription.current = false;
       }
     };
-  }, [currentFolder, isSharedView]);
+  }, [currentFolder, rootFolder, isSharedView]);
   
   // Setup folder subscription for real-time updates
   useEffect(() => {
@@ -3757,6 +4074,8 @@ export default function DocumentList({
     }
   };
 
+  
+
   return (
     <div 
       ref={dropZoneRef}
@@ -3776,6 +4095,9 @@ export default function DocumentList({
               selectedDocument={selectedDocument}
               onNavigate={handleBreadcrumbNavigation}
               onDocumentClick={() => selectedDocument && onPreview(selectedDocument)}
+              onUpdateDocument={onUpdateDocument}
+              onRefresh={onRefresh}
+              showToast={(message: string, type?: "success" | "error" | "info" | "warning") => showToast(message, type as "success" | "error")}
             />
             
             {/* Header actions */}
@@ -3929,7 +4251,7 @@ export default function DocumentList({
                 />
                 <Search className="absolute left-3 top-2.5 w-5 h-5 text-gray-400" />
                 {searchQuery && (
-                  <button
+                  <motion.button
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
@@ -3937,7 +4259,7 @@ export default function DocumentList({
                     onClick={() => setSearchQuery("")}
                   >
                     Clear
-                  </button>
+                  </motion.button>
                 )}
               </div>
               
@@ -3956,7 +4278,7 @@ export default function DocumentList({
                 
                 <>
                   {showFilterDropdown && (
-                    <div
+                    <motion.div
                       initial={{ opacity: 0, y: -10 }}
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: -10 }}
@@ -4000,7 +4322,7 @@ export default function DocumentList({
                           <span>Files Only</span>
                         </button>
                       </div>
-                    </div>
+                    </motion.div>
                   )}
                 </>
               </div>
@@ -4020,7 +4342,7 @@ export default function DocumentList({
                 
                 <>
                   {showSortDropdown && (
-                    <div
+                    <motion.div
                       initial={{ opacity: 0, y: -10 }}
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: -10 }}
@@ -4059,53 +4381,69 @@ export default function DocumentList({
                           <span>Toggle Order ({sortOrder === 'asc' ? 'Ascending' : 'Descending'})</span>
                         </button>
                       </div>
-                    </div>
+                    </motion.div>
                   )}
                 </>
               </div>
             </div>
             
             {searchQuery && (
-              <div
+              <motion.div
                 initial={{ opacity: 0, y: -10 }}
                 animate={{ opacity: 1, y: 0 }}
                 className="text-sm text-gray-500"
               >
                 Found {subFolders.length + currentDocs.length} items
                 {viewFilter !== 'all' && ` (${viewFilter === 'folders' ? `${subFolders.length} folders` : `${currentDocs.length} files`})`}
-              </div>
+              </motion.div>
             )}
           </div>
 
           <>
-            {loading || isReloading ? (
-              <div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                className="flex items-center justify-center py-12"
-              >
-                <Loader2 className="w-8 h-8 animate-spin text-primary-500" />
-              </div>
+            {loading || isReloading || isNotificationLoading || isProcessingNotification || (rootLoading && !currentFolder && rootFolder) ? (
+                              <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="flex flex-col items-center justify-center py-12"
+                >
+                  <Loader2 className="w-8 h-8 animate-spin text-primary-500 mb-3" />
+                  {isNotificationLoading ? (
+                    <div className="text-center">
+                      <p className="text-primary-700 font-medium">Navigating to uploaded file...</p>
+                      {notificationLoadingTarget?.fileName && (
+                        <p className="text-sm text-gray-500 mt-1">
+                          {notificationLoadingTarget.fileName}
+                        </p>
+                      )}
+                    </div>
+                  ) : rootLoading && !currentFolder && rootFolder ? (
+                    <p className="text-gray-500">Loading root folder content...</p>
+                  ) : isProcessingNotification ? (
+                    <p className="text-gray-500">Processing notification...</p>
+                  ) : (
+                    <p className="text-gray-500">Loading content...</p>
+                  )}
+                </motion.div>
             ) : (
-              <div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                className="space-y-2 px-4 pr-6 overflow-y-auto"
-                style={{paddingTop: '1.5rem', paddingBottom: '1.5rem'}}
-              >
+                              <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="space-y-2 px-4 pr-6 overflow-y-auto"
+                  style={{paddingTop: '1.5rem', paddingBottom: '1.5rem'}}
+                >
                 {subFolders.map((folder, index) => (
-                  <div
+                  <motion.div
                     key={`folder-${folder.id || Math.random().toString(36)}`}
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     className={`flex items-center justify-between p-3 bg-white border ${
                       dropTargetFolder === folder.id ? 'border-primary-500 bg-primary-50' : 'border-gray-200'
                     } rounded-lg hover:bg-gray-50 transition-colors`}
-                    onDragOver={(e) => handleFolderDragOver(e, folder.id)}
-                    onDragLeave={handleFolderDragLeave}
-                    onDrop={(e) => handleFolderDrop(e, folder.id)}
+                    onDragOver={(e: any) => handleFolderDragOver(e, folder.id)}
+                    onDragLeave={(e: any) => handleFolderDragLeave(e)}
+                    onDrop={(e: any) => handleFolderDrop(e, folder.id)}
                   >
                     <button
                       onClick={() => onFolderSelect?.(folder)}
@@ -4234,11 +4572,11 @@ export default function DocumentList({
                           </div>
                       </div>
                     )}
-                  </div>
+                  </motion.div>
                 ))}
 
                 {currentDocs.map((doc) => ( 
-                  <div
+                  <motion.div
                     key={`doc-${doc.id || Math.random().toString(36)}`}
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
@@ -4250,7 +4588,7 @@ export default function DocumentList({
                       draggedItems.includes(doc.id) ? 'opacity-50' : ''
                     }`}
                     draggable={!isSharedView}
-                    onDragStart={(e: React.DragEvent<HTMLDivElement>) => handleFileDragStart(e, doc.id)}
+                    onDragStart={(e: any) => handleFileDragStart(e, doc.id)}
                   >
                     {/* Selection checkbox - only show in selection mode */}
                     {isSelectionMode && (
@@ -4466,11 +4804,11 @@ export default function DocumentList({
                         )}
                       </div>
                     )}
-                  </div>
+                  </motion.div>
                 ))}
 
                 {subFolders.length === 0 && currentDocs.length === 0 && (
-                  <div
+                  <motion.div
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     className="text-center py-12"
@@ -4483,9 +4821,9 @@ export default function DocumentList({
                         Try adjusting your search terms or filters
                       </p>
                     )}
-                  </div>
+                  </motion.div>
                 )}
-              </div>
+              </motion.div>
             )}
           </>
         </>
@@ -4494,7 +4832,7 @@ export default function DocumentList({
       {/* Drag and drop overlay */}
       <>
         {showDragOverlay && hasUploadPermission() && !selectedDocument && (
-          <div
+          <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -4515,7 +4853,7 @@ export default function DocumentList({
                 Folder structure will be preserved on upload
               </div>
             </div>
-          </div>
+          </motion.div>
         )}
       </>
 
@@ -4824,7 +5162,7 @@ export default function DocumentList({
       {/* Drag and drop overlay */}
       <>
         {showDragOverlay && (
-          <div
+          <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -4839,14 +5177,14 @@ export default function DocumentList({
                 Drop {draggedFileCount === 1 ? 'your file' : `your ${draggedFileCount} files`} anywhere to start uploading
               </p>
             </div>
-          </div>
+          </motion.div>
         )}
       </>
 
       {/* Loading indicator for uploads */}
       <>
         {isUploading && (
-          <div
+          <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -4884,14 +5222,14 @@ export default function DocumentList({
                   "Upload complete!"}
               </p>
             </div>
-          </div>
+          </motion.div>
         )}
       </>
 
       {/* Large image preview popup */}
       <>
         {showPreviewPopup && hoveredImageDoc && (
-          <div
+          <motion.div
             initial={{ opacity: 0, scale: 0.8 }}
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.8 }}
@@ -4922,14 +5260,14 @@ export default function DocumentList({
                 {hoveredImageDoc?.name}
               </div>
             </div>
-          </div>
+          </motion.div>
         )}
       </>
       
       {/* Download progress overlay */}
       <>
         {isDownloading && (
-          <div
+          <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -4955,14 +5293,14 @@ export default function DocumentList({
                   "Archive complete! Download will start automatically."}
               </p>
             </div>
-          </div>
+          </motion.div>
         )}
       </>
 
       {/* Add multi-file move dialog */}
       <>
         {showCopyMoveDialog && (selectionMode === 'move' || selectionMode === 'copy') && selectedFiles.size > 0 && (
-          <div
+          <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -5169,14 +5507,14 @@ export default function DocumentList({
                 )}
               </button>
             </div>
-          </div>
+          </motion.div>
         )}
       </>
 
       {/* Move confirmation dialog */}
       <>
         {showMoveConfirmation && moveTargetFolder && (
-          <div 
+          <motion.div 
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -5230,7 +5568,7 @@ export default function DocumentList({
                 </button>
               </div>
             </div>
-          </div>
+          </motion.div>
         )}
       </>
 

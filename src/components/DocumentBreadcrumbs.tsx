@@ -10,6 +10,9 @@ interface DocumentBreadcrumbsProps {
   selectedDocument?: Document;
   onNavigate: (folder?: Folder) => void;
   onDocumentClick?: () => void;
+  onUpdateDocument?: (id: string, updates: Partial<Document>) => Promise<void>;
+  onRefresh?: () => Promise<void>;
+  showToast?: (message: string, type?: 'success' | 'error' | 'info' | 'warning') => void;
 }
 
 export default function DocumentBreadcrumbs({
@@ -18,6 +21,9 @@ export default function DocumentBreadcrumbs({
   selectedDocument,
   onNavigate,
   onDocumentClick,
+  onUpdateDocument,
+  onRefresh,
+  showToast,
 }: DocumentBreadcrumbsProps) {
   const folderMap = new Map<string, Folder>(folders.map(f => [f.id, f]));
   const [showDropdown, setShowDropdown] = useState(false);
@@ -26,6 +32,11 @@ export default function DocumentBreadcrumbs({
   const [currentVersion, setCurrentVersion] = useState<number | undefined>(selectedDocument?.version);
   const [documentName, setDocumentName] = useState<string | undefined>(selectedDocument?.name);
   const unsubscribeRef = useRef<(() => void) | null>(null);
+  
+  // Drag and drop state
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragTargetFolder, setDragTargetFolder] = useState<string | null>(null);
+  const [moveInProgress, setMoveInProgress] = useState(false);
   
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -166,7 +177,14 @@ export default function DocumentBreadcrumbs({
               onNavigate(folder);
               setShowDropdown(false);
             }}
-            className="flex items-center w-full px-4 py-2 text-sm text-left text-gray-700 hover:bg-gray-100"
+            onDragOver={(e) => handleFolderDragOver(e, folder.id)}
+            onDragLeave={handleFolderDragLeave}
+            onDrop={(e) => handleFolderDrop(e, folder.id)}
+            className={`flex items-center w-full px-4 py-2 text-sm text-left ${
+              dragTargetFolder === folder.id 
+                ? 'bg-blue-50 text-blue-700' 
+                : 'text-gray-700 hover:bg-gray-100'
+            }`}
           >
             <FolderOpen className="w-4 h-4 text-gray-400 mr-2 flex-shrink-0" />
             <span className="truncate">{getFolderDisplayName(folder)}</span>
@@ -184,6 +202,107 @@ export default function DocumentBreadcrumbs({
       return <Image className="w-4 h-4 text-blue-400" />;
     }
     return <FileText className="w-4 h-4 text-gray-400" />;
+  };
+
+  // Handle document drag start
+  const handleDocumentDragStart = (e: React.DragEvent<HTMLDivElement>, docId: string) => {
+    if (!selectedDocument) return;
+    
+    e.stopPropagation();
+    e.dataTransfer.setData('text/plain', docId);
+    e.dataTransfer.effectAllowed = 'move';
+    
+    // Set visual feedback for drag
+    setIsDragging(true);
+    
+    // Set visual cue for dragging
+    const target = e.currentTarget;
+    target.classList.add('opacity-50');
+    
+    // Clean up after drag ends
+    const handleDragEnd = () => {
+      target.classList.remove('opacity-50');
+      setIsDragging(false);
+      target.removeEventListener('dragend', handleDragEnd);
+    };
+    
+    target.addEventListener('dragend', handleDragEnd);
+  };
+  
+  // Handle folder drag over
+  const handleFolderDragOver = (e: React.DragEvent<HTMLElement>, folderId: string) => {
+    if (!selectedDocument) return;
+    
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'move';
+    
+    // Visual feedback - highlight target folder
+    setDragTargetFolder(folderId);
+  };
+  
+  // Handle folder drag leave
+  const handleFolderDragLeave = (e: React.DragEvent<HTMLElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    // Remove highlight
+    setDragTargetFolder(null);
+  };
+  
+  // Handle folder drop
+  const handleFolderDrop = async (e: React.DragEvent<HTMLElement>, targetFolderId: string) => {
+    if (!selectedDocument || !onUpdateDocument) return;
+    
+    e.preventDefault();
+    e.stopPropagation();
+    
+    // Clear visual feedback
+    setDragTargetFolder(null);
+    
+    // Get folder name for confirmation
+    const targetFolder = folders.find(f => f.id === targetFolderId);
+    if (!targetFolder) return;
+    
+    // Skip if file is already in target folder
+    if (selectedDocument.folderId === targetFolderId) {
+      if (showToast) showToast("File is already in this folder");
+      return;
+    }
+    
+    // Move the file
+    await moveFileToFolder(selectedDocument.id, targetFolderId, targetFolder.name);
+  };
+  
+  // Move file to folder
+  const moveFileToFolder = async (docId: string, targetFolderId: string, targetFolderName: string) => {
+    if (!onUpdateDocument) return;
+    
+    setMoveInProgress(true);
+    
+    try {
+      if (showToast) showToast(`Moving file to ${targetFolderName}...`);
+      
+      // Update document location
+      await onUpdateDocument(docId, {
+        folderId: targetFolderId
+      });
+      
+      // Refresh data after move
+      if (onRefresh) {
+        await onRefresh();
+      }
+      
+      if (showToast) showToast("File moved successfully", "success");
+      
+      // Navigate to the folder containing the file
+      onNavigate(folders.find(f => f.id === targetFolderId));
+    } catch (error) {
+      console.error("Error moving file:", error);
+      if (showToast) showToast("Error moving file", "error");
+    } finally {
+      setMoveInProgress(false);
+    }
   };
 
   return (
@@ -205,7 +324,13 @@ export default function DocumentBreadcrumbs({
                 onNavigate(undefined);
               }
             }}
-            className="flex items-center space-x-1.5 px-2 py-1 rounded-md transition-colors whitespace-nowrap hover:text-gray-900 hover:bg-gray-100"
+            onDragOver={(e) => handleFolderDragOver(e, '')}
+            onDragLeave={handleFolderDragLeave}
+            onDrop={(e) => handleFolderDrop(e, '')}
+            className={`flex items-center space-x-1.5 px-2 py-1 rounded-md transition-colors whitespace-nowrap 
+              ${dragTargetFolder === '' 
+                ? 'bg-blue-50 text-blue-700' 
+                : 'hover:text-gray-900 hover:bg-gray-100'}`}
           >
             <Home className="w-4 h-4" />
             <span>Documents</span>
@@ -230,7 +355,13 @@ export default function DocumentBreadcrumbs({
                     <div className="flex items-center my-1">
                       <button
                         onClick={() => onNavigate(breadcrumbPath[0])}
-                        className="flex items-center space-x-1.5 px-2 py-1 rounded-md transition-colors whitespace-nowrap hover:text-gray-900 hover:bg-gray-100"
+                        onDragOver={(e) => handleFolderDragOver(e, breadcrumbPath[0].id)}
+                        onDragLeave={handleFolderDragLeave}
+                        onDrop={(e) => handleFolderDrop(e, breadcrumbPath[0].id)}
+                        className={`flex items-center space-x-1.5 px-2 py-1 rounded-md transition-colors whitespace-nowrap 
+                          ${dragTargetFolder === breadcrumbPath[0].id 
+                            ? 'bg-blue-50 text-blue-700' 
+                            : 'hover:text-gray-900 hover:bg-gray-100'}`}
                       >
                         <FolderOpen className="w-4 h-4 text-gray-400" />
                         <span>{getFolderDisplayName(breadcrumbPath[0])}</span>
@@ -268,7 +399,13 @@ export default function DocumentBreadcrumbs({
                 <div className="flex items-center my-1">
                   <button
                     onClick={() => onNavigate(breadcrumbPath[breadcrumbPath.length - 1])}
-                    className="flex items-center space-x-1.5 px-2 py-1 rounded-md transition-colors whitespace-nowrap hover:text-gray-900 hover:bg-gray-100"
+                    onDragOver={(e) => handleFolderDragOver(e, breadcrumbPath[breadcrumbPath.length - 1].id)}
+                    onDragLeave={handleFolderDragLeave}
+                    onDrop={(e) => handleFolderDrop(e, breadcrumbPath[breadcrumbPath.length - 1].id)}
+                    className={`flex items-center space-x-1.5 px-2 py-1 rounded-md transition-colors whitespace-nowrap 
+                      ${dragTargetFolder === breadcrumbPath[breadcrumbPath.length - 1].id 
+                        ? 'bg-blue-50 text-blue-700' 
+                        : 'hover:text-gray-900 hover:bg-gray-100'}`}
                   >
                     <FolderOpen className="w-4 h-4 text-gray-400" />
                     <span>{getFolderDisplayName(breadcrumbPath[breadcrumbPath.length - 1])}</span>
@@ -287,7 +424,13 @@ export default function DocumentBreadcrumbs({
                   <div className="flex items-center my-1">
                     <button
                       onClick={() => onNavigate(folder)}
-                      className="flex items-center space-x-1.5 px-2 py-1 rounded-md transition-colors whitespace-nowrap hover:text-gray-900 hover:bg-gray-100"
+                      onDragOver={(e) => handleFolderDragOver(e, folder.id)}
+                      onDragLeave={handleFolderDragLeave}
+                      onDrop={(e) => handleFolderDrop(e, folder.id)}
+                      className={`flex items-center space-x-1.5 px-2 py-1 rounded-md transition-colors whitespace-nowrap 
+                        ${dragTargetFolder === folder.id 
+                          ? 'bg-blue-50 text-blue-700' 
+                          : 'hover:text-gray-900 hover:bg-gray-100'}`}
                     >
                       <FolderOpen className="w-4 h-4 text-gray-400" />
                       <span>{getFolderDisplayName(folder)}</span>
@@ -310,8 +453,12 @@ export default function DocumentBreadcrumbs({
             {/* Document item - current (last) item */}
             <div className="flex items-center my-1">
               <div 
-                className="flex items-center space-x-1.5 px-3 py-1.5 rounded-md whitespace-nowrap text-gray-900 font-medium bg-blue-50 border border-blue-200"
+                className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-md whitespace-nowrap text-gray-900 font-medium 
+                  ${isDragging ? 'opacity-50' : ''} 
+                  bg-blue-50 border border-blue-200 cursor-pointer`}
                 onClick={onDocumentClick}
+                draggable={!!onUpdateDocument}
+                onDragStart={(e) => handleDocumentDragStart(e, selectedDocument.id)}
                 aria-current="page"
               >
                 {getDocumentIcon(selectedDocument.type)}
