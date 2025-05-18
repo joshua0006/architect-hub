@@ -6,6 +6,79 @@ import { documentService } from '../services/documentService';
 import { userService } from '../services/userService';
 import { createFileUploadNotification } from '../services/notificationService';
 import { triggerDocumentUpdate } from '../services/documentSubscriptionService';
+import heic2any from 'heic2any';
+
+// Convert HEIC file to JPEG before upload
+const convertHeicToJpeg = async (file: File): Promise<File> => {
+  // Only convert if it's a HEIC file
+  if (!file.name.toLowerCase().endsWith('.heic') && 
+      !file.type.toLowerCase().includes('image/heic')) {
+    return file;
+  }
+  
+  try {
+    console.log(`Converting HEIC file: ${file.name} to JPEG`);
+    
+    // Convert HEIC to JPEG using heic2any library
+    const jpegBlob = await heic2any({
+      blob: file,
+      toType: 'image/jpeg',
+      quality: 0.9  // Maintain good quality
+    }) as Blob;
+    
+    // Create new file name (replace .heic with .jpg)
+    const newFileName = file.name.replace(/\.heic$/i, '.jpg');
+    
+    // Create a new File object from the JPEG blob
+    const jpegFile = new File(
+      [jpegBlob], 
+      newFileName, 
+      { type: 'image/jpeg', lastModified: file.lastModified }
+    );
+    
+    console.log(`Successfully converted ${file.name} to ${jpegFile.name}`);
+    return jpegFile;
+  } catch (error) {
+    console.error(`Error converting HEIC file: ${file.name}`, error);
+    // Return the original file if conversion fails
+    return file;
+  }
+};
+
+// Process files to convert any HEIC files to JPEG before upload
+const processFilesBeforeUpload = async (files: File[]): Promise<File[]> => {
+  if (!files || files.length === 0) return files;
+  
+  try {
+    const processedFiles: File[] = [];
+    
+    // Process each file - convert HEIC to JPEG
+    for (const file of files) {
+      try {
+        // Check if it's a HEIC file
+        if (file.name.toLowerCase().endsWith('.heic') || 
+            file.type.toLowerCase().includes('image/heic')) {
+          // Convert HEIC to JPEG
+          const jpegFile = await convertHeicToJpeg(file);
+          processedFiles.push(jpegFile);
+        } else {
+          // Not a HEIC file, keep as is
+          processedFiles.push(file);
+        }
+      } catch (error) {
+        console.error(`Error processing file ${file.name}:`, error);
+        // Add the original file if there's an error
+        processedFiles.push(file);
+      }
+    }
+    
+    return processedFiles;
+  } catch (error) {
+    console.error('Error processing files before upload:', error);
+    // Return original files if there's an error in the overall process
+    return files;
+  }
+};
 
 // Custom document upload function for token uploads
 const uploadDocument = async (
@@ -119,7 +192,7 @@ const TokenUpload: React.FC = () => {
     addFiles(selectedFiles);
   };
 
-  const addFiles = (newFiles: File[]) => {
+  const addFiles = async (newFiles: File[]) => {
     if (!guestIdentifier.trim()) {
       setIdentifierError("Please provide your name/email before uploading files");
       return;
@@ -138,7 +211,10 @@ const TokenUpload: React.FC = () => {
       }
     }
     
-    const validFiles = newFiles.filter(file => {
+    // Process files - convert HEIC to JPEG
+    const processedFiles = await processFilesBeforeUpload(newFiles);
+    
+    const validFiles = processedFiles.filter(file => {
       if (token?.maxFileSize && file.size > token.maxFileSize) {
         return false;
       }
@@ -151,7 +227,7 @@ const TokenUpload: React.FC = () => {
       return true;
     });
 
-    if (validFiles.length !== newFiles.length) {
+    if (validFiles.length !== processedFiles.length) {
       alert('Some files were rejected due to size or type restrictions.');
     }
 
@@ -210,6 +286,7 @@ const TokenUpload: React.FC = () => {
     }
     
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      // The HEIC conversion will be handled by addFiles
       addFiles(Array.from(e.dataTransfer.files));
       e.dataTransfer.clearData();
     }
@@ -255,7 +332,7 @@ const TokenUpload: React.FC = () => {
             fileType = "pdf";
           } else if (extension === 'dwg') {
             fileType = "dwg";
-          } else if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg'].includes(extension || '')) {
+          } else if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg', 'heic'].includes(extension || '')) {
             fileType = "image";
           }
           
