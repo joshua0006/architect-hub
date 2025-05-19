@@ -688,10 +688,19 @@ function ProjectListComponent({
             !minimized && (
               <div className="text-center py-8">
                 <p className="text-gray-500">No projects found</p>
-                {searchQuery && (
+                {searchQuery ? (
                   <p className="text-sm text-gray-400 mt-2">
                     Try adjusting your search terms
                   </p>
+                ) : (
+                  <div className="mt-4 p-4 bg-blue-50 rounded-md border border-blue-100">
+                    <p className="text-sm text-blue-700 mb-2">
+                      You don't have access to any projects.
+                    </p>
+                    <p className="text-xs text-blue-600">
+                      Please contact your administrator to be added to projects or have your role updated.
+                    </p>
+                  </div>
                 )}
               </div>
             )
