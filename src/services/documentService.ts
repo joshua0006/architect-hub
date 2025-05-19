@@ -25,7 +25,7 @@ import { db, storage } from '../lib/firebase';
 import { Document, DocumentComment } from '../types';
 import { folderService } from './folderService';
 import { userService } from './userService';
-import { createCommentMentionNotifications } from './notificationService';
+import { createCommentMentionNotifications, createAdminFileUploadNotification } from './notificationService';
 import { extractMentions, extractUserIds, resolveUserMentions, UserMention } from '../utils/textUtils';
 
 // Add a global subscription tracker
@@ -172,7 +172,8 @@ export const documentService = {
   async create(
     folderId: string,
     document: Omit<Document, 'id' | 'url'>,
-    file: File
+    file: File,
+    uploader?: { id: string, displayName: string, role: string } // Add uploader info
   ): Promise<Document> {
     try {
       // Check if name already exists in parent directory
@@ -227,6 +228,7 @@ export const documentService = {
           storagePath,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
+          createdBy: uploader?.id || '', // Add the uploader ID if available
           metadata: {
             originalFilename: file.name,
             contentType: file.type,
@@ -268,6 +270,42 @@ export const documentService = {
           } catch (folderUpdateError) {
             console.warn('Error updating folder metadata (non-critical):', folderUpdateError);
             // Continue even if folder metadata update fails
+          }
+        }
+
+        // If file was uploaded by a non-admin user, notify admin users
+        if (uploader && uploader.role !== 'Admin') {
+          try {
+            // Get the folder name
+            let folderName = "Project Root";
+            if (folderId) {
+              const folder = await folderService.getById(folderId);
+              if (folder) {
+                folderName = folder.name;
+              }
+            }
+
+            // Get all admin users
+            const adminUsers = await userService.getUsersByRole('Admin');
+            if (adminUsers && adminUsers.length > 0) {
+              // Create notifications for all admin users
+              await createAdminFileUploadNotification(
+                document.name,
+                uploader.displayName,
+                uploader.role,
+                file.type,
+                folderId || '',
+                folderName,
+                docRef.id,
+                document.projectId,
+                new Date().toISOString(),
+                adminUsers.map(user => user.id)
+              );
+              console.log(`Admin notifications sent for file upload by ${uploader.displayName}`);
+            }
+          } catch (notificationError) {
+            console.warn('Error sending admin notifications (non-critical):', notificationError);
+            // Continue even if notifications fail
           }
         }
 

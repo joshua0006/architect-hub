@@ -20,6 +20,7 @@ interface ExtendedMetadata {
   dueDate?: string;
   parentTaskId?: string;
   parentTaskTitle?: string;
+  uploaderRole?: string; // Add uploader role for admin notifications
 }
 
 // Define extended notification type with the enhanced metadata
@@ -171,7 +172,18 @@ const NotificationContent: React.FC<NotificationContentProps> = React.memo(({
               <div className="flex items-center mt-1 text-green-600 w-full overflow-hidden">
                 <User className="w-3 h-3 mr-1 flex-shrink-0" />
                 <p className="font-medium truncate max-w-[100px] overflow-hidden" title={notification.metadata.guestName}>{notification.metadata.guestName}</p>
-                <span className="ml-1 bg-green-100 text-green-800 text-xs px-1.5 py-0.5 rounded flex-shrink-0">Guest</span>
+                {/* Show 'Guest' badge for guest uploads, otherwise show the uploader's role if available */}
+                {notification.metadata.uploaderRole ? (
+                  <span className={`ml-1 text-xs px-1.5 py-0.5 rounded flex-shrink-0 
+                    ${notification.metadata.uploaderRole === 'Staff' ? 'bg-blue-100 text-blue-800' : 
+                     notification.metadata.uploaderRole === 'Client' ? 'bg-orange-100 text-orange-800' :
+                     notification.metadata.uploaderRole === 'Contractor' ? 'bg-green-100 text-green-800' :
+                     'bg-gray-100 text-gray-800'}`}>
+                    {notification.metadata.uploaderRole}
+                  </span>
+                ) : (
+                  <span className="ml-1 bg-green-100 text-green-800 text-xs px-1.5 py-0.5 rounded flex-shrink-0">Guest</span>
+                )}
               </div>
             )}
             {notification.metadata.commentText && (
