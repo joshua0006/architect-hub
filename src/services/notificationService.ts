@@ -26,6 +26,7 @@ export interface Notification {
     parentTaskId?: string; // Add parentTaskId to metadata for subtask notifications
     parentTaskTitle?: string; // Add parentTaskTitle for context
     projectName?: string; // Add projectName for better display
+    uploaderRole?: string; // Add uploaderRole for admin notifications
   };
   raw?: {
     userId: string;
@@ -2030,6 +2031,104 @@ export const createSubtaskAssignmentNotification = async (
     }
   } catch (error) {
     console.error('[Notification Error] Error in createSubtaskAssignmentNotification:', error);
+    return [];
+  }
+};
+
+/**
+ * Creates notifications for admin users when a non-admin user uploads a file
+ * @param fileName The name of the uploaded file
+ * @param uploaderName The name of the user who uploaded the file
+ * @param uploaderRole The role of the user who uploaded the file
+ * @param contentType The content type of the file
+ * @param folderId The ID of the folder where the file was uploaded
+ * @param folderName The name of the folder where the file was uploaded
+ * @param fileId The ID of the uploaded file
+ * @param projectId The ID of the project
+ * @param adminUserIds Array of admin user IDs who should receive this notification
+ * @returns The IDs of the created notifications
+ */
+export const createAdminFileUploadNotification = async (
+  fileName: string,
+  uploaderName: string,
+  uploaderRole: string,
+  contentType: string,
+  folderId: string,
+  folderName: string,
+  fileId: string,
+  projectId: string,
+  uploadDate: string = new Date().toISOString(),
+  adminUserIds: string[] = []
+): Promise<string[]> => {
+  // Format the uploader name for display in notification
+  const formattedUploaderName = uploaderName || 'Unknown user';
+  
+  // Create the link to the document with proper context
+  let link = `/documents`;
+  
+  if (folderId) {
+    link += `/folders/${folderId}`;
+    
+    if (fileId) {
+      link += `/files/${fileId}`;
+    }
+  } else if (fileId) {
+    link += `/files/${fileId}`;
+  }
+  
+  // If no admin users provided, return empty array
+  if (!adminUserIds || adminUserIds.length === 0) {
+    console.warn('[Notification] No admin users provided for file upload notification');
+    return [];
+  }
+  
+  // Create a notification for each admin user
+  const notificationPromises = adminUserIds.map(userId => {
+    // Make sure we have a valid userId
+    if (!userId || typeof userId !== 'string' || userId.trim() === '') {
+      console.warn('[Notification] Skipping invalid userId in createAdminFileUploadNotification');
+      return Promise.resolve('invalid-user-id');
+    }
+    
+    // Create the notification object with all required fields
+    const notification = {
+      iconType: 'file-upload', // Same icon type as guest upload notifications
+      type: 'success' as const, // Use 'success' type for a green indicator
+      message: `${formattedUploaderName} uploaded "${fileName}" to ${folderName}`,
+      link,
+      read: false,
+      userId, // Set the target user ID
+      metadata: {
+        contentType: contentType || 'file', // Ensure content type is never empty
+        fileName,
+        folderId,
+        folderName,
+        fileId,
+        guestName: formattedUploaderName, // Reuse the same field for consistency
+        uploadDate,
+        uploaderRole // Add the role of the uploader for context
+      }
+    };
+    
+    // Create the notification in Firebase
+    return createNotification(notification);
+  });
+  
+  try {
+    // Wait for all notifications to be created
+    const notificationIds = await Promise.all(notificationPromises);
+    
+    // Filter out any failed notifications
+    const validNotificationIds = notificationIds.filter(id => 
+      id && typeof id === 'string' && 
+      !id.startsWith('invalid') && 
+      !id.startsWith('retry') && 
+      !id.startsWith('general')
+    );
+    
+    return validNotificationIds;
+  } catch (error) {
+    console.error('[Notification Error] Error creating admin file upload notifications:', error);
     return [];
   }
 };

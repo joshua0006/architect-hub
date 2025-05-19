@@ -2,12 +2,14 @@ import { useState, useEffect } from 'react';
 import { Document } from '../types';
 import { documentService } from '../services';
 import { folderService } from '../services';
+import { useAuth } from '../contexts/AuthContext';
 
 export function useDocumentManager(projectId: string) {
   const [documents, setDocuments] = useState<Document[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
   const [currentFolderId, setCurrentFolderId] = useState<string | undefined>();
+  const { user } = useAuth(); // Get current user info
 
   useEffect(() => {
     if (projectId) {
@@ -66,6 +68,13 @@ export function useDocumentManager(projectId: string) {
         }
       }
 
+      // Prepare uploader information if user is logged in
+      const uploaderInfo = user ? {
+        id: user.id,
+        displayName: user.displayName,
+        role: user.role
+      } : undefined;
+
       const newDoc = await documentService.create(
         targetFolderId || '', // Pass empty string for root directory
         {
@@ -76,7 +85,8 @@ export function useDocumentManager(projectId: string) {
           version: 1,
           dateModified: new Date().toISOString()
         },
-        file
+        file,
+        uploaderInfo // Pass uploader information
       );
       
       console.log('Created document:', newDoc);
