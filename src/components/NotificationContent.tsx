@@ -179,7 +179,9 @@ const NotificationContent: React.FC<NotificationContentProps> = React.memo(({
                      notification.metadata.uploaderRole === 'Client' ? 'bg-orange-100 text-orange-800' :
                      notification.metadata.uploaderRole === 'Contractor' ? 'bg-green-100 text-green-800' :
                      'bg-gray-100 text-gray-800'}`}>
-                    {notification.metadata.uploaderRole}
+                    {notification.metadata.uploaderRole === 'Staff' ? 'CCA' : 
+                     notification.metadata.uploaderRole === 'Contractor' ? 'Consultant' : 
+                     notification.metadata.uploaderRole}
                   </span>
                 ) : (
                   <span className="ml-1 bg-green-100 text-green-800 text-xs px-1.5 py-0.5 rounded flex-shrink-0">Guest</span>

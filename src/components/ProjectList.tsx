@@ -411,10 +411,16 @@ function ProjectListComponent({
     // Only initialize filtered projects when projects change significantly
     // This prevents reinitialization on tab switches
     if (projects.length > 0) {
-      const nonArchivedProjects = projects.filter(p => p.status !== "archived");
+      const nonArchivedProjects = projects.filter(p => {
+        // Hide project with specific ID from non-admin users
+        if (p.id === "ZhYf84TEvi9YRWFjVX1W" && user?.role !== "Admin") {
+          return false;
+        }
+        return p.status !== "archived";
+      });
       setFilteredProjects(nonArchivedProjects);
     }
-  }, [projectsHash]);
+  }, [projectsHash, user?.role]);
 
   useEffect(() => {
     // Only apply filtering after the custom order is loaded
@@ -422,7 +428,13 @@ function ProjectListComponent({
     
     // Filter projects without sorting by name
     const filtered = projectOrder
-      .filter((project) => project.status !== "archived")
+      .filter((project) => {
+        // Hide project with specific ID from non-admin users
+        if (project.id === "ZhYf84TEvi9YRWFjVX1W" && user?.role !== "Admin") {
+          return false;
+        }
+        return project.status !== "archived";
+      })
       .filter((project) => {
         const searchLower = searchQuery.toLowerCase();
         return (
@@ -439,7 +451,7 @@ function ProjectListComponent({
     if (JSON.stringify(filtered.map(p => p.id)) !== JSON.stringify(filteredProjects.map(p => p.id))) {
       setFilteredProjects(filtered);
     }
-  }, [searchQuery, projectOrder, isOrderLoaded, filteredProjects]);
+  }, [searchQuery, projectOrder, isOrderLoaded, filteredProjects, user?.role]);
 
   const handleDragEnd = useCallback((result: DropResult) => {
     const { destination, source } = result;
@@ -496,6 +508,12 @@ function ProjectListComponent({
 
   // Memoize all handler functions to prevent recreating them on re-renders
   const handleProjectSelect = useCallback((project: Project) => {
+    // Prevent non-admin users from selecting the protected project
+    if (project.id === "ZhYf84TEvi9YRWFjVX1W" && user?.role !== "Admin") {
+      showToast("You don't have permission to access this project", "error");
+      return;
+    }
+    
     onSelect(project);
 
     if (!isProjectTab) {
@@ -507,7 +525,7 @@ function ProjectListComponent({
         },
       });
     }
-  }, [onSelect, isProjectTab, navigate, location.pathname]);
+  }, [onSelect, isProjectTab, navigate, location.pathname, user?.role, showToast]);
 
   const handleStatusChange = useCallback((
     projectId: string,
