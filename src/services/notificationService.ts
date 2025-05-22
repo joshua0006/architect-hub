@@ -319,10 +319,14 @@ export const createFileUploadNotification = async (
   fileId: string,
   projectId: string,
   uploadDate: string = new Date().toISOString(),
-  targetUserIds: string[] = []
+  targetUserIds: string[] = [],
+  projectName: string = ''
 ): Promise<string[]> => {
   // Format the guest name for display in notification
   const formattedGuestName = guestName || 'Anonymous user';
+  
+  // Handle root folder name - replace _root with Project Root
+  const displayFolderName = folderName === '_root' ? (projectName || 'Project Root') : folderName;
   
   // Create the link to the document with proper context - remove projectId from path
   let link = `/documents`;
@@ -355,7 +359,7 @@ export const createFileUploadNotification = async (
     const notification = {
       iconType: 'file-upload', // This matches the icon type in NotificationContent.tsx
       type: 'success' as const, // Use 'success' type for a green indicator
-      message: `${formattedGuestName} uploaded "${fileName}" to ${folderName}`,
+      message: `${formattedGuestName} uploaded "${fileName}" to ${displayFolderName}`,
       link,
       read: false,
       userId, // Set the target user ID
@@ -366,7 +370,9 @@ export const createFileUploadNotification = async (
         folderName,
         fileId, // Explicitly include fileId in metadata for proper navigation
         guestName: formattedGuestName,
-        uploadDate
+        uploadDate,
+        projectId, // Include project ID for use with _root folders
+        projectName // Include project name if available
       }
     };
     
@@ -2058,10 +2064,14 @@ export const createAdminFileUploadNotification = async (
   fileId: string,
   projectId: string,
   uploadDate: string = new Date().toISOString(),
-  adminUserIds: string[] = []
+  adminUserIds: string[] = [],
+  projectName: string = ''
 ): Promise<string[]> => {
   // Format the uploader name for display in notification
   const formattedUploaderName = uploaderName || 'Unknown user';
+  
+  // Handle root folder name - replace _root with Project Root
+  const displayFolderName = folderName === '_root' ? (projectName || 'Project Root') : folderName;
   
   // Create the link to the document with proper context
   let link = `/documents`;
@@ -2094,7 +2104,7 @@ export const createAdminFileUploadNotification = async (
     const notification = {
       iconType: 'file-upload', // Same icon type as guest upload notifications
       type: 'success' as const, // Use 'success' type for a green indicator
-      message: `${formattedUploaderName} uploaded "${fileName}" to ${folderName}`,
+      message: `${formattedUploaderName} uploaded "${fileName}" to ${displayFolderName}`,
       link,
       read: false,
       userId, // Set the target user ID
@@ -2106,7 +2116,9 @@ export const createAdminFileUploadNotification = async (
         fileId,
         guestName: formattedUploaderName, // Reuse the same field for consistency
         uploadDate,
-        uploaderRole // Add the role of the uploader for context
+        uploaderRole, // Add the role of the uploader for context
+        projectId, // Include project ID for use with _root folders
+        projectName // Include project name if available
       }
     };
     

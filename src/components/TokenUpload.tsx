@@ -396,17 +396,35 @@ const TokenUpload: React.FC = () => {
             const staffUsers = projectUsers.filter(u => u.role === 'Staff' || u.role === 'Admin');
             const assignedUsers = projectUsers.filter(u => u.role !== 'Staff' && u.role !== 'Admin');
             
+            // If this is a root folder, get the project name
+            let folderName = token.metadata?.folderName || "Folder";
+            let projectName = "";
+            
+            if (folderName === '_root' && token.metadata?.projectId) {
+              try {
+                // Try to get the project name
+                const { projectService } = await import('../services/projectService');
+                const project = await projectService.getById(token.metadata.projectId);
+                if (project && project.name) {
+                  projectName = project.name;
+                }
+              } catch (projectError) {
+                console.warn('Error fetching project name (non-critical):', projectError);
+              }
+            }
+            
             if (documentResult && (staffUsers.length > 0 || assignedUsers.length > 0)) {
               await createFileUploadNotification(
                 file.name.length > 40 ? file.name.substring(0, 37) + '...' : file.name,
                 guestIdentifier.trim().length > 25 ? guestIdentifier.trim().substring(0, 22) + '...' : guestIdentifier.trim(),
                 fileType,
                 token.folderId,
-                token.metadata?.folderName || "Folder",
+                folderName,
                 documentResult.id,
                 token.metadata?.projectId || '',
                 new Date().toISOString(),
-                [...assignedUsers.map((u) => u.id), ...staffUsers.map((u) => u.id)]
+                [...assignedUsers.map((u) => u.id), ...staffUsers.map((u) => u.id)],
+                projectName
               );
               
               console.log(`Notifications sent to ${assignedUsers.length + staffUsers.length} users`);
@@ -421,7 +439,7 @@ const TokenUpload: React.FC = () => {
                   guestIdentifier.trim().length > 25 ? guestIdentifier.trim().substring(0, 22) + '...' : guestIdentifier.trim(),
                   fileType,
                   token.folderId,
-                  token.metadata?.folderName || "Folder",
+                  folderName,
                   documentResult.id,
                   token.metadata?.projectId || '',
                   new Date().toISOString(),

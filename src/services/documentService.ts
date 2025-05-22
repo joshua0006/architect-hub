@@ -273,40 +273,55 @@ export const documentService = {
           }
         }
 
-        // If file was uploaded by a non-admin user, notify admin users
-        if (uploader && uploader.role !== 'Admin') {
-          try {
-            // Get the folder name
-            let folderName = "Project Root";
-            if (folderId) {
-              const folder = await folderService.getById(folderId);
-              if (folder) {
-                folderName = folder.name;
+        // Always notify admin users about file uploads, regardless of uploader role
+        try {
+          // Get the folder name
+          let folderName = "Project Root";
+          let projectName = "";
+          
+          if (folderId) {
+            const folder = await folderService.getById(folderId);
+            if (folder) {
+              folderName = folder.name;
+              
+              // If this is a root folder, try to get the project name
+              if (folder.name === '_root' && folder.projectId) {
+                try {
+                  // Import projectService dynamically to avoid circular dependencies
+                  const { projectService } = await import('./projectService');
+                  const project = await projectService.getById(folder.projectId);
+                  if (project && project.name) {
+                    projectName = project.name;
+                  }
+                } catch (projectError) {
+                  console.warn('Error fetching project name (non-critical):', projectError);
+                }
               }
             }
-
-            // Get all admin users
-            const adminUsers = await userService.getUsersByRole('Admin');
-            if (adminUsers && adminUsers.length > 0) {
-              // Create notifications for all admin users
-              await createAdminFileUploadNotification(
-                document.name,
-                uploader.displayName,
-                uploader.role,
-                file.type,
-                folderId || '',
-                folderName,
-                docRef.id,
-                document.projectId,
-                new Date().toISOString(),
-                adminUsers.map(user => user.id)
-              );
-              console.log(`Admin notifications sent for file upload by ${uploader.displayName}`);
-            }
-          } catch (notificationError) {
-            console.warn('Error sending admin notifications (non-critical):', notificationError);
-            // Continue even if notifications fail
           }
+
+          // Get all admin users
+          const adminUsers = await userService.getUsersByRole('Admin');
+          if (adminUsers && adminUsers.length > 0) {
+            // Create notifications for all admin users
+            await createAdminFileUploadNotification(
+              document.name,
+              uploader?.displayName || 'Unknown user',
+              uploader?.role || 'Unknown',
+              file.type,
+              folderId || '',
+              folderName,
+              docRef.id,
+              document.projectId,
+              new Date().toISOString(),
+              adminUsers.map(user => user.id),
+              projectName
+            );
+            console.log(`Admin notifications sent for file upload by ${uploader?.displayName || 'Unknown user'}`);
+          }
+        } catch (notificationError) {
+          console.warn('Error sending admin notifications (non-critical):', notificationError);
+          // Continue even if notifications fail
         }
 
         return {
@@ -393,7 +408,12 @@ export const documentService = {
   },
 
   // Update document file with version tracking
-  async updateFile(folderId: string, documentId: string, file: File): Promise<string> {
+  async updateFile(
+    folderId: string, 
+    documentId: string, 
+    file: File,
+    uploader?: { id: string, displayName: string, role: string } // Add uploader info
+  ): Promise<string> {
     try {
       const documentRef = doc(db, 'documents', documentId);
       const docSnap = await getDoc(documentRef);
@@ -465,6 +485,40 @@ export const documentService = {
         } catch (error) {
           console.warn('Old file not found:', error);
         }
+      }
+
+      // Notify admin users about file updates
+      try {
+        // Get the folder name
+        let folderName = "Project Root";
+        if (folderId) {
+          const folder = await folderService.getById(folderId);
+          if (folder) {
+            folderName = folder.name;
+          }
+        }
+
+        // Get all admin users
+        const adminUsers = await userService.getUsersByRole('Admin');
+        if (adminUsers && adminUsers.length > 0) {
+          // Create notifications for all admin users
+          await createAdminFileUploadNotification(
+            document.name,
+            uploader?.displayName || 'Unknown user',
+            uploader?.role || 'Unknown',
+            file.type,
+            folderId || '',
+            folderName,
+            documentId,
+            document.projectId || '',
+            new Date().toISOString(),
+            adminUsers.map(user => user.id)
+          );
+          console.log(`Admin notifications sent for file update by ${uploader?.displayName || 'Unknown user'}`);
+        }
+      } catch (notificationError) {
+        console.warn('Error sending admin notifications for file update (non-critical):', notificationError);
+        // Continue even if notification fails
       }
 
       return url;

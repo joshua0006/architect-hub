@@ -577,15 +577,15 @@ export default function DocumentActions({
           <button
             onClick={handleBulkRename}
             className="px-3 py-2 flex items-center space-x-2 bg-slate-300 text-gray-700 rounded-md hover:bg-gray-200 transition-colors"
-            title="Rename multiple folders"
+            title="Multiple Rename"
             disabled={!hasFolderWritePermission()}
           >
             <FileText className="w-5 h-5" />
-            <span className="hidden sm:inline">Rename Folders</span>
+            <span className="hidden sm:inline">Bulk Rename</span>
           </button>
           <div className="absolute top-full mb-2 left-1/2 transform -translate-x-1/2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap">
             {hasFolderWritePermission() 
-              ? "Select multiple folders to rename (files cannot be selected)" 
+              ? "Select multiple items to rename" 
               : "You don't have permission!"}
           </div>
         </div>

@@ -158,7 +158,11 @@ const NotificationContent: React.FC<NotificationContentProps> = React.memo(({
             {notification.metadata.folderName && (
               <div className="flex items-center mt-1">
                 <Folder className="w-3 h-3 mr-1 flex-shrink-0" />
-                <span className="truncate max-w-[170px] overflow-hidden" title={notification.metadata.folderName}>{notification.metadata.folderName}</span>
+                <span className="truncate max-w-[170px] overflow-hidden" title={notification.metadata.folderName === '_root' && notification.metadata.projectName ? notification.metadata.projectName : notification.metadata.folderName}>
+                  {notification.metadata.folderName === '_root' 
+                    ? (notification.metadata.projectName || 'Project Root') 
+                    : notification.metadata.folderName}
+                </span>
               </div>
             )}
             {notification.metadata.guestName && !isFileUploadNotification && (
