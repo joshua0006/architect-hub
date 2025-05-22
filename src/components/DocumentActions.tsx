@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Plus, Upload, FolderPlus, X, Folder, File, MoreVertical, Share2, Copy, Move, Download } from "lucide-react";
+import { Plus, Upload, FolderPlus, X, Folder, File, MoreVertical, Share2, Copy, Move, Download, FileText } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Document, Folder as FolderType } from "../types";
 import { useToast } from "../contexts/ToastContext";
@@ -30,6 +30,7 @@ interface DocumentActionsProps {
     destinationFolderId: string,
     action: 'copy' | 'move'
   ) => Promise<void>;
+  onBulkRename?: (items: Array<{id: string, name: string, type: 'document' | 'folder'}>, pattern: string) => Promise<void>;
   allowRootUploads?: boolean; // Allow upload directly to root with no folder ID
 }
 
@@ -44,6 +45,7 @@ export default function DocumentActions({
   onRefresh,
   onShare,
   onCopyOrMoveFile,
+  onBulkRename,
   allowRootUploads = false,
 }: DocumentActionsProps) {
   const [showDropdown, setShowDropdown] = useState(false);
@@ -62,6 +64,12 @@ export default function DocumentActions({
   const [isProcessingFileOperation, setIsProcessingFileOperation] = useState(false);
   const [selectedDestinationFolderId, setSelectedDestinationFolderId] = useState<string>("");
   const [showFileSelectionMode, setShowFileSelectionMode] = useState(false);
+  const [showBulkRenameModal, setShowBulkRenameModal] = useState(false);
+  const [bulkRenamePattern, setBulkRenamePattern] = useState("");
+  const [selectedItemsForRename, setSelectedItemsForRename] = useState<Array<{id: string, name: string, type: 'document' | 'folder'}>>([]);
+  const [individualRenames, setIndividualRenames] = useState<Record<string, string>>({});
+  const [isProcessingRename, setIsProcessingRename] = useState(false);
+  const [useBulkPattern, setUseBulkPattern] = useState(true);
   const dragCounter = useRef(0);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -104,6 +112,41 @@ export default function DocumentActions({
     
     return () => {
       document.removeEventListener("file-selected-for-operation", handleFileSelected as any);
+    };
+  }, []);
+
+  // Add event listener for when items are selected for rename
+  useEffect(() => {
+    function handleItemsSelectedForRename(event: CustomEvent) {
+      console.log("DocumentActions: Received items-selected-for-rename event");
+      
+      const { items } = (event as CustomEvent<{
+        items: Array<{id: string, name: string, type: 'document' | 'folder'}>;
+      }>).detail;
+      
+      console.log("DocumentActions: Items received for rename:", items.length);
+      
+      setSelectedItemsForRename(items);
+      
+      // Initialize individual rename values with current names
+      const initialRenames: Record<string, string> = {};
+      items.forEach(item => {
+        initialRenames[item.id] = item.name;
+      });
+      setIndividualRenames(initialRenames);
+      
+      console.log("DocumentActions: Setting showBulkRenameModal to true");
+      setShowBulkRenameModal(true);
+    }
+
+    // Cast to any to handle custom event with typescript
+    document.addEventListener("items-selected-for-rename", handleItemsSelectedForRename as any);
+    
+    console.log("DocumentActions: Added event listener for items-selected-for-rename");
+    
+    return () => {
+      document.removeEventListener("items-selected-for-rename", handleItemsSelectedForRename as any);
+      console.log("DocumentActions: Removed event listener for items-selected-for-rename");
     };
   }, []);
 
@@ -376,6 +419,84 @@ export default function DocumentActions({
     setShowDropdown(false);
   };
 
+  // Handle bulk rename button click
+  const handleBulkRename = () => {
+    // Trigger an event to tell DocumentList to enter selection mode for rename
+    const selectFilesEvent = new CustomEvent('select-files-for-rename', {
+      bubbles: true,
+      detail: { mode: 'rename' }
+    });
+    document.dispatchEvent(selectFilesEvent);
+    setShowDropdown(false);
+  };
+
+  // Execute the bulk rename operation
+  const executeBulkRename = async () => {
+    if (!onBulkRename || selectedItemsForRename.length === 0) return;
+    
+    // When using bulk pattern, validate that it's not empty
+    if (useBulkPattern && !bulkRenamePattern.trim()) return;
+    
+    try {
+      setIsProcessingRename(true);
+
+      if (useBulkPattern) {
+        // Use pattern-based renaming
+        await onBulkRename(selectedItemsForRename, bulkRenamePattern);
+      } else {
+        // Use individual renaming
+        // Create a modified array with updated names from individualRenames
+        const renamedItems = selectedItemsForRename.map(item => {
+          const newName = individualRenames[item.id];
+          // Skip items that weren't changed
+          if (newName === item.name) {
+            return null;
+          }
+          return {
+            ...item,
+            newName: newName
+          };
+        }).filter(Boolean);
+        
+        // Call the API with a special pattern that indicates individual renaming
+        if (renamedItems.length > 0) {
+          await onBulkRename(renamedItems as any, "__INDIVIDUAL__");
+        } else {
+          showToast("No changes were made", "success");
+          setIsProcessingRename(false);
+          setShowBulkRenameModal(false);
+          return;
+        }
+      }
+      
+      showToast(`${selectedItemsForRename.length} items renamed successfully`, "success");
+      
+      if (onRefresh) {
+        await onRefresh();
+      }
+      
+      // Dispatch custom event for rename success
+      const renameSuccessEvent = new CustomEvent('bulk-rename-success', {
+        bubbles: true,
+        detail: {
+          timestamp: Date.now()
+        }
+      });
+      document.dispatchEvent(renameSuccessEvent);
+      
+    } catch (error) {
+      console.error(`Error renaming items:`, error);
+      showToast(`Failed to rename items: ${error instanceof Error ? error.message : 'Unknown error'}`, "error");
+    } finally {
+      setIsProcessingRename(false);
+      setShowBulkRenameModal(false);
+      setSelectedItemsForRename([]);
+      setBulkRenamePattern("");
+      setIndividualRenames({});
+      setUseBulkPattern(true);
+    }
+  };
+
   return (
     <div 
       className="relative" 
@@ -444,13 +565,30 @@ export default function DocumentActions({
             title="Download multiple files"
           >
             <Download className="w-5 h-5" />
-            <span className="hidden sm:inline">Bulk Download</span>
+            <span className="hidden sm:inline">Download Files</span>
           </button>
           <div className="absolute top-full mb-2 left-1/2 transform -translate-x-1/2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap">
-            Download multiple files as ZIP
+            Select multiple files to download as ZIP (folders cannot be downloaded)
           </div>
         </div>
 
+        {/* Bulk Rename Button */}
+        <div className="group relative">
+          <button
+            onClick={handleBulkRename}
+            className="px-3 py-2 flex items-center space-x-2 bg-slate-300 text-gray-700 rounded-md hover:bg-gray-200 transition-colors"
+            title="Rename multiple folders"
+            disabled={!hasFolderWritePermission()}
+          >
+            <FileText className="w-5 h-5" />
+            <span className="hidden sm:inline">Rename Folders</span>
+          </button>
+          <div className="absolute top-full mb-2 left-1/2 transform -translate-x-1/2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap">
+            {hasFolderWritePermission() 
+              ? "Select multiple folders to rename (files cannot be selected)" 
+              : "You don't have permission!"}
+          </div>
+        </div>
        
       </div>
 
@@ -531,7 +669,18 @@ export default function DocumentActions({
                 className="flex items-center space-x-3 px-4 py-2 text-sm w-full text-left hover:bg-gray-100 text-gray-700"
               >
                 <Download className="w-5 h-5 text-gray-500" />
-                <span>Bulk Download</span>
+                <span>Download Files</span>
+                <span className="ml-auto text-xs text-gray-400">(Files only)</span>
+              </button>
+              
+              {/* Bulk Rename option */}
+              <button
+                onClick={handleBulkRename}
+                className="flex items-center space-x-3 px-4 py-2 text-sm w-full text-left hover:bg-gray-100 text-gray-700"
+              >
+                <FileText className="w-5 h-5 text-gray-500" />
+                <span>Rename Folders</span>
+                <span className="ml-auto text-xs text-gray-400">(Folders only)</span>
               </button>
               
               {/* Copy Files option */}
@@ -737,6 +886,176 @@ export default function DocumentActions({
                   ) : (
                     <span>{fileOperation === 'copy' ? 'Copy' : 'Move'}</span>
                   )}
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Bulk Rename Modal */}
+      <AnimatePresence>
+        {showBulkRenameModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4"
+          >
+            <div className="bg-white rounded-lg shadow-lg p-6 w-full max-w-2xl">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-semibold">Bulk Rename</h2>
+                <button
+                  onClick={() => setShowBulkRenameModal(false)}
+                  className="text-gray-500 hover:text-gray-700 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              
+              <p className="text-gray-600 mb-4">
+                Selected {selectedItemsForRename.length} item{selectedItemsForRename.length !== 1 ? 's' : ''} for renaming.
+              </p>
+
+              <div className="flex items-center space-x-4 mb-4">
+                <button
+                  onClick={() => setUseBulkPattern(true)}
+                  className={`px-3 py-2 rounded-md transition-colors ${
+                    useBulkPattern 
+                      ? 'bg-primary-100 text-primary-700 border border-primary-300' 
+                      : 'bg-gray-100 text-gray-700 border border-gray-200 hover:bg-gray-200'
+                  }`}
+                >
+                  Use Pattern
+                </button>
+                <button
+                  onClick={() => setUseBulkPattern(false)}
+                  className={`px-3 py-2 rounded-md transition-colors ${
+                    !useBulkPattern 
+                      ? 'bg-primary-100 text-primary-700 border border-primary-300' 
+                      : 'bg-gray-100 text-gray-700 border border-gray-200 hover:bg-gray-200'
+                  }`}
+                >
+                  Edit Individually
+                </button>
+              </div>
+              
+              {useBulkPattern ? (
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Rename Pattern</label>
+                  <input
+                    type="text"
+                    value={bulkRenamePattern}
+                    onChange={(e) => setBulkRenamePattern(e.target.value)}
+                    placeholder="e.g. Project_{index}"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  />
+                  <p className="mt-2 text-sm text-gray-500">
+                    Use {'{name}'} for original name, {'{index}'} for numbering, {'{ext}'} for file extension
+                  </p>
+                  
+                  <div className="mt-4 max-h-60 overflow-y-auto border border-gray-200 rounded-md">
+                    <div className="p-3 bg-gray-50 border-b">
+                      <h3 className="text-sm font-medium">Preview</h3>
+                    </div>
+                    <ul className="divide-y divide-gray-200 text-sm">
+                      {selectedItemsForRename.map((item, index) => {
+                        // Get file extension if it's a document
+                        const ext = item.name.includes('.') ? item.name.split('.').pop() : '';
+                        
+                        // Create a preview of the new name
+                        let newName = bulkRenamePattern
+                          .replace(/{name}/g, item.name.replace(`.${ext}`, ''))
+                          .replace(/{index}/g, (index + 1).toString().padStart(2, '0'))
+                          .replace(/{ext}/g, ext || '');
+                        
+                        // Add extension back if it was a document with extension
+                        if (item.type === 'document' && ext && !newName.endsWith(`.${ext}`)) {
+                          newName += `.${ext}`;
+                        }
+                        
+                        return (
+                          <li key={item.id} className="px-3 py-2 flex justify-between">
+                            <span className="truncate text-gray-600">{item.name}</span>
+                            <span className="truncate font-medium">→ {newName || '(specify pattern)'}</span>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
+                </div>
+              ) : (
+                <div className="mb-4">
+                  <div className="mb-2">
+                    <h3 className="text-sm font-medium text-gray-700">Edit each file/folder name individually:</h3>
+                  </div>
+                  
+                  <div className="max-h-72 overflow-y-auto border border-gray-200 rounded-md">
+                    <table className="min-w-full divide-y divide-gray-200">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" style={{width: '10%'}}>Type</th>
+                          <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" style={{width: '45%'}}>New Name</th>
+                          <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" style={{width: '45%'}}>Current Name</th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-200">
+                        {selectedItemsForRename.map((item) => (
+                          <tr key={item.id}>
+                            <td className="px-3 py-2 whitespace-nowrap">
+                              {item.type === 'folder' ? (
+                                <Folder className="w-4 h-4 text-gray-400" />
+                              ) : (
+                                <File className="w-4 h-4 text-gray-400" />
+                              )}
+                            </td>
+                            <td className="px-3 py-2 whitespace-nowrap">
+                              <input 
+                                type="text"
+                                value={individualRenames[item.id] || ''}
+                                onChange={(e) => {
+                                  setIndividualRenames({
+                                    ...individualRenames,
+                                    [item.id]: e.target.value
+                                  });
+                                }}
+                                className="w-full px-2 py-1 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-primary-500"
+                              />
+                            </td>
+                                                         <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-600 truncate">
+                               {item.name.length > 20 ? item.name.substring(0, 20) + '...' : item.name}
+                             </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+              
+              <div className="flex justify-end space-x-2">
+                <button
+                  onClick={() => setShowBulkRenameModal(false)}
+                  className="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={executeBulkRename}
+                  disabled={
+                    isProcessingRename || 
+                    (useBulkPattern && !bulkRenamePattern.trim()) || 
+                    selectedItemsForRename.length === 0
+                  }
+                  className={`px-4 py-2 text-white bg-primary-600 rounded-md hover:bg-primary-700 transition-colors ${
+                    isProcessingRename || 
+                    (useBulkPattern && !bulkRenamePattern.trim()) || 
+                    selectedItemsForRename.length === 0
+                      ? 'opacity-70 cursor-not-allowed' 
+                      : ''
+                  }`}
+                >
+                  {isProcessingRename ? 'Processing...' : 'Rename'}
                 </button>
               </div>
             </div>
