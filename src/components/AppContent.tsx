@@ -46,6 +46,8 @@ const DocumentsPage: React.FC<{
   deleteDocument: any;
   updateDocumentPermission: (id: string, permission: 'STAFF_ONLY' | 'CONTRACTORS_WRITE' | 'CLIENTS_READ' | 'ALL') => Promise<void>;
   updateFolderPermission: (id: string, permission: 'STAFF_ONLY' | 'CONTRACTORS_WRITE' | 'CLIENTS_READ' | 'ALL') => Promise<void>;
+  onCopyOrMoveFile?: (sourceDocumentId: string, destinationFolderId: string, action: 'copy' | 'move') => Promise<void>;
+  onBulkRename?: (items: Array<{id: string, name: string, type: 'document' | 'folder'}>, pattern: string) => Promise<void>;
 }> = ({ 
   projects, 
   selectedProject, 
@@ -63,7 +65,9 @@ const DocumentsPage: React.FC<{
   updateDocument,
   deleteDocument,
   updateDocumentPermission,
-  updateFolderPermission
+  updateFolderPermission,
+  onCopyOrMoveFile,
+  onBulkRename
 }) => {
   // Hooks for URL parameters
   const params = useParams();
@@ -183,6 +187,108 @@ const DocumentsPage: React.FC<{
     }
   };
   
+  // Function to handle copy or move operations for files
+  const handleCopyOrMoveFile = async (sourceDocumentId: string, destinationFolderId: string, action: 'copy' | 'move'): Promise<void> => {
+    try {
+      if (action === 'copy') {
+        // Use document service to copy the file
+        await documentService.copyDocument(sourceDocumentId, destinationFolderId);
+        showToast("File copied successfully", "success");
+      } else {
+        // Use document service to move the file
+        await documentService.moveDocument(sourceDocumentId, destinationFolderId);
+        showToast("File moved successfully", "success");
+      }
+      
+      // Refresh documents after the operation
+      if (refreshDocuments) {
+        await refreshDocuments();
+      }
+    } catch (error) {
+      console.error(`Error ${action}ing file:`, error);
+      showToast(`Failed to ${action} file: ${error instanceof Error ? error.message : 'Unknown error'}`, "error");
+      throw error;
+    }
+  };
+  
+  // Add bulk rename functionality
+  const bulkRenameItems = async (items: Array<{id: string, name: string, type: 'document' | 'folder', newName?: string}>, pattern: string): Promise<void> => {
+    try {
+      const promises: Promise<void>[] = [];
+      
+      // Check if we're using individual rename mode
+      if (pattern === "__INDIVIDUAL__") {
+        // For individual rename, each item already has a newName property
+        items.forEach(item => {
+          if (item.newName && item.newName !== item.name) {
+            if (item.type === 'document') {
+              promises.push(updateDocument(item.id, { name: item.newName }));
+            } else {
+              promises.push(updateFolder(item.id, item.newName));
+            }
+          }
+        });
+      } else {
+        // Original pattern-based renaming
+        const renamedItems: Record<string, string> = {};
+        const duplicates: string[] = [];
+        
+        // First pass: generate new names and check for duplicates
+        items.forEach((item, index) => {
+          // Get file extension if it's a document
+          const ext = item.name.includes('.') ? item.name.split('.').pop() : '';
+          const nameWithoutExt = item.name.replace(`.${ext}`, '');
+          
+          // Create a new name based on the pattern
+          let newName = pattern
+            .replace(/{name}/g, nameWithoutExt)
+            .replace(/{index}/g, (index + 1).toString().padStart(2, '0'))
+            .replace(/{ext}/g, ext || '');
+          
+          // Add extension back if it was a document with extension
+          if (item.type === 'document' && ext && !newName.endsWith(`.${ext}`)) {
+            newName += `.${ext}`;
+          }
+          
+          // Check for duplicates
+          if (renamedItems[newName]) {
+            duplicates.push(item.name);
+          }
+          
+          renamedItems[item.id] = newName;
+        });
+        
+        // If duplicates found, show error and abort
+        if (duplicates.length > 0) {
+          showToast(`Rename pattern would create duplicate names. Please use a pattern with unique values like {name}_{index}`, "error");
+          return;
+        }
+        
+        // Second pass: actually rename the items
+        items.forEach(item => {
+          const newName = renamedItems[item.id];
+          if (newName && newName !== item.name) {
+            if (item.type === 'document') {
+              promises.push(updateDocument(item.id, { name: newName }));
+            } else {
+              promises.push(updateFolder(item.id, newName));
+            }
+          }
+        });
+      }
+      
+      // Wait for all rename operations to complete
+      await Promise.all(promises);
+      
+      showToast(`Successfully renamed ${promises.length} items`, "success");
+      
+    } catch (error) {
+      console.error('Error during bulk rename:', error);
+      showToast(`Error renaming items: ${error instanceof Error ? error.message : 'Unknown error'}`, "error");
+      throw error;
+    }
+  };
+
   return (
     <Layout
       sidebar={
@@ -208,6 +314,7 @@ const DocumentsPage: React.FC<{
           onPreview={handleFileSelect}
           onCreateFolder={createFolder}
           onCreateDocument={createDocument}
+          onCreateMultipleDocuments={(files, folderId) => createDocument(files[0].name, 'other', files[0], folderId)}
           onUpdateFolder={updateFolder}
           onDeleteFolder={deleteFolder}
           onUpdateDocument={updateDocument}
@@ -217,6 +324,14 @@ const DocumentsPage: React.FC<{
           onUpdateDocumentPermission={updateDocumentPermission}
           onUpdateFolderPermission={updateFolderPermission}
           onFullscreenChange={setIsFullscreen}
+          onBulkRename={(items, pattern) => bulkRenameItems(items, pattern)}
+          onCopyOrMoveFile={(sourceDocumentId, destinationFolderId, action) => {
+            if (action === 'copy') {
+              return documentService.copyDocument(sourceDocumentId, destinationFolderId);
+            } else {
+              return documentService.moveDocument(sourceDocumentId, destinationFolderId);
+            }
+          }}
         />
       ) : (
         <div className="h-full flex items-center justify-center text-gray-500">
@@ -296,6 +411,7 @@ export default function AppContent() {
   const [searchParams] = useSearchParams();
   const params = useParams();
   const { user } = useAuth();
+  const { showToast } = useToast();
   
   // Add state for tracking notification navigation
   const [pendingNotificationNavigation, setPendingNotificationNavigation] = useState<any>(null);
@@ -308,7 +424,9 @@ export default function AppContent() {
     updateDocument,
     updateDocumentFile,
     deleteDocument,
-    setCurrentFolderId: setDocumentManagerFolderId
+    setCurrentFolderId: setDocumentManagerFolderId,
+    copyDocument,
+    moveDocument
   } = useDocumentManager(selectedProject?.id || '');
 
   const {
@@ -1070,6 +1188,14 @@ export default function AppContent() {
               deleteDocument={deleteDocument}
               updateDocumentPermission={updateDocumentPermission}
               updateFolderPermission={updateFolderPermission}
+              onCopyOrMoveFile={(sourceDocumentId, destinationFolderId, action) => {
+                if (action === 'copy') {
+                  return documentService.copyDocument(sourceDocumentId, destinationFolderId);
+                } else {
+                  return documentService.moveDocument(sourceDocumentId, destinationFolderId);
+                }
+              }}
+              onBulkRename={(items, pattern) => bulkRenameItems(items, pattern)}
             />
           }
         />
@@ -1095,6 +1221,14 @@ export default function AppContent() {
               deleteDocument={deleteDocument}
               updateDocumentPermission={updateDocumentPermission}
               updateFolderPermission={updateFolderPermission}
+              onCopyOrMoveFile={(sourceDocumentId, destinationFolderId, action) => {
+                if (action === 'copy') {
+                  return documentService.copyDocument(sourceDocumentId, destinationFolderId);
+                } else {
+                  return documentService.moveDocument(sourceDocumentId, destinationFolderId);
+                }
+              }}
+              onBulkRename={(items, pattern) => bulkRenameItems(items, pattern)}
             />
           }
         />
@@ -1120,6 +1254,14 @@ export default function AppContent() {
               deleteDocument={deleteDocument}
               updateDocumentPermission={updateDocumentPermission}
               updateFolderPermission={updateFolderPermission}
+              onCopyOrMoveFile={(sourceDocumentId, destinationFolderId, action) => {
+                if (action === 'copy') {
+                  return documentService.copyDocument(sourceDocumentId, destinationFolderId);
+                } else {
+                  return documentService.moveDocument(sourceDocumentId, destinationFolderId);
+                }
+              }}
+              onBulkRename={(items, pattern) => bulkRenameItems(items, pattern)}
             />
           }
         />
@@ -1145,6 +1287,14 @@ export default function AppContent() {
               deleteDocument={deleteDocument}
               updateDocumentPermission={updateDocumentPermission}
               updateFolderPermission={updateFolderPermission}
+              onCopyOrMoveFile={(sourceDocumentId, destinationFolderId, action) => {
+                if (action === 'copy') {
+                  return documentService.copyDocument(sourceDocumentId, destinationFolderId);
+                } else {
+                  return documentService.moveDocument(sourceDocumentId, destinationFolderId);
+                }
+              }}
+              onBulkRename={(items, pattern) => bulkRenameItems(items, pattern)}
             />
           }
         />
@@ -1277,6 +1427,14 @@ export default function AppContent() {
               deleteDocument={deleteDocument}
               updateDocumentPermission={updateDocumentPermission}
               updateFolderPermission={updateFolderPermission}
+              onCopyOrMoveFile={(sourceDocumentId, destinationFolderId, action) => {
+                if (action === 'copy') {
+                  return documentService.copyDocument(sourceDocumentId, destinationFolderId);
+                } else {
+                  return documentService.moveDocument(sourceDocumentId, destinationFolderId);
+                }
+              }}
+              onBulkRename={(items, pattern) => bulkRenameItems(items, pattern)}
             />
           }
         />
@@ -1302,6 +1460,14 @@ export default function AppContent() {
               deleteDocument={deleteDocument}
               updateDocumentPermission={updateDocumentPermission}
               updateFolderPermission={updateFolderPermission}
+              onCopyOrMoveFile={(sourceDocumentId, destinationFolderId, action) => {
+                if (action === 'copy') {
+                  return documentService.copyDocument(sourceDocumentId, destinationFolderId);
+                } else {
+                  return documentService.moveDocument(sourceDocumentId, destinationFolderId);
+                }
+              }}
+              onBulkRename={(items, pattern) => bulkRenameItems(items, pattern)}
             />
           }
         />
@@ -1327,6 +1493,14 @@ export default function AppContent() {
               deleteDocument={deleteDocument}
               updateDocumentPermission={updateDocumentPermission}
               updateFolderPermission={updateFolderPermission}
+              onCopyOrMoveFile={(sourceDocumentId, destinationFolderId, action) => {
+                if (action === 'copy') {
+                  return documentService.copyDocument(sourceDocumentId, destinationFolderId);
+                } else {
+                  return documentService.moveDocument(sourceDocumentId, destinationFolderId);
+                }
+              }}
+              onBulkRename={(items, pattern) => bulkRenameItems(items, pattern)}
             />
           }
         />
@@ -1352,6 +1526,14 @@ export default function AppContent() {
               deleteDocument={deleteDocument}
               updateDocumentPermission={updateDocumentPermission}
               updateFolderPermission={updateFolderPermission}
+              onCopyOrMoveFile={(sourceDocumentId, destinationFolderId, action) => {
+                if (action === 'copy') {
+                  return documentService.copyDocument(sourceDocumentId, destinationFolderId);
+                } else {
+                  return documentService.moveDocument(sourceDocumentId, destinationFolderId);
+                }
+              }}
+              onBulkRename={(items, pattern) => bulkRenameItems(items, pattern)}
             />
           }
         />

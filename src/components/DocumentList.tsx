@@ -95,6 +95,8 @@ interface DocumentListProps {
   onUpdateDocumentPermission?: (id: string, permission: 'STAFF_ONLY' | 'ALL' | 'CONTRACTORS_WRITE' | 'CLIENTS_READ') => Promise<void>;
   onUpdateFolderPermission?: (id: string, permission: 'STAFF_ONLY' | 'ALL' | 'CONTRACTORS_WRITE' | 'CLIENTS_READ') => Promise<void>;
   onCopyOrMoveFolder?: (source_folder: string, destination_folder: string, action: 'move' | 'copy') => Promise<void>;
+  onCopyOrMoveFile?: (sourceDocumentId: string, destinationFolderId: string, action: 'copy' | 'move') => Promise<void>;
+  onBulkRename?: (items: Array<{id: string, name: string, type: 'document' | 'folder'}>, pattern: string) => Promise<void>;
   isSharedView?: boolean;
   sharedDocuments?: Document[];
   sharedFolders?: Folder[];
@@ -135,6 +137,8 @@ export default function DocumentList({
   onUpdateDocumentPermission,
   onUpdateFolderPermission,
   onCopyOrMoveFolder,
+  onCopyOrMoveFile,
+  onBulkRename,
   isSharedView,
   sharedDocuments,
   sharedFolders,
@@ -3756,7 +3760,7 @@ export default function DocumentList({
   // Add state for file selection mode
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
-  const [selectionMode, setSelectionMode] = useState<'download' | 'copy' | 'move' | null>(null);
+  const [selectionMode, setSelectionMode] = useState<'download' | 'copy' | 'move' | 'rename' | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [movingFiles, setMovingFiles] = useState(false);
@@ -3769,18 +3773,28 @@ export default function DocumentList({
   const [draggedFiles, setDraggedFiles] = useState<string[]>([]);
   const [moveInProgress, setMoveInProgress] = useState(false);
 
-  // Toggle file selection - select or deselect a file
-  const toggleFileSelection = (fileId: string, event?: React.MouseEvent) => {
+  // Toggle item selection - select or deselect a file or folder
+  const toggleFileSelection = (itemId: string, event?: React.MouseEvent) => {
     if (event) {
       event.stopPropagation();
     }
     
+    // Prevent folder selection in download mode
+    if (selectionMode === 'download') {
+      // Check if the itemId belongs to a folder
+      const isFolder = folders.some(folder => folder.id === itemId);
+      if (isFolder) {
+        showToast("Folders cannot be selected for download, only files");
+        return;
+      }
+    }
+    
     setSelectedFiles(prev => {
       const newSelection = new Set(prev);
-      if (newSelection.has(fileId)) {
-        newSelection.delete(fileId);
+      if (newSelection.has(itemId)) {
+        newSelection.delete(itemId);
       } else {
-        newSelection.add(fileId);
+        newSelection.add(itemId);
       }
       
       // If selection is empty, exit selection mode
@@ -3794,17 +3808,31 @@ export default function DocumentList({
     });
   };
   
-  // Select all files in the current view
+  // Select all files and folders in the current view
   const selectAllFiles = () => {
     const newSelection = new Set<string>();
     
     // Add all visible document IDs to selection
-    const { filteredDocs } = filteredAndSortedItems();
+    const { filteredDocs, filteredFolders } = filteredAndSortedItems();
+    
+    // Add documents
     filteredDocs.forEach(doc => {
       if (doc.id) {
         newSelection.add(doc.id);
       }
     });
+    
+    // Add folders only if not in download mode
+    if (selectionMode !== 'download') {
+      filteredFolders.forEach(folder => {
+        if (folder.id) {
+          newSelection.add(folder.id);
+        }
+      });
+    } else if (filteredFolders.length > 0) {
+      // Show a message that folders can't be selected in download mode
+      showToast("Selecting all files. Folders can't be included in downloads.");
+    }
     
     setSelectedFiles(newSelection);
     if (newSelection.size > 0) {
@@ -3832,6 +3860,7 @@ export default function DocumentList({
     }
     
     try {
+      setIsDownloading(true);
       const zip = new JSZip();
       const selectedDocs = currentDocs.filter(doc => selectedFiles.has(doc.id));
       
@@ -3855,8 +3884,60 @@ export default function DocumentList({
           // Get the blob data
           const blob = await response.blob();
           
-          // Add file to zip
-          zip.file(doc.name, blob);
+          // Check for content-type from the response
+          const responseContentType = response.headers.get('content-type');
+          
+          // Ensure filename has correct extension
+          let fileName = doc.name;
+          
+          // Get file extension from metadata, content-type, or document type
+          let fileExtension = '';
+          
+          // First check metadata original filename
+          if (doc.metadata?.originalFilename && doc.metadata.originalFilename.includes('.')) {
+            fileExtension = doc.metadata.originalFilename.split('.').pop() || '';
+          } 
+          // Then try to get from response content type or metadata content type
+          else if (responseContentType || doc.metadata?.contentType) {
+            const contentType = (responseContentType || doc.metadata?.contentType || '').toLowerCase();
+            if (contentType.includes('pdf')) fileExtension = 'pdf';
+            else if (contentType.includes('dwg')) fileExtension = 'dwg';
+            else if (contentType.includes('jpeg') || contentType.includes('jpg')) fileExtension = 'jpg';
+            else if (contentType.includes('png')) fileExtension = 'png';
+            else if (contentType.includes('gif')) fileExtension = 'gif';
+            else if (contentType.includes('tiff')) fileExtension = 'tiff';
+            else if (contentType.includes('bmp')) fileExtension = 'bmp';
+            else if (contentType.includes('svg')) fileExtension = 'svg';
+            else if (contentType.includes('webp')) fileExtension = 'webp';
+            else if (contentType.includes('octet-stream')) {
+              // For binary streams, try to guess from the URL
+              const urlPath = new URL(doc.url).pathname.toLowerCase();
+              if (urlPath.includes('.pdf')) fileExtension = 'pdf';
+              else if (urlPath.includes('.dwg')) fileExtension = 'dwg';
+              else if (urlPath.includes('.jpg') || urlPath.includes('.jpeg')) fileExtension = 'jpg';
+              else if (urlPath.includes('.png')) fileExtension = 'png';
+              else if (urlPath.includes('.gif')) fileExtension = 'gif';
+              else fileExtension = 'bin';
+            }
+          } 
+          // Finally fallback to document type
+          if (!fileExtension) {
+            fileExtension = doc.type === 'pdf' 
+              ? 'pdf' 
+              : doc.type === 'dwg' 
+                ? 'dwg' 
+                : doc.type === 'image' 
+                  ? 'jpg' 
+                  : 'bin';
+          }
+          
+          // If filename doesn't already have an extension, add it
+          if (!fileName.toLowerCase().endsWith(`.${fileExtension.toLowerCase()}`)) {
+            fileName = `${fileName}.${fileExtension}`;
+          }
+          
+          // Add file to zip with proper filename
+          zip.file(fileName, blob);
           
           // Update progress for large downloads
           processed++;
@@ -3883,6 +3964,8 @@ export default function DocumentList({
     } catch (error) {
       console.error("Error downloading selected files:", error);
       showToast("Failed to download selected files", "error");
+    } finally {
+      setIsDownloading(false);
     }
   };
   
@@ -4074,7 +4157,236 @@ export default function DocumentList({
     }
   };
 
-  
+  // Add a new effect to listen for the bulk rename selection event
+  useEffect(() => {
+    const handleSelectFilesForRename = (event: Event) => {
+      const customEvent = event as CustomEvent;
+      const { mode } = customEvent.detail;
+      
+      if (mode === 'rename') {
+        // Enter selection mode for rename
+        setSelectionMode('rename');
+        setIsSelectionMode(true);
+        
+        // Clear any existing selection
+        setSelectedFiles(new Set());
+      }
+    };
+    
+    document.addEventListener('select-files-for-rename', handleSelectFilesForRename as EventListener);
+    
+    return () => {
+      document.removeEventListener('select-files-for-rename', handleSelectFilesForRename as EventListener);
+    };
+  }, []);
+
+  // Add function to handle bulk rename operation
+  const bulkRenameSelectedItems = () => {
+    console.log("bulkRenameSelectedItems called, selected files:", selectedFiles.size);
+    
+    if (selectedFiles.size === 0) {
+      showToast("No files or folders selected for renaming", "error");
+      return;
+    }
+    
+    // Gather the selected items (both files and folders)
+    const itemsToRename: Array<{id: string, name: string, type: 'document' | 'folder'}> = [];
+    
+    // Get selected documents
+    const selectedDocs = currentDocs.filter(doc => selectedFiles.has(doc.id));
+    console.log("Selected documents for rename:", selectedDocs.length);
+    
+    selectedDocs.forEach(doc => {
+      itemsToRename.push({
+        id: doc.id,
+        name: doc.name,
+        type: 'document'
+      });
+    });
+    
+    // Get selected folders
+    const selectedFolders = visibleFolders.filter(folder => selectedFiles.has(folder.id));
+    console.log("Selected folders for rename:", selectedFolders.length);
+    
+    selectedFolders.forEach(folder => {
+      itemsToRename.push({
+        id: folder.id,
+        name: folder.name,
+        type: 'folder'
+      });
+    });
+    
+    // If no onBulkRename function is provided, show an error
+    if (!onBulkRename) {
+      showToast("Bulk rename functionality is not available", "error");
+      return;
+    }
+    
+    console.log("Dispatching items-selected-for-rename event with items:", itemsToRename);
+    
+    // First try direct approach - create a modal directly in DocumentList
+    const modal = document.createElement('div');
+    modal.className = 'fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4';
+    modal.innerHTML = `
+      <div class="bg-white rounded-lg shadow-lg p-6 w-full max-w-2xl">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-xl font-semibold">Rename ${itemsToRename.length} Items</h2>
+          <button id="closeRenameModal" class="text-gray-500 hover:text-gray-700 transition-colors">✕</button>
+        </div>
+        
+        <div class="mb-4 max-h-72 overflow-y-auto border border-gray-200 rounded-md">
+          <table class="min-w-full divide-y divide-gray-200">
+            <thead class="bg-gray-50">
+              <tr>
+                <th scope="col" class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" style="width: 10%">Type</th>
+                <th scope="col" class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" style="width: 90%">New Name</th>
+
+              </tr>
+            </thead>
+            <tbody class="bg-white divide-y divide-gray-200">
+              ${itemsToRename.map((item, index) => `
+                <tr key="${item.id}">
+                  <td class="px-3 py-2 whitespace-nowrap">
+                    ${item.type === 'folder' ? 
+                      '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-gray-400"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>' : 
+                      '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-gray-400"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline></svg>'}
+                  </td>
+                  <td class="px-3 py-2 whitespace-nowrap">
+                    <input 
+                      type="text"
+                      id="rename-${item.id}"
+                      value="${item.name}"
+                      class="w-full px-2 py-1 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-primary-500"
+                    />
+                
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+        
+        <div class="flex justify-end space-x-2">
+          <button
+            id="cancelRenameModal"
+            class="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            id="confirmRename"
+            class="px-4 py-2 text-white bg-primary-600 rounded-md hover:bg-primary-700 transition-colors"
+          >
+            Rename
+          </button>
+        </div>
+      </div>
+    `;
+    
+    document.body.appendChild(modal);
+    
+    // Add event listeners
+    document.getElementById('closeRenameModal')?.addEventListener('click', () => {
+      document.body.removeChild(modal);
+    });
+    
+    document.getElementById('cancelRenameModal')?.addEventListener('click', () => {
+      document.body.removeChild(modal);
+    });
+    
+    document.getElementById('confirmRename')?.addEventListener('click', async () => {
+      // Gather new names
+      const updatedItems = itemsToRename.map(item => {
+        const input = document.getElementById(`rename-${item.id}`) as HTMLInputElement;
+        return {
+          ...item,
+          newName: input.value
+        };
+      });
+      
+      // Apply rename
+      try {
+        await onBulkRename(updatedItems, "__INDIVIDUAL__");
+        showToast(`${updatedItems.length} items renamed successfully`, "success");
+        
+        if (onRefresh) {
+          await onRefresh();
+        }
+      } catch (error) {
+        console.error('Error renaming items:', error);
+        showToast(`Failed to rename items: ${error instanceof Error ? error.message : 'Unknown error'}`, "error");
+      } finally {
+        document.body.removeChild(modal);
+      }
+    });
+    
+    // Also try the original event approach as fallback
+    const itemsSelectedEvent = new CustomEvent('items-selected-for-rename', {
+      bubbles: true,
+      detail: {
+        items: itemsToRename
+      }
+    });
+    document.dispatchEvent(itemsSelectedEvent);
+    
+    // Exit selection mode
+    exitSelectionMode();
+  };
+
+  // Add a listener for bulk rename success event
+  useEffect(() => {
+    const handleBulkRenameSuccess = (event: Event) => {
+      // Refresh the current view
+      if (onRefresh) {
+        onRefresh();
+      }
+    };
+    
+    document.addEventListener('bulk-rename-success', handleBulkRenameSuccess as EventListener);
+    
+    return () => {
+      document.removeEventListener('bulk-rename-success', handleBulkRenameSuccess as EventListener);
+    };
+  }, [onRefresh]);
+
+  // Modify the UI to show rename action in selection mode
+  // Inside the render function where the selection mode controls are
+  // Look for the selection actions section
+  // Add the following inside:
+
+  /* Inside the selection mode UI:
+  {selectionMode === 'rename' && (
+    <button
+      onClick={bulkRenameSelectedItems}
+      className="px-3 py-2 text-primary-700 border border-primary-200 bg-primary-100 hover:bg-primary-200 rounded"
+    >
+      Rename Selected
+    </button>
+  )}
+  */
+
+  // Add event listener for the 'select-files-for-download' event
+  useEffect(() => {
+    const handleSelectFilesForDownload = (event: Event) => {
+      const customEvent = event as CustomEvent;
+      
+      // Clear any existing selection
+      setSelectedFiles(new Set());
+      
+      // Enter selection mode for download
+      setIsSelectionMode(true);
+      setSelectionMode('download');
+      
+      console.log("[DocumentList] Entered file selection mode for download");
+    };
+    
+    // Add event listener
+    document.addEventListener('select-files-for-download', handleSelectFilesForDownload as EventListener);
+    
+    // Clean up
+    return () => {
+      document.removeEventListener('select-files-for-download', handleSelectFilesForDownload as EventListener);
+    };
+  }, []);
 
   return (
     <div 
@@ -4107,7 +4419,7 @@ export default function DocumentList({
             {isSelectionMode && (
               <div className="flex items-center space-x-2">
                 <span className="text-sm font-medium text-gray-700">
-                  {selectedFiles.size} files selected
+                  {selectedFiles.size} {selectedFiles.size === 1 ? 'item' : 'items'} selected
                 </span>
                 
                 {/* Selection actions */}
@@ -4169,7 +4481,7 @@ export default function DocumentList({
                       ) : (
                         <>
                           <FolderInput className="w-4 h-4" />
-                          <span>Move Files</span>
+                          <span>Move Items</span>
                         </>
                       )}
                     </button>
@@ -4192,9 +4504,20 @@ export default function DocumentList({
                       ) : (
                         <>
                           <Copy className="w-4 h-4" />
-                          <span>Copy Files</span>
+                          <span>Copy Items</span>
                         </>
                       )}
+                    </button>
+                  )}
+                  
+                  {/* Rename button - only in rename mode */}
+                  {selectionMode === 'rename' && selectedFiles.size > 0 && (
+                    <button
+                      onClick={bulkRenameSelectedItems}
+                      className="px-3 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 transition-colors flex items-center space-x-1"
+                    >
+                      <FileText className="w-4 h-4" />
+                      <span>Rename Selected</span>
                     </button>
                   )}
                   
@@ -4439,14 +4762,44 @@ export default function DocumentList({
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     className={`flex items-center justify-between p-3 bg-white border ${
-                      dropTargetFolder === folder.id ? 'border-primary-500 bg-primary-50' : 'border-gray-200'
-                    } rounded-lg hover:bg-gray-50 transition-colors`}
+                      dropTargetFolder === folder.id ? 'border-primary-500 bg-primary-50' : 
+                      isSelectionMode && selectedFiles.has(folder.id) ? 'border-primary-500 bg-primary-50' : 'border-gray-200'
+                    } rounded-lg ${selectionMode === 'download' ? 'hover:bg-gray-50 opacity-60 cursor-default' : 'hover:bg-gray-50'} transition-colors`}
                     onDragOver={(e: any) => handleFolderDragOver(e, folder.id)}
                     onDragLeave={(e: any) => handleFolderDragLeave(e)}
                     onDrop={(e: any) => handleFolderDrop(e, folder.id)}
                   >
+                    {/* Selection checkbox - only show in selection mode and not in download mode for folders */}
+                    {isSelectionMode && selectionMode !== 'download' && (
+                      <div 
+                        className="flex-shrink-0 mr-3 cursor-pointer"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleFileSelection(folder.id, e);
+                        }}
+                      >
+                        {selectedFiles.has(folder.id) ? (
+                          <CheckCircle className="w-5 h-5 text-primary-600" />
+                        ) : (
+                          <Circle className="w-5 h-5 text-gray-400" />
+                        )}
+                      </div>
+                    )}
                     <button
-                      onClick={() => onFolderSelect?.(folder)}
+                      onClick={(e) => {
+                        // In selection mode, toggle selection instead of navigating
+                        // But prevent toggling in download mode for folders
+                        if (isSelectionMode) {
+                          e.preventDefault();
+                          if (selectionMode !== 'download') {
+                            toggleFileSelection(folder.id, e);
+                          } else {
+                            showToast("Folders cannot be selected for download, only files");
+                          }
+                          return;
+                        }
+                        onFolderSelect?.(folder);
+                      }}
                       className="flex items-left space-x-3 flex-1"
                     >
                       <FolderOpen className="w-6 h-6 text-gray-400" />

@@ -51,7 +51,7 @@ export default function ProjectDetails({
 
   // Load team members for the project
   const loadTeamMembers = async () => {
-    if (!project.teamMemberIds?.length) {
+    if (!project?.teamMemberIds?.length) {
       setTeamMembers([]);
       return;
     }
@@ -94,7 +94,7 @@ export default function ProjectDetails({
   }, [project.teamMemberIds]);
 
   // Determine if current user is in the project
-  const isCurrentUserInProject = user?.id && project.teamMemberIds?.includes(user.id);
+  const isCurrentUserInProject = user?.id && project?.teamMemberIds?.includes(user.id);
 
   return (
     <div className="p-6">
@@ -217,7 +217,7 @@ export default function ProjectDetails({
             <div className="mt-6 pt-6 border-t border-gray-100">
               <div className="flex justify-between items-center mb-3">
                 <h3 className="text-sm font-medium text-gray-900">
-                  Team Members ({project.teamMemberIds?.length || 0})
+                  Team Members ({project?.teamMemberIds?.length || 0})
                 </h3>
                 {user?.role === 'Staff' && (
                   <button 
@@ -245,13 +245,13 @@ export default function ProjectDetails({
                           />
                         ) : (
                           <div className="w-6 h-6 rounded-full bg-gray-200 mr-2 flex items-center justify-center text-xs text-gray-600">
-                            {member.displayName[0]}
+                            {member.displayName && member.displayName.length > 0 ? member.displayName[0] : '?'}
                           </div>
                         )}
-                        <span className="text-sm">{member.displayName}</span>
+                        <span className="text-sm">{member.displayName || 'Unknown User'}</span>
                       </div>
                       <span className="text-xs px-2 py-1 rounded-full bg-gray-100 text-gray-700">
-                        {member.role}
+                        {member.role || 'Member'}
                       </span>
                     </div>
                   ))}

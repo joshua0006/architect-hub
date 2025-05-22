@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Shield, Plus, Trash2, Save, X, ChevronDown, Search, Filter } from 'lucide-react';
+import { Shield, Plus, Trash2, Save, X, ChevronDown, Search, Filter, Table } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { useAuth, UserRole } from '../contexts/AuthContext';
 import { User } from '../types/auth';
 import { userService } from '../services/userService';
@@ -9,6 +10,8 @@ import { Timestamp } from 'firebase/firestore';
 import { CreateUserDto } from '../services/cloudFunctionService';
 import {cloudFunctionService} from '../services/cloudFunctionService';
 import toast, { Toaster } from 'react-hot-toast';
+import PermissionsTableModal from '../components/PermissionsTableModal';
+
 export default function AdminPage() {
   const { user } = useAuth();
   const [users, setUsers] = useState<User[]>([]);
@@ -25,6 +28,9 @@ export default function AdminPage() {
   const [roleFilter, setRoleFilter] = useState<UserRole | 'ALL'>('ALL');
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const filterRef = useRef<HTMLDivElement>(null);
+  
+  // Permissions modal state
+  const [isPermissionsModalOpen, setIsPermissionsModalOpen] = useState(false);
   
   // New user form
   const [isCreatingUser, setIsCreatingUser] = useState(false);
@@ -353,15 +359,29 @@ export default function AdminPage() {
             <Shield className="w-6 h-6 text-purple-600" />
             <h1 className="text-2xl font-bold text-gray-900">Admin Dashboard</h1>
           </div>
-          
-          <button
-            className="flex items-center space-x-1 px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 transition-colors"
-            onClick={() => setIsCreatingUser(true)}
-          >
-            <Plus className="w-4 h-4" />
-            <span>Create User</span>
-          </button>
+          <div className="flex space-x-3">
+            <button
+              onClick={() => setIsPermissionsModalOpen(true)}
+              className="flex items-center space-x-1 px-4 py-2 bg-gray-100 text-gray-800 border border-gray-300 rounded-md hover:bg-gray-200 transition-colors"
+            >
+              <Table className="w-4 h-4" />
+              <span>Project Access</span>
+            </button>
+            <button
+              className="flex items-center space-x-1 px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 transition-colors"
+              onClick={() => setIsCreatingUser(true)}
+            >
+              <Plus className="w-4 h-4" />
+              <span>Create User</span>
+            </button>
+          </div>
         </div>
+        
+        {/* Permissions Table Modal */}
+        <PermissionsTableModal 
+          isOpen={isPermissionsModalOpen}
+          onClose={() => setIsPermissionsModalOpen(false)}
+        />
         
         {error && (
           <div className="mb-4 p-3 bg-red-100 border border-red-400 text-red-700 rounded">
