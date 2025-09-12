@@ -56,6 +56,44 @@ const pageBufferCache = new Map<number, {
 // Track the last opened document ID
 let lastDocumentId: string | null = null;
 
+// Centralized container measurement utility to ensure consistent scaling
+const getContainerWidth = (containerRef: React.RefObject<HTMLDivElement>): { width: number; height: number; availableWidth: number } => {
+  const PADDING = 32; // Consistent padding across all measurements
+  const DEFAULT_WIDTH = 800;
+  const DEFAULT_HEIGHT = 1200;
+  
+  if (!containerRef.current) {
+    console.warn('[PDFViewer] Container ref not available, using defaults');
+    return {
+      width: DEFAULT_WIDTH,
+      height: DEFAULT_HEIGHT,
+      availableWidth: DEFAULT_WIDTH - PADDING
+    };
+  }
+
+  const rect = containerRef.current.getBoundingClientRect();
+  const width = rect.width || containerRef.current.clientWidth;
+  const height = rect.height || containerRef.current.clientHeight;
+  
+  // Validate measurements
+  if (width <= 0 || height <= 0) {
+    console.warn('[PDFViewer] Invalid container dimensions, using defaults', { width, height });
+    return {
+      width: DEFAULT_WIDTH,
+      height: DEFAULT_HEIGHT, 
+      availableWidth: DEFAULT_WIDTH - PADDING
+    };
+  }
+
+  console.log('[PDFViewer] Container measurements:', { width, height, availableWidth: width - PADDING });
+  
+  return {
+    width,
+    height,
+    availableWidth: width - PADDING
+  };
+};
+
 // Export this function to allow clearing caches from outside
 export function resetPDFViewerState() {
   // Clear all caches and state
@@ -718,6 +756,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
         // Set display dimensions
         canvas.style.width = `${bufferViewport.width}px`;
         canvas.style.height = `${bufferViewport.height}px`;
+        canvas.style.backgroundColor = '#FFFFFF';
         
         // Clear the canvas before drawing the buffer content
         ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -792,13 +831,10 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
 
             // Set up viewport
             let viewport = page.getViewport({ scale: 1 });
-            const containerWidth = containerRef.current?.clientWidth || 800;
-            const containerHeight = containerRef.current?.clientHeight || 1200;
+            const containerMeasurements = getContainerWidth(containerRef);
             
-            // Calculate scale to fit the container width exactly
-            // Account for padding (16px total for p-2 or 32px for p-4)
-            const padding = 32;
-            const availableWidth = containerWidth - padding;
+            // Use centralized container measurements
+            const { width: containerWidth, height: containerHeight, availableWidth } = containerMeasurements;
             const widthScale = availableWidth / viewport.width;
             
             // For initial rendering, prioritize fitting to width
@@ -815,10 +851,15 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
             // Set canvas display size (CSS pixels) dividing by qualityMultiplier
             canvas.style.width = `${viewport.width / qualityMultiplier}px`;
             canvas.style.height = `${viewport.height / qualityMultiplier}px`;
+            canvas.style.backgroundColor = '#FFFFFF';
             
             // Explicitly clear the canvas *before* scaling the context
             // Use the canvas buffer dimensions (already includes devicePixelRatio)
             ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Set white background for consistent appearance
+            ctx.fillStyle = "#FFFFFF";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
 
             // Scale the context to account for device pixel ratio
             ctx.scale(devicePixelRatio, devicePixelRatio);
@@ -1267,12 +1308,10 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
 
   // Define function for fitting to width - placed at the top of other functions
   const handleFitToWidth = useCallback(() => {
-    if (!page || !containerRef.current) return;
+    if (!page) return;
     
-    const container = containerRef.current;
-    // Account for padding (16px total for p-2 or 32px for p-4)
-    const padding = 32; 
-    const availableWidth = container.clientWidth - padding;
+    // Use centralized container measurements
+    const { availableWidth } = getContainerWidth(containerRef);
     
     // Get the intrinsic dimensions of the PDF page
     const viewport = page.getViewport({ scale: 1 });
@@ -1289,10 +1328,8 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     // Update the scale
     setScale(newScale); // Use direct setter
     
-    // Scroll to center after a brief delay to ensure rendering is complete
-    setTimeout(() => {
-      scrollToCenterDocument();
-    }, 100);
+    // Scroll to center immediately - centralized measurements make delays unnecessary
+    scrollToCenterDocument();
     
     // Enable automatic fit for future page changes
     disableFitToWidthRef.current = false;
@@ -1397,10 +1434,8 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     // Disable automatic fit to width for future page changes
     disableFitToWidthRef.current = true;
     
-    // Center the document after resetting zoom
-    setTimeout(() => {
-      scrollToCenterDocument();
-    }, 100);
+    // Center the document immediately after resetting zoom
+    scrollToCenterDocument();
   }, [page, scrollToCenterDocument]);
 
   // Setup container dimensions
@@ -1408,21 +1443,12 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     if (!containerRef.current) return;
     
     const updateContainerSize = () => {
-      const container = containerRef.current;
-      if (!container) return;
-      
-      const { width, height } = container.getBoundingClientRect();
+      // Use centralized container measurements
+      const { width, height } = getContainerWidth(containerRef);
       setContainerWidth(width);
       setContainerHeight(height);
       
-      // Reapply fit-to-width when container dimensions change
-      // and we have a page loaded
-      if (page && !disableFitToWidthRef.current) {
-        // Add a small delay to ensure measurements are accurate
-        setTimeout(() => {
-          handleFitToWidth();
-        }, 100);
-      }
+      // Update container dimensions without auto-fitting to width
     };
     
     // Initial size
@@ -2007,16 +2033,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
       setIsExporting(false);
     }
   }, [pdf, page, viewport, currentPage, documentId, document, file, showToast, normalizeAnnotationForExport]);
-  
-  // Auto fit to width when page is loaded
-  useEffect(() => {
-    if (page && containerRef.current && !disableFitToWidthRef.current) {
-      // Wait a moment for the page to be fully rendered
-      setTimeout(() => {
-        handleFitToWidth();
-      }, 200);
-    }
-  }, [page, handleFitToWidth]);
 
   // Export all pages with annotations
   const handleExportAllPages = useCallback(async (quality?: "standard" | "hd" | "optimal") => {
@@ -2531,18 +2547,11 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
         setHasStartedLoading(true);
         
         // Set initial scale based on container width
-        if (containerRef.current) {
-          const containerWidth = containerRef.current.clientWidth - 32; // Account for padding
-          const containerHeight = containerRef.current.clientHeight - 32;
-          
-          setContainerWidth(containerWidth);
-          setContainerHeight(containerHeight);
-          
-          // Schedule fit to width after a delay to ensure container is rendered
-          setTimeout(() => {
-            handleFitToWidth();
-          }, 100);
-        }
+        const containerMeasurements = getContainerWidth(containerRef);
+        const { width: containerWidth, height: containerHeight } = containerMeasurements;
+        
+        setContainerWidth(containerWidth);
+        setContainerHeight(containerHeight);
         
         // PDF loading state will be updated by the hooks
         // We should not set isInitialLoading to false here - that will happen when the PDF is actually loaded
@@ -3285,7 +3294,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
       >
         {/* PDF Viewer - Fixed container with scrollable content */}
         <div 
-          className="relative flex-1 overflow-auto bg-gray-100 p-2 md:p-4 h-full w-full" 
+          className="relative flex-1 overflow-auto bg-white p-2 md:p-4 h-full w-full" 
           ref={scrollContainerRef}
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
