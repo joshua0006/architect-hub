@@ -8,6 +8,7 @@ import { folderService } from '../services/folderService';
 import { projectService } from '../services';
 import FileSpreadsheetTable, { FileRowData } from './FileSpreadsheetTable';
 import * as XLSX from 'xlsx';
+import { generateFolderTreeOptions, buildFullPath } from '../utils/folderTree';
 
 export default function FileSpreadsheetView() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -92,18 +93,33 @@ export default function FileSpreadsheetView() {
     };
   }, [projectId]);
 
-  // Create folder name map for O(1) lookups
+  // Create folder map for lookups and build full paths
   const folderPathMap = useMemo(() => {
     const map = new Map<string, string>();
+    const folderMap = new Map<string, Folder>();
+
+    // Create folder lookup map
+    folders.forEach(folder => folderMap.set(folder.id, folder));
+
+    // Build full path for each folder
     folders.forEach(folder => {
-      // Use folder name directly (not full path)
-      // Fallback: folder.name → folderId
-      const path = folder.name || folder.id;
-      map.set(folder.id, path);
+      const fullPath = buildFullPath(folder.id, folderMap);
+      map.set(folder.id, fullPath);
     });
+
     map.set('', '/'); // Root folder
     return map;
   }, [folders]);
+
+  // Generate folder tree options with file counts
+  const folderTreeOptions = useMemo(() => {
+    return generateFolderTreeOptions(folders, documents);
+  }, [folders, documents]);
+
+  // Calculate root file count (files with no folderId)
+  const rootFileCount = useMemo(() => {
+    return documents.filter(doc => !doc.folderId).length;
+  }, [documents]);
 
   // Transform documents to file rows with folder paths
   const fileRows: FileRowData[] = useMemo(() => {
@@ -247,18 +263,8 @@ export default function FileSpreadsheetView() {
     window.location.reload();
   };
 
-  // Get unique folders for filter dropdown
-  const uniqueFolders = useMemo(() => {
-    const folderMap = new Map<string, string>();
-
-    fileRows.forEach(file => {
-      if (file.document.folderId) {
-        folderMap.set(file.document.folderId, file.folderPath);
-      }
-    });
-
-    return Array.from(folderMap.entries()).map(([id, path]) => ({ id, path }));
-  }, [fileRows]);
+  // Folder tree options are already generated above with file counts
+  // No need for separate uniqueFolders calculation
 
   // Loading state
   if (loading) {
@@ -373,13 +379,20 @@ export default function FileSpreadsheetView() {
               <select
                 value={filterFolder}
                 onChange={(e) => setFilterFolder(e.target.value)}
-                className="pl-10 pr-8 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent appearance-none bg-white cursor-pointer"
+                className="pl-10 pr-8 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent appearance-none bg-white cursor-pointer font-mono text-sm"
+                style={{ minWidth: '300px' }}
               >
                 <option value="all">All Folders</option>
-                <option value="">Root</option>
-                {uniqueFolders.map(folder => (
-                  <option key={folder.id} value={folder.id}>
-                    {folder.path}
+                {rootFileCount > 0 && (
+                  <option value="">Root ({rootFileCount})</option>
+                )}
+                {folderTreeOptions.map(option => (
+                  <option
+                    key={option.id}
+                    value={option.id}
+                    title={buildFullPath(option.id, new Map(folders.map(f => [f.id, f])))}
+                  >
+                    {option.displayText}
                   </option>
                 ))}
               </select>
