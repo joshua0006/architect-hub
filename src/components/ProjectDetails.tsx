@@ -4,7 +4,7 @@ import { Project, Task } from "../types";
 import CircularProgress from "./CircularProgress";
 import TaskSummary from "./TaskSummary";
 import MilestoneList from "./MilestoneList";
-import { Calendar, Users, Building2, Edit, MapPin, UserPlus, Shield, ChevronDown, ChevronUp } from "lucide-react";
+import { Calendar, Users, Building2, Edit, MapPin, UserPlus, Shield, ChevronDown, ChevronUp, FileSpreadsheet } from "lucide-react";
 import { useMilestoneManager } from "../hooks/useMilestoneManager";
 import { calculateMilestoneProgress } from "../utils/progressCalculator";
 import EditProject from "./EditProject";
@@ -111,15 +111,26 @@ export default function ProjectDetails({
           <p className="text-gray-500">{project.client}</p>
         </div>
 
-        {canEditProject() && (
+        <div className="flex items-center space-x-3">
           <button
-            onClick={() => setShowEditProject(true)}
-            className="px-4 py-2 text-sm text-white bg-blue-500 rounded-md hover:bg-blue-600 transition-colors flex items-center space-x-2"
+            onClick={() => window.open(`/${project.id}/files-spreadsheet`, '_blank')}
+            className="px-4 py-2 text-sm text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors flex items-center space-x-2"
+            title="View all files in spreadsheet format"
           >
-            <Edit className="w-4 h-4" />
-            <span>Edit Project</span>
+            <FileSpreadsheet className="w-4 h-4" />
+            <span>Files Spreadsheet</span>
           </button>
-        )}
+
+          {canEditProject() && (
+            <button
+              onClick={() => setShowEditProject(true)}
+              className="px-4 py-2 text-sm text-white bg-blue-500 rounded-md hover:bg-blue-600 transition-colors flex items-center space-x-2"
+            >
+              <Edit className="w-4 h-4" />
+              <span>Edit Project</span>
+            </button>
+          )}
+        </div>
       </motion.div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

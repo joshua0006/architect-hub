@@ -4,21 +4,38 @@ import { useOrganization } from '../contexts/OrganizationContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useState, useRef, useEffect } from 'react';
 import { NotificationIcon } from './NotificationIcon';
+import { Project } from '../types';
 
-export default function Header() {
+interface HeaderProps {
+  selectedProject?: Project;
+}
+
+export default function Header({ selectedProject }: HeaderProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const { settings } = useOrganization();
   const { user, signOut } = useAuth();
   const [showUserMenu, setShowUserMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
-  
-  const isActive = (path: string) => location.pathname === path;
+
+  const isActive = (path: string) => {
+    // For project overview, check if we're on the /:projectId/overview route
+    if (path === '/' && selectedProject) {
+      return location.pathname === `/${selectedProject.id}/overview` || location.pathname === '/';
+    }
+    return location.pathname === path;
+  };
 
   const handleProjectClick = () => {
-    if (location.pathname === '/') {
-      navigate('/', { replace: true, state: { resetFolder: true } });
+    if (selectedProject) {
+      const projectOverviewPath = `/${selectedProject.id}/overview`;
+      if (location.pathname === projectOverviewPath) {
+        navigate(projectOverviewPath, { replace: true, state: { resetFolder: true } });
+      } else {
+        navigate(projectOverviewPath);
+      }
     } else {
+      // If no project selected, navigate to home
       navigate('/');
     }
   };

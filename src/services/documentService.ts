@@ -36,7 +36,7 @@ export const documentService = {
   async getByFolderId(folderId: string): Promise<Document[]> {
     try {
       let q;
-      
+
       if (folderId) {
         // Query documents with specific folder ID
         q = query(
@@ -50,9 +50,9 @@ export const documentService = {
           where('folderId', '==', '')
         );
       }
-      
+
       const snapshot = await getDocs(q);
-      
+
       return snapshot.docs
         .filter(doc => doc.id !== '_metadata')
         .map(doc => ({
@@ -62,6 +62,28 @@ export const documentService = {
     } catch (error) {
       console.error('Error getting documents:', error);
       throw new Error('Failed to get documents');
+    }
+  },
+
+  // Get all documents for a project (optimized single query)
+  async getByProjectId(projectId: string): Promise<Document[]> {
+    try {
+      const q = query(
+        collection(db, 'documents'),
+        where('projectId', '==', projectId)
+      );
+
+      const snapshot = await getDocs(q);
+
+      return snapshot.docs
+        .filter(doc => doc.id !== '_metadata')
+        .map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        } as Document));
+    } catch (error) {
+      console.error('Error getting documents by projectId:', error);
+      throw new Error('Failed to get documents for project');
     }
   },
 

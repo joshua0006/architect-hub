@@ -18,3 +18,5 @@ This change was implemented within the `handleMouseUp` function in `AnnotationCa
 This change addresses user feedback requesting a more streamlined workflow. Automatically selecting the new annotation and switching to select mode allows users to immediately move, resize, or style the annotation they just created without needing to manually switch tools and re-select the object.
 
 ---
+
+
