@@ -156,14 +156,6 @@ export default function FileSpreadsheetView() {
           aValue = a.folderPath.toLowerCase();
           bValue = b.folderPath.toLowerCase();
           break;
-        case 'type':
-          aValue = a.type;
-          bValue = b.type;
-          break;
-        case 'dateModified':
-          aValue = new Date(a.dateModified).getTime();
-          bValue = new Date(b.dateModified).getTime();
-          break;
         default:
           return 0;
       }
@@ -211,9 +203,7 @@ export default function FileSpreadsheetView() {
   const handleExportExcel = () => {
     const exportData = sortedFiles.map(file => ({
       'File Name': file.name,
-      'Folder Name': file.folderPath,
-      'Type': file.type.toUpperCase(),
-      'Date Modified': new Date(file.dateModified).toLocaleString()
+      'Folder Name': file.folderPath
     }));
 
     const worksheet = XLSX.utils.json_to_sheet(exportData);
@@ -223,9 +213,7 @@ export default function FileSpreadsheetView() {
     // Set column widths
     worksheet['!cols'] = [
       { wch: 40 }, // File Name
-      { wch: 30 }, // Folder Path
-      { wch: 10 }, // Type
-      { wch: 20 }  // Date Modified
+      { wch: 30 }  // Folder Path
     ];
 
     XLSX.writeFile(workbook, `${projectName || 'project'}-files.xlsx`);
@@ -235,9 +223,7 @@ export default function FileSpreadsheetView() {
   const handleExportCSV = () => {
     const exportData = sortedFiles.map(file => ({
       'File Name': file.name,
-      'Folder Name': file.folderPath,
-      'Type': file.type.toUpperCase(),
-      'Date Modified': new Date(file.dateModified).toLocaleString()
+      'Folder Name': file.folderPath
     }));
 
     const worksheet = XLSX.utils.json_to_sheet(exportData);
@@ -318,13 +304,13 @@ export default function FileSpreadsheetView() {
   }
 
   return (
-    <div className="bg-gray-50 p-6">
-      <div className="max-w-7xl mx-auto">
+    <div className="h-screen bg-gray-50 flex flex-col">
+      <div className="flex flex-col h-full max-w-7xl mx-auto w-full">
         {/* Header */}
         <motion.div
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="mb-6"
+          className="flex-shrink-0 p-6 pb-4"
         >
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center space-x-4">
@@ -406,15 +392,18 @@ export default function FileSpreadsheetView() {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.1 }}
+          className="flex-1 min-h-0 px-6"
         >
-          <FileSpreadsheetTable
-            files={sortedFiles}
-            sortColumn={sortColumn}
-            sortDirection={sortDirection}
-            onSort={handleSort}
-            onFileClick={handleFileClick}
-            onDownload={handleDownload}
-          />
+          <div className="h-full overflow-auto">
+            <FileSpreadsheetTable
+              files={sortedFiles}
+              sortColumn={sortColumn}
+              sortDirection={sortDirection}
+              onSort={handleSort}
+              onFileClick={handleFileClick}
+              onDownload={handleDownload}
+            />
+          </div>
         </motion.div>
 
         {/* Results summary */}
@@ -422,7 +411,7 @@ export default function FileSpreadsheetView() {
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            className="mt-4 text-center text-sm text-gray-500"
+            className="flex-shrink-0 p-6 pt-4 text-center text-sm text-gray-500"
           >
             Showing {sortedFiles.length} of {fileRows.length} total files
           </motion.div>
