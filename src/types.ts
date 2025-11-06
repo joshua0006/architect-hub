@@ -29,6 +29,7 @@ export interface Document {
   version: number;
   dateModified: string;
   url: string;
+  drawingNo?: string;
   comments?: DocumentComment[];
   metadata?: {
     size?: number;

@@ -142,6 +142,7 @@ export default function FileSpreadsheetView() {
   const fileRows: FileRowData[] = useMemo(() => {
     return documents.map(doc => ({
       id: doc.id,
+      drawingNo: doc.drawingNo || '',
       name: doc.name,
       folderPath: folderPathMap.get(doc.folderId) || '/',  // ✅ O(1) Map lookup
       type: doc.type,
@@ -181,6 +182,10 @@ export default function FileSpreadsheetView() {
       let bValue: any;
 
       switch (sortColumn) {
+        case 'drawingNo':
+          aValue = (a.drawingNo || '').toLowerCase();
+          bValue = (b.drawingNo || '').toLowerCase();
+          break;
         case 'name':
           aValue = a.name.toLowerCase();
           bValue = b.name.toLowerCase();
@@ -232,9 +237,32 @@ export default function FileSpreadsheetView() {
     document.body.removeChild(link);
   };
 
+  // Handle drawing number update
+  const handleUpdateDrawingNo = async (fileId: string, drawingNo: string) => {
+    const file = documents.find(doc => doc.id === fileId);
+    if (!file) {
+      throw new Error('File not found');
+    }
+
+    try {
+      await documentService.update(file.folderId, fileId, { drawingNo });
+
+      // Update local state to reflect the change
+      setDocuments(prevDocs =>
+        prevDocs.map(doc =>
+          doc.id === fileId ? { ...doc, drawingNo } : doc
+        )
+      );
+    } catch (error) {
+      console.error('Error updating drawing number:', error);
+      throw error;
+    }
+  };
+
   // Export to Excel
   const handleExportExcel = () => {
     const exportData = sortedFiles.map(file => ({
+      'Drawing No.': file.drawingNo || '',
       'File Name': file.name,
       'Folder Name': file.folderPath
     }));
@@ -245,6 +273,7 @@ export default function FileSpreadsheetView() {
 
     // Set column widths
     worksheet['!cols'] = [
+      { wch: 15 }, // Drawing No.
       { wch: 40 }, // File Name
       { wch: 30 }  // Folder Path
     ];
@@ -255,6 +284,7 @@ export default function FileSpreadsheetView() {
   // Export to CSV
   const handleExportCSV = () => {
     const exportData = sortedFiles.map(file => ({
+      'Drawing No.': file.drawingNo || '',
       'File Name': file.name,
       'Folder Name': file.folderPath
     }));
@@ -430,6 +460,7 @@ export default function FileSpreadsheetView() {
               onSort={handleSort}
               onFileClick={handleFileClick}
               onDownload={handleDownload}
+              onUpdateDrawingNo={handleUpdateDrawingNo}
             />
           </div>
         </motion.div>
