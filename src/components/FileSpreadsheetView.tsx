@@ -1,14 +1,15 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Search, Filter, Download, FileSpreadsheet, ArrowLeft, AlertCircle, RefreshCw } from 'lucide-react';
+import { Search, Download, FileSpreadsheet, ArrowLeft, AlertCircle, RefreshCw, Filter, ChevronDown, X } from 'lucide-react';
 import { Document, Folder } from '../types';
 import { documentService } from '../services/documentService';
 import { folderService } from '../services/folderService';
 import { projectService } from '../services';
 import FileSpreadsheetTable, { FileRowData } from './FileSpreadsheetTable';
+import FolderTreeSelect from './FolderTreeSelect';
 import * as XLSX from 'xlsx';
-import { generateFolderTreeOptions, buildFullPath } from '../utils/folderTree';
+import { buildFullPath } from '../utils/folderTree';
 
 export default function FileSpreadsheetView() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -22,6 +23,7 @@ export default function FileSpreadsheetView() {
   const [filterFolder, setFilterFolder] = useState<string>('all');
   const [sortColumn, setSortColumn] = useState<string>('name');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+  const [isFilterOpen, setIsFilterOpen] = useState(false);
   const mountedRef = useRef(true);
 
   // Timeout wrapper function
@@ -111,15 +113,30 @@ export default function FileSpreadsheetView() {
     return map;
   }, [folders]);
 
-  // Generate folder tree options with file counts
-  const folderTreeOptions = useMemo(() => {
-    return generateFolderTreeOptions(folders, documents);
-  }, [folders, documents]);
+  // Calculate filter button display text and count
+  const filterDisplayInfo = useMemo(() => {
+    if (filterFolder === 'all') {
+      return {
+        name: 'All Folders',
+        count: documents.length
+      };
+    }
 
-  // Calculate root file count (files with no folderId)
-  const rootFileCount = useMemo(() => {
-    return documents.filter(doc => !doc.folderId).length;
-  }, [documents]);
+    if (filterFolder === '') {
+      return {
+        name: 'Root',
+        count: documents.filter(doc => !doc.folderId).length
+      };
+    }
+
+    const folder = folders.find(f => f.id === filterFolder);
+    const count = documents.filter(doc => doc.folderId === filterFolder).length;
+
+    return {
+      name: folder?.name || 'Unknown Folder',
+      count
+    };
+  }, [filterFolder, folders, documents]);
 
   // Transform documents to file rows with folder paths
   const fileRows: FileRowData[] = useMemo(() => {
@@ -360,7 +377,7 @@ export default function FileSpreadsheetView() {
           </div>
 
           {/* Search and Filter Bar */}
-          <div className="flex items-center space-x-4">
+          <div className="flex items-center gap-4">
             {/* Search */}
             <div className="flex-1 relative">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
@@ -373,29 +390,27 @@ export default function FileSpreadsheetView() {
               />
             </div>
 
-            {/* Folder Filter */}
-            <div className="relative">
-              <Filter className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
-              <select
-                value={filterFolder}
-                onChange={(e) => setFilterFolder(e.target.value)}
-                className="pl-10 pr-8 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent appearance-none bg-white cursor-pointer font-mono text-sm"
-                style={{ minWidth: '300px' }}
+            {/* Filter Buttons */}
+            <div className="flex items-center gap-2">
+              {/* Compact Filter Button */}
+              <button
+                onClick={() => setIsFilterOpen(true)}
+                className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg bg-white hover:bg-gray-50 transition-colors text-sm font-medium text-gray-700 whitespace-nowrap"
               >
-                <option value="all">All Folders</option>
-                {rootFileCount > 0 && (
-                  <option value="">Root ({rootFileCount})</option>
-                )}
-                {folderTreeOptions.map(option => (
-                  <option
-                    key={option.id}
-                    value={option.id}
-                    title={buildFullPath(option.id, new Map(folders.map(f => [f.id, f])))}
-                  >
-                    {option.displayText}
-                  </option>
-                ))}
-              </select>
+                <Filter className="w-4 h-4" />
+                <span>Filter: {filterDisplayInfo.name} ({filterDisplayInfo.count})</span>
+                <ChevronDown className="w-4 h-4" />
+              </button>
+
+              {/* Clear Filter Button - Only show when filter is active */}
+              {filterFolder !== 'all' && (
+                <button
+                  onClick={() => setFilterFolder('all')}
+                  className="px-3 py-2 border border-gray-300 rounded-lg bg-white hover:bg-gray-50 transition-colors text-sm font-medium text-gray-700 hover:text-gray-900 whitespace-nowrap"
+                >
+                  Remove Filter
+                </button>
+              )}
             </div>
           </div>
         </motion.div>
@@ -429,6 +444,16 @@ export default function FileSpreadsheetView() {
             Showing {sortedFiles.length} of {fileRows.length} total files
           </motion.div>
         ) : null}
+
+        {/* Folder Filter Modal */}
+        <FolderTreeSelect
+          folders={folders}
+          documents={documents}
+          selectedFolderId={filterFolder}
+          onFolderSelect={setFilterFolder}
+          isOpen={isFilterOpen}
+          onClose={() => setIsFilterOpen(false)}
+        />
       </div>
     </div>
   );

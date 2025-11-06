@@ -233,6 +233,8 @@ export default function PeopleList({ projects, teamMembers, onCreateMember, onUp
     return `${projectNames[0]}, ${projectNames[1]} +${projectNames.length - 2}`;
   };
 
+
+  
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
