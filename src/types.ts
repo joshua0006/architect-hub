@@ -64,6 +64,22 @@ export interface TransmittalData {
   editedByName?: string;      // Display name for UI
 }
 
+// Transmittal change history - audit trail of all transmittal edits
+export interface TransmittalHistoryEntry {
+  id: string;
+  documentId: string;
+  documentName: string;       // Snapshot of document name at time of edit
+  projectId: string;
+  changes: {
+    field: 'drawingNo' | 'description' | 'revision';
+    oldValue: string;
+    newValue: string;
+  }[];
+  editedBy: string;           // User ID who made the edit
+  editedByName: string;       // Display name for UI
+  timestamp: string;          // ISO timestamp
+}
+
 // Project types
 export interface Project {
   id: string;

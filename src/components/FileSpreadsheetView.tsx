@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Search, Download, FileSpreadsheet, ArrowLeft, AlertCircle, RefreshCw, Filter, ChevronDown, X } from 'lucide-react';
-import { Document, Folder, TransmittalData } from '../types';
+import { Search, Download, FileSpreadsheet, ArrowLeft, AlertCircle, RefreshCw, Filter, ChevronDown, X, History } from 'lucide-react';
+import { Document, Folder, TransmittalData, TransmittalHistoryEntry } from '../types';
 import { documentService } from '../services/documentService';
 import { folderService } from '../services/folderService';
 import { projectService } from '../services';
@@ -12,6 +12,29 @@ import FolderTreeSelect from './FolderTreeSelect';
 import * as XLSX from 'xlsx';
 import { buildFullPath } from '../utils/folderTree';
 import { useAuth } from '../contexts/AuthContext';
+
+// Helper function to format time ago
+const formatTimeAgo = (date: Date): string => {
+  const seconds = Math.floor((new Date().getTime() - date.getTime()) / 1000);
+
+  const intervals = {
+    year: 31536000,
+    month: 2592000,
+    week: 604800,
+    day: 86400,
+    hour: 3600,
+    minute: 60
+  };
+
+  for (const [unit, secondsInUnit] of Object.entries(intervals)) {
+    const interval = Math.floor(seconds / secondsInUnit);
+    if (interval >= 1) {
+      return `${interval} ${unit}${interval === 1 ? '' : 's'} ago`;
+    }
+  }
+
+  return 'just now';
+};
 
 export default function FileSpreadsheetView() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -36,6 +59,9 @@ export default function FileSpreadsheetView() {
     folderName: false,
     revisions: true
   });
+  const [showHistoryDialog, setShowHistoryDialog] = useState(false);
+  const [historyEntries, setHistoryEntries] = useState<TransmittalHistoryEntry[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
   const mountedRef = useRef(true);
 
   // Timeout wrapper function
@@ -269,6 +295,10 @@ export default function FileSpreadsheetView() {
       throw new Error('Missing project ID or user');
     }
 
+    // Get document name for history tracking
+    const document = documents.find(doc => doc.id === fileId);
+    const documentName = document?.name || 'Unknown Document';
+
     try {
       const updates: any = {};
       updates[field] = value;
@@ -276,6 +306,7 @@ export default function FileSpreadsheetView() {
       await transmittalService.updateTransmittalData(
         projectId,
         fileId,
+        documentName,
         user.id,
         user.displayName || 'Unknown User',
         updates
@@ -302,6 +333,24 @@ export default function FileSpreadsheetView() {
     } catch (error) {
       console.error('Error updating transmittal data:', error);
       throw error;
+    }
+  };
+
+  // Open history dialog and load history
+  const handleViewHistory = async () => {
+    if (!projectId) return;
+
+    setShowHistoryDialog(true);
+    setLoadingHistory(true);
+
+    try {
+      const history = await transmittalService.getProjectHistory(projectId);
+      setHistoryEntries(history);
+    } catch (error) {
+      console.error('Error loading history:', error);
+      setHistoryEntries([]);
+    } finally {
+      setLoadingHistory(false);
     }
   };
 
@@ -446,8 +495,16 @@ export default function FileSpreadsheetView() {
               </div>
             </div>
 
-            {/* Export buttons */}
+            {/* History and Export buttons */}
             <div className="flex items-center space-x-2">
+              <button
+                onClick={handleViewHistory}
+                className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 transition-colors"
+                title="View transmittal change history"
+              >
+                <History className="w-4 h-4 mr-2" />
+                History
+              </button>
               <button
                 onClick={() => handleOpenExportDialog('csv')}
                 className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 transition-colors"
@@ -626,6 +683,121 @@ export default function FileSpreadsheetView() {
                     <span>Export {exportType === 'excel' ? 'Excel' : 'CSV'}</span>
                   </button>
                 </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {/* History Dialog */}
+        {showHistoryDialog && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="bg-white rounded-lg shadow-xl max-w-3xl w-full max-h-[90vh] flex flex-col"
+            >
+              {/* Header */}
+              <div className="p-6 border-b border-gray-200 flex items-center justify-between">
+                <div className="flex items-center space-x-3">
+                  <History className="w-6 h-6 text-blue-600" />
+                  <h2 className="text-xl font-semibold text-gray-900">
+                    Transmittal Change History
+                  </h2>
+                </div>
+                <button
+                  onClick={() => setShowHistoryDialog(false)}
+                  className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                >
+                  <X className="w-5 h-5 text-gray-500" />
+                </button>
+              </div>
+
+              {/* Content */}
+              <div className="flex-1 overflow-y-auto p-6">
+                {loadingHistory ? (
+                  <div className="flex items-center justify-center py-12">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                  </div>
+                ) : historyEntries.length === 0 ? (
+                  <div className="text-center py-12">
+                    <History className="w-12 h-12 text-gray-300 mx-auto mb-4" />
+                    <p className="text-gray-500 text-sm">No changes recorded yet</p>
+                    <p className="text-gray-400 text-xs mt-2">
+                      Changes will appear here when transmittal fields are edited
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {historyEntries.map((entry, index) => {
+                      const timestamp = new Date(entry.timestamp);
+                      const timeAgo = formatTimeAgo(timestamp);
+
+                      return (
+                        <motion.div
+                          key={entry.id}
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: index * 0.05 }}
+                          className="border border-gray-200 rounded-lg p-4 hover:border-gray-300 transition-colors"
+                        >
+                          {/* Document Name */}
+                          <div className="flex items-start justify-between mb-2">
+                            <div className="flex items-center space-x-2">
+                              <FileSpreadsheet className="w-4 h-4 text-blue-600" />
+                              <h3 className="font-medium text-gray-900">{entry.documentName}</h3>
+                            </div>
+                          </div>
+
+                          {/* Changes */}
+                          <div className="space-y-2 mb-3">
+                            {entry.changes.map((change, changeIndex) => {
+                              const fieldLabels = {
+                                drawingNo: 'Drawing No.',
+                                description: 'Description',
+                                revision: 'Revision'
+                              };
+
+                              return (
+                                <div key={changeIndex} className="flex items-start space-x-2 text-sm">
+                                  <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
+                                    {fieldLabels[change.field]}
+                                  </span>
+                                  <div className="flex-1">
+                                    {change.oldValue && (
+                                      <span className="text-gray-400 line-through">{change.oldValue}</span>
+                                    )}
+                                    {change.oldValue && <span className="text-gray-400 mx-1">→</span>}
+                                    <span className="text-gray-900 font-medium">{change.newValue || '(cleared)'}</span>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+
+                          {/* Editor and Timestamp */}
+                          <div className="flex items-center space-x-2 text-xs text-gray-500">
+                            <span>Edited by {entry.editedByName}</span>
+                            <span>•</span>
+                            <span title={timestamp.toLocaleString()}>{timeAgo}</span>
+                          </div>
+                        </motion.div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Footer */}
+              <div className="p-4 border-t border-gray-200 flex items-center justify-between bg-gray-50">
+                <p className="text-xs text-gray-500">
+                  {historyEntries.length} {historyEntries.length === 1 ? 'change' : 'changes'} recorded
+                </p>
+                <button
+                  onClick={() => setShowHistoryDialog(false)}
+                  className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
+                >
+                  Close
+                </button>
               </div>
             </motion.div>
           </div>

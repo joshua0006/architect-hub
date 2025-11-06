@@ -4,13 +4,15 @@ import {
   getDocs,
   getDoc,
   setDoc,
+  addDoc,
   query,
   where,
+  orderBy,
   serverTimestamp,
   Timestamp
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import { TransmittalData } from '../types';
+import { TransmittalData, TransmittalHistoryEntry } from '../types';
 
 export const transmittalService = {
   /**
@@ -67,6 +69,7 @@ export const transmittalService = {
   async updateTransmittalData(
     projectId: string,
     documentId: string,
+    documentName: string,
     userId: string,
     userName: string,
     updates: {
@@ -78,18 +81,68 @@ export const transmittalService = {
     try {
       const docRef = doc(db, 'transmittals', projectId, 'documents', documentId);
 
+      // Get current data to compare changes
+      const currentDoc = await getDoc(docRef);
+      const currentData = currentDoc.exists() ? currentDoc.data() : {};
+
+      // Track what actually changed
+      const changes: TransmittalHistoryEntry['changes'] = [];
+
+      if (updates.drawingNo !== undefined && updates.drawingNo !== currentData.drawingNo) {
+        changes.push({
+          field: 'drawingNo',
+          oldValue: currentData.drawingNo || '',
+          newValue: updates.drawingNo
+        });
+      }
+
+      if (updates.description !== undefined && updates.description !== currentData.description) {
+        changes.push({
+          field: 'description',
+          oldValue: currentData.description || '',
+          newValue: updates.description
+        });
+      }
+
+      if (updates.revision !== undefined && updates.revision !== currentData.revision) {
+        changes.push({
+          field: 'revision',
+          oldValue: currentData.revision || '',
+          newValue: updates.revision
+        });
+      }
+
+      // Only proceed if there are actual changes
+      if (changes.length === 0) {
+        return;
+      }
+
+      const timestamp = new Date().toISOString();
+
       // Prepare the data with metadata
       const data: Partial<TransmittalData> = {
         ...updates,
-        editedAt: new Date().toISOString(),
+        editedAt: timestamp,
         editedBy: userId,
         editedByName: userName,
         documentId,
         projectId
       };
 
-      // Use setDoc with merge to create or update
+      // Update current transmittal data
       await setDoc(docRef, data, { merge: true });
+
+      // Write to history collection
+      const historyRef = collection(db, 'transmittals', projectId, 'history');
+      await addDoc(historyRef, {
+        documentId,
+        documentName,
+        projectId,
+        changes,
+        editedBy: userId,
+        editedByName: userName,
+        timestamp
+      });
     } catch (error) {
       console.error('Error updating transmittal data:', error);
       throw new Error('Failed to update transmittal data');
@@ -129,6 +182,25 @@ export const transmittalService = {
     } catch (error) {
       console.error('Error checking transmittal overrides:', error);
       return false;
+    }
+  },
+
+  /**
+   * Get all transmittal change history for a project
+   */
+  async getProjectHistory(projectId: string): Promise<TransmittalHistoryEntry[]> {
+    try {
+      const historyRef = collection(db, 'transmittals', projectId, 'history');
+      const q = query(historyRef, orderBy('timestamp', 'desc'));
+      const snapshot = await getDocs(q);
+
+      return snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      } as TransmittalHistoryEntry));
+    } catch (error) {
+      console.error('Error getting transmittal history:', error);
+      throw new Error('Failed to get transmittal history');
     }
   }
 };
