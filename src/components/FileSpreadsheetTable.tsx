@@ -273,9 +273,9 @@ export default function FileSpreadsheetTable({
               const isSavingDescription = savingDescription[file.id] || false;
               const hasDescriptionError = !!descriptionError[file.id];
 
-              // Revision field - use transmittal override if available
-              const currentRevision = editingRevision[file.id] ?? file.transmittalRevision ?? file.revisionCount.toString();
-              const originalRevision = file.transmittalRevision ?? file.revisionCount.toString();
+              // Revision field - use transmittal override if available (don't show document version count)
+              const currentRevision = editingRevision[file.id] ?? file.transmittalRevision ?? '';
+              const originalRevision = file.transmittalRevision ?? '';
               const isSavingRevision = savingRevision[file.id] || false;
               const hasRevisionError = !!revisionError[file.id];
 
@@ -372,7 +372,8 @@ export default function FileSpreadsheetTable({
                         onChange={(e) => handleRevisionChange(file.id, e.target.value)}
                         onBlur={() => handleRevisionBlur(file.id, originalRevision)}
                         disabled={isSavingRevision}
-                        placeholder="Rev #"
+                        maxLength={4}
+                        placeholder="----"
                         className={`w-full px-2 py-1 text-sm border rounded-md text-center focus:outline-none focus:ring-2 transition-colors ${
                           file.isRevisionOverridden ? 'bg-blue-50 border-blue-300' : ''
                         } ${
@@ -382,7 +383,7 @@ export default function FileSpreadsheetTable({
                             ? 'border-gray-200 bg-gray-50 cursor-wait'
                             : 'border-gray-300 focus:ring-blue-500 hover:border-gray-400'
                         }`}
-                        title={hasRevisionError ? revisionError[file.id] : file.isRevisionOverridden ? `Override: ${file.transmittalRevision}\nOriginal: ${file.revisionCount}` : 'Enter revision (e.g., "Rev A", "R01")'}
+                        title={hasRevisionError ? revisionError[file.id] : file.isRevisionOverridden ? `Override: ${file.transmittalRevision}\nOriginal: ${file.revisionCount}` : 'Max 4 characters (e.g., "RevA", "R01", "3.2")'}
                       />
                       {isSavingRevision && (
                         <div className="absolute right-2 top-1/2 transform -translate-y-1/2">
