@@ -148,7 +148,8 @@ export default function FileSpreadsheetView() {
       type: doc.type,
       dateModified: doc.dateModified,
       url: doc.url,
-      document: doc
+      document: doc,
+      revisionCount: doc.version
     }));
   }, [documents, folderPathMap]);
 
@@ -194,6 +195,10 @@ export default function FileSpreadsheetView() {
           aValue = a.folderPath.toLowerCase();
           bValue = b.folderPath.toLowerCase();
           break;
+        case 'revisionCount':
+          aValue = a.revisionCount;
+          bValue = b.revisionCount;
+          break;
         default:
           return 0;
       }
@@ -225,18 +230,6 @@ export default function FileSpreadsheetView() {
     }
   };
 
-  // Handle download
-  const handleDownload = (file: FileRowData) => {
-    // Create a temporary link and trigger download
-    const link = document.createElement('a');
-    link.href = file.url;
-    link.download = file.name;
-    link.target = '_blank';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
   // Handle drawing number update
   const handleUpdateDrawingNo = async (fileId: string, drawingNo: string) => {
     const file = documents.find(doc => doc.id === fileId);
@@ -264,7 +257,8 @@ export default function FileSpreadsheetView() {
     const exportData = sortedFiles.map(file => ({
       'Drawing No.': file.drawingNo || '',
       'File Name': file.name,
-      'Folder Name': file.folderPath
+      'Folder Name': file.folderPath,
+      'No. of Revisions': file.revisionCount
     }));
 
     const worksheet = XLSX.utils.json_to_sheet(exportData);
@@ -275,7 +269,8 @@ export default function FileSpreadsheetView() {
     worksheet['!cols'] = [
       { wch: 15 }, // Drawing No.
       { wch: 40 }, // File Name
-      { wch: 30 }  // Folder Path
+      { wch: 30 }, // Folder Path
+      { wch: 15 }  // No. of Revisions
     ];
 
     XLSX.writeFile(workbook, `${projectName || 'project'}-files.xlsx`);
@@ -286,7 +281,8 @@ export default function FileSpreadsheetView() {
     const exportData = sortedFiles.map(file => ({
       'Drawing No.': file.drawingNo || '',
       'File Name': file.name,
-      'Folder Name': file.folderPath
+      'Folder Name': file.folderPath,
+      'No. of Revisions': file.revisionCount
     }));
 
     const worksheet = XLSX.utils.json_to_sheet(exportData);
@@ -459,7 +455,6 @@ export default function FileSpreadsheetView() {
               sortDirection={sortDirection}
               onSort={handleSort}
               onFileClick={handleFileClick}
-              onDownload={handleDownload}
               onUpdateDrawingNo={handleUpdateDrawingNo}
             />
           </div>

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ChevronUp, ChevronDown, ExternalLink, Download, Loader2 } from 'lucide-react';
+import { ChevronUp, ChevronDown, Loader2 } from 'lucide-react';
 import { Document } from '../types';
 import {
   Table,
@@ -9,12 +9,6 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@/components/ui/tooltip';
 
 export interface FileRowData {
   id: string;
@@ -25,6 +19,7 @@ export interface FileRowData {
   dateModified: string;
   url: string;
   document: Document;
+  revisionCount: number;
 }
 
 interface FileSpreadsheetTableProps {
@@ -33,7 +28,6 @@ interface FileSpreadsheetTableProps {
   sortDirection: 'asc' | 'desc';
   onSort: (column: string) => void;
   onFileClick: (fileId: string) => void;
-  onDownload: (file: FileRowData) => void;
   onUpdateDrawingNo: (fileId: string, drawingNo: string) => Promise<void>;
 }
 
@@ -43,7 +37,6 @@ export default function FileSpreadsheetTable({
   sortDirection,
   onSort,
   onFileClick,
-  onDownload,
   onUpdateDrawingNo
 }: FileSpreadsheetTableProps) {
   const [editingDrawingNo, setEditingDrawingNo] = useState<{[key: string]: string}>({});
@@ -143,8 +136,14 @@ export default function FileSpreadsheetTable({
                 {renderSortIcon('folderPath')}
               </div>
             </TableHead>
-            <TableHead className="w-[100px] px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
-              Actions
+            <TableHead
+              className="w-[120px] px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors"
+              onClick={() => onSort('revisionCount')}
+            >
+              <div className="flex items-center space-x-1">
+                <span>No. of Revisions</span>
+                {renderSortIcon('revisionCount')}
+              </div>
             </TableHead>
           </TableRow>
         </TableHeader>
@@ -206,39 +205,10 @@ export default function FileSpreadsheetTable({
                       {file.folderPath}
                     </div>
                   </TableCell>
-                  <TableCell className="w-[100px] px-4 py-4 whitespace-nowrap text-sm">
-                    <TooltipProvider>
-                      <div className="flex items-center space-x-2">
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <button
-                              onClick={() => onFileClick(file.id)}
-                              className="inline-flex items-center justify-center p-2 border border-gray-300 rounded-md text-gray-700 bg-white hover:bg-gray-50 transition-colors"
-                              aria-label="Open file"
-                            >
-                              <ExternalLink className="w-4 h-4" />
-                            </button>
-                          </TooltipTrigger>
-                          <TooltipContent>
-                            <p>Open file</p>
-                          </TooltipContent>
-                        </Tooltip>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <button
-                              onClick={() => onDownload(file)}
-                              className="inline-flex items-center justify-center p-2 border border-blue-300 rounded-md text-blue-700 bg-blue-50 hover:bg-blue-100 transition-colors"
-                              aria-label="Download file"
-                            >
-                              <Download className="w-4 h-4" />
-                            </button>
-                          </TooltipTrigger>
-                          <TooltipContent>
-                            <p>Download file</p>
-                          </TooltipContent>
-                        </Tooltip>
-                      </div>
-                    </TooltipProvider>
+                  <TableCell className="w-[120px] px-4 py-4 whitespace-nowrap text-sm">
+                    <div className="text-center text-gray-900 font-medium">
+                      {file.revisionCount}
+                    </div>
                   </TableCell>
                 </TableRow>
               );
