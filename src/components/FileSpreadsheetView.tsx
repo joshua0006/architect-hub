@@ -256,7 +256,7 @@ export default function FileSpreadsheetView() {
   const handleExportExcel = () => {
     const exportData = sortedFiles.map(file => ({
       'Drawing No.': file.drawingNo || '',
-      'File Name': file.name,
+      'Description': file.name,
       'Folder Name': file.folderPath,
       'No. of Revisions': file.revisionCount
     }));
@@ -268,7 +268,7 @@ export default function FileSpreadsheetView() {
     // Set column widths
     worksheet['!cols'] = [
       { wch: 15 }, // Drawing No.
-      { wch: 40 }, // File Name
+      { wch: 40 }, // Description
       { wch: 30 }, // Folder Path
       { wch: 15 }  // No. of Revisions
     ];
@@ -280,7 +280,7 @@ export default function FileSpreadsheetView() {
   const handleExportCSV = () => {
     const exportData = sortedFiles.map(file => ({
       'Drawing No.': file.drawingNo || '',
-      'File Name': file.name,
+      'Description': file.name,
       'Folder Name': file.folderPath,
       'No. of Revisions': file.revisionCount
     }));

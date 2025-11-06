@@ -123,7 +123,7 @@ export default function FileSpreadsheetTable({
               onClick={() => onSort('name')}
             >
               <div className="flex items-center space-x-1">
-                <span>File Name</span>
+                <span>Description</span>
                 {renderSortIcon('name')}
               </div>
             </TableHead>
