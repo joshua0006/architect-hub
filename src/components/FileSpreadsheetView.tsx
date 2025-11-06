@@ -374,7 +374,7 @@ export default function FileSpreadsheetView() {
                 <div className="flex items-center space-x-2">
                   <FileSpreadsheet className="w-6 h-6 text-blue-600" />
                   <h1 className="text-2xl font-semibold text-gray-900">
-                    Files Spreadsheet
+                    Transmittal
                   </h1>
                 </div>
                 <p className="text-sm text-gray-500 mt-1">
