@@ -28,6 +28,14 @@ export default function FileSpreadsheetView() {
   const [sortColumn, setSortColumn] = useState<string>('name');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const [isFilterOpen, setIsFilterOpen] = useState(false);
+  const [showExportDialog, setShowExportDialog] = useState(false);
+  const [exportType, setExportType] = useState<'csv' | 'excel'>('excel');
+  const [exportColumns, setExportColumns] = useState({
+    drawingNo: true,
+    description: true,
+    folderName: false,
+    revisions: true
+  });
   const mountedRef = useRef(true);
 
   // Timeout wrapper function
@@ -297,50 +305,60 @@ export default function FileSpreadsheetView() {
     }
   };
 
-  // Export to Excel
-  const handleExportExcel = () => {
-    const exportData = sortedFiles.map(file => ({
-      'Drawing No.': file.transmittalDrawingNo || file.drawingNo || '',
-      'Description': file.transmittalDescription || file.name,
-      'Folder Name': file.folderPath,
-      'No. of Revisions': file.transmittalRevision || file.revisionCount.toString()
-    }));
-
-    const worksheet = XLSX.utils.json_to_sheet(exportData);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Transmittal');
-
-    // Set column widths
-    worksheet['!cols'] = [
-      { wch: 15 }, // Drawing No.
-      { wch: 40 }, // Description
-      { wch: 30 }, // Folder Path
-      { wch: 15 }  // No. of Revisions
-    ];
-
-    XLSX.writeFile(workbook, `${projectName || 'project'}-transmittal.xlsx`);
+  // Open export dialog
+  const handleOpenExportDialog = (type: 'csv' | 'excel') => {
+    setExportType(type);
+    setShowExportDialog(true);
   };
 
-  // Export to CSV
-  const handleExportCSV = () => {
-    const exportData = sortedFiles.map(file => ({
-      'Drawing No.': file.transmittalDrawingNo || file.drawingNo || '',
-      'Description': file.transmittalDescription || file.name,
-      'Folder Name': file.folderPath,
-      'No. of Revisions': file.transmittalRevision || file.revisionCount.toString()
-    }));
+  // Handle export with selected columns
+  const handleExport = () => {
+    const exportData = sortedFiles.map(file => {
+      const row: any = {};
+
+      if (exportColumns.drawingNo) {
+        row['Drawing No.'] = file.transmittalDrawingNo || file.drawingNo || '';
+      }
+      if (exportColumns.description) {
+        row['Description'] = file.transmittalDescription || file.name;
+      }
+      if (exportColumns.folderName) {
+        row['Folder Name'] = file.folderPath;
+      }
+      if (exportColumns.revisions) {
+        row['No. of Revisions'] = file.transmittalRevision || file.revisionCount.toString();
+      }
+
+      return row;
+    });
 
     const worksheet = XLSX.utils.json_to_sheet(exportData);
-    const csv = XLSX.utils.sheet_to_csv(worksheet);
 
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = `${projectName || 'project'}-transmittal.csv`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(link.href);
+    // Set column widths dynamically based on selected columns
+    const colWidths = [];
+    if (exportColumns.drawingNo) colWidths.push({ wch: 15 });
+    if (exportColumns.description) colWidths.push({ wch: 40 });
+    if (exportColumns.folderName) colWidths.push({ wch: 30 });
+    if (exportColumns.revisions) colWidths.push({ wch: 15 });
+    worksheet['!cols'] = colWidths;
+
+    if (exportType === 'excel') {
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Transmittal');
+      XLSX.writeFile(workbook, `${projectName || 'project'}-transmittal.xlsx`);
+    } else {
+      const csv = XLSX.utils.sheet_to_csv(worksheet);
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = `${projectName || 'project'}-transmittal.csv`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(link.href);
+    }
+
+    setShowExportDialog(false);
   };
 
   // Handle retry
@@ -431,14 +449,14 @@ export default function FileSpreadsheetView() {
             {/* Export buttons */}
             <div className="flex items-center space-x-2">
               <button
-                onClick={handleExportCSV}
+                onClick={() => handleOpenExportDialog('csv')}
                 className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 transition-colors"
               >
                 <Download className="w-4 h-4 mr-2" />
                 Export CSV
               </button>
               <button
-                onClick={handleExportExcel}
+                onClick={() => handleOpenExportDialog('excel')}
                 className="inline-flex items-center px-4 py-2 border border-blue-500 rounded-md text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 transition-colors"
               >
                 <Download className="w-4 h-4 mr-2" />
@@ -526,6 +544,92 @@ export default function FileSpreadsheetView() {
           isOpen={isFilterOpen}
           onClose={() => setIsFilterOpen(false)}
         />
+
+        {/* Export Column Selection Dialog */}
+        {showExportDialog && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4"
+            >
+              <div className="p-6">
+                <h2 className="text-xl font-semibold text-gray-900 mb-4">
+                  Export {exportType === 'excel' ? 'Excel' : 'CSV'}
+                </h2>
+                <p className="text-sm text-gray-600 mb-4">
+                  Select columns to include in the export
+                </p>
+
+                {/* Column Selection */}
+                <div className="space-y-3 mb-6">
+                  <label className="flex items-center space-x-3 cursor-pointer hover:bg-gray-50 p-2 rounded">
+                    <input
+                      type="checkbox"
+                      checked={exportColumns.drawingNo}
+                      onChange={(e) => setExportColumns(prev => ({ ...prev, drawingNo: e.target.checked }))}
+                      className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                    />
+                    <span className="text-sm font-medium text-gray-700">Drawing No.</span>
+                  </label>
+
+                  <label className="flex items-center space-x-3 cursor-pointer hover:bg-gray-50 p-2 rounded">
+                    <input
+                      type="checkbox"
+                      checked={exportColumns.description}
+                      onChange={(e) => setExportColumns(prev => ({ ...prev, description: e.target.checked }))}
+                      className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                    />
+                    <span className="text-sm font-medium text-gray-700">Description</span>
+                  </label>
+
+                  <label className="flex items-center space-x-3 cursor-pointer hover:bg-gray-50 p-2 rounded">
+                    <input
+                      type="checkbox"
+                      checked={exportColumns.folderName}
+                      onChange={(e) => setExportColumns(prev => ({ ...prev, folderName: e.target.checked }))}
+                      className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                    />
+                    <span className="text-sm font-medium text-gray-700">Folder Name</span>
+                  </label>
+
+                  <label className="flex items-center space-x-3 cursor-pointer hover:bg-gray-50 p-2 rounded">
+                    <input
+                      type="checkbox"
+                      checked={exportColumns.revisions}
+                      onChange={(e) => setExportColumns(prev => ({ ...prev, revisions: e.target.checked }))}
+                      className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                    />
+                    <span className="text-sm font-medium text-gray-700">No. of Revisions</span>
+                  </label>
+                </div>
+
+                {/* Selected Count */}
+                <div className="mb-4 text-xs text-gray-500">
+                  {Object.values(exportColumns).filter(Boolean).length} of 4 columns selected
+                </div>
+
+                {/* Action Buttons */}
+                <div className="flex items-center justify-end space-x-3">
+                  <button
+                    onClick={() => setShowExportDialog(false)}
+                    className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleExport}
+                    disabled={Object.values(exportColumns).filter(Boolean).length === 0}
+                    className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span>Export {exportType === 'excel' ? 'Excel' : 'CSV'}</span>
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
       </div>
     </div>
   );
