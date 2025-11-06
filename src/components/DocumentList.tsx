@@ -5160,7 +5160,8 @@ export default function DocumentList({
                   </motion.div>
                 ))}
 
-                {subFolders.length === 0 && currentDocs.length === 0 && (
+                {!loading && !isReloading && !rootLoading && !isNotificationLoading && !isProcessingNotification &&
+                 subFolders.length === 0 && currentDocs.length === 0 && (
                   <motion.div
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}

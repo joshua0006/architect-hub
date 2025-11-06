@@ -221,12 +221,16 @@ export default function FileSpreadsheetView() {
     }
   };
 
-  // Handle file click - open in document viewer
+  // Handle file click - open in document viewer in new tab
   const handleFileClick = (fileId: string) => {
     const file = documents.find(doc => doc.id === fileId);
     if (file) {
-      // Open document viewer in same or new tab based on user preference
-      navigate(`/${projectId}/documents/${fileId}`);
+      // Construct URL based on whether file has a folder
+      const url = file.folderId
+        ? `/documents/projects/${projectId}/folders/${file.folderId}/files/${fileId}`
+        : `/documents/projects/${projectId}/files/${fileId}`;
+      // Open in new tab
+      window.open(url, '_blank');
     }
   };
 
