@@ -12,7 +12,7 @@ import {
   Timestamp
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import { TransmittalData, TransmittalHistoryEntry } from '../types';
+import { TransmittalData, TransmittalHistoryEntry, StandaloneTransmittalEntry } from '../types';
 
 export const transmittalService = {
   /**
@@ -201,6 +201,112 @@ export const transmittalService = {
     } catch (error) {
       console.error('Error getting transmittal history:', error);
       throw new Error('Failed to get transmittal history');
+    }
+  },
+
+  /**
+   * Create a standalone transmittal entry (no document link)
+   */
+  async createStandaloneEntry(
+    projectId: string,
+    userId: string,
+    userName: string,
+    data: {
+      drawingNo?: string;
+      title?: string;
+      description?: string;
+      revision?: string;
+    }
+  ): Promise<StandaloneTransmittalEntry> {
+    try {
+      const timestamp = new Date().toISOString();
+      const collectionRef = collection(db, 'transmittals', projectId, 'standalone');
+
+      const entryData = {
+        projectId,
+        ...data,
+        createdAt: timestamp,
+        createdBy: userId,
+        createdByName: userName
+      };
+
+      const docRef = await addDoc(collectionRef, entryData);
+
+      return {
+        id: docRef.id,
+        ...entryData
+      } as StandaloneTransmittalEntry;
+    } catch (error) {
+      console.error('Error creating standalone entry:', error);
+      throw new Error('Failed to create standalone entry');
+    }
+  },
+
+  /**
+   * Get all standalone transmittal entries for a project
+   */
+  async getAllStandaloneEntries(projectId: string): Promise<StandaloneTransmittalEntry[]> {
+    try {
+      const collectionRef = collection(db, 'transmittals', projectId, 'standalone');
+      const snapshot = await getDocs(collectionRef);
+
+      return snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      } as StandaloneTransmittalEntry));
+    } catch (error) {
+      console.error('Error getting standalone entries:', error);
+      throw new Error('Failed to get standalone entries');
+    }
+  },
+
+  /**
+   * Update a standalone transmittal entry
+   */
+  async updateStandaloneEntry(
+    projectId: string,
+    entryId: string,
+    userId: string,
+    userName: string,
+    updates: {
+      drawingNo?: string;
+      title?: string;
+      description?: string;
+      revision?: string;
+    }
+  ): Promise<void> {
+    try {
+      const docRef = doc(db, 'transmittals', projectId, 'standalone', entryId);
+      const timestamp = new Date().toISOString();
+
+      await setDoc(docRef, {
+        ...updates,
+        editedAt: timestamp,
+        editedBy: userId,
+        editedByName: userName
+      }, { merge: true });
+    } catch (error) {
+      console.error('Error updating standalone entry:', error);
+      throw new Error('Failed to update standalone entry');
+    }
+  },
+
+  /**
+   * Delete a standalone transmittal entry
+   */
+  async deleteStandaloneEntry(projectId: string, entryId: string): Promise<void> {
+    try {
+      const docRef = doc(db, 'transmittals', projectId, 'standalone', entryId);
+      await setDoc(docRef, {
+        deletedAt: new Date().toISOString(),
+        _deleted: true
+      }, { merge: true });
+
+      // Alternatively, we could use deleteDoc() for hard deletion:
+      // await deleteDoc(docRef);
+    } catch (error) {
+      console.error('Error deleting standalone entry:', error);
+      throw new Error('Failed to delete standalone entry');
     }
   }
 };

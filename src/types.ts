@@ -81,6 +81,23 @@ export interface TransmittalHistoryEntry {
   timestamp: string;          // ISO timestamp
 }
 
+// Standalone transmittal entry - exists independently without a linked document
+export interface StandaloneTransmittalEntry {
+  id: string;                 // Auto-generated unique ID
+  projectId: string;          // Project this entry belongs to
+  drawingNo?: string;         // Drawing number
+  title?: string;             // Entry title (user-defined)
+  description?: string;       // Entry description
+  revision?: string;          // Revision identifier
+  documentId?: string;        // Optional link to document (for future linking)
+  createdAt: string;          // ISO timestamp
+  createdBy: string;          // User ID who created the entry
+  createdByName: string;      // Display name for UI
+  editedAt?: string;          // Last edit timestamp
+  editedBy?: string;          // Last editor user ID
+  editedByName?: string;      // Last editor display name
+}
+
 // Project types
 export interface Project {
   id: string;

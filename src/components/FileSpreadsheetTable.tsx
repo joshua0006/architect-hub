@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ChevronUp, ChevronDown, Loader2, Edit3 } from 'lucide-react';
+import { ChevronUp, ChevronDown, Loader2, Edit3, Trash2 } from 'lucide-react';
 import { Document } from '../types';
 import {
   Table,
@@ -18,7 +18,7 @@ export interface FileRowData {
   type: string;
   dateModified: string;
   url: string;
-  document: Document;
+  document?: Document;
   revisionCount: number;
   // Transmittal-specific fields
   transmittalDrawingNo?: string;
@@ -29,6 +29,9 @@ export interface FileRowData {
   isTitleOverridden?: boolean;
   isDescriptionOverridden?: boolean;
   isRevisionOverridden?: boolean;
+  // Standalone entry fields
+  isStandalone?: boolean;
+  standaloneId?: string;
 }
 
 interface FileSpreadsheetTableProps {
@@ -39,6 +42,7 @@ interface FileSpreadsheetTableProps {
   onFileClick: (fileId: string) => void;
   onUpdateDrawingNo: (fileId: string, drawingNo: string) => Promise<void>;
   onUpdateTransmittal: (fileId: string, field: 'drawingNo' | 'title' | 'description' | 'revision', value: string) => Promise<void>;
+  onDeleteRow: (rowId: string, isStandalone: boolean) => void;
 }
 
 export default function FileSpreadsheetTable({
@@ -48,7 +52,8 @@ export default function FileSpreadsheetTable({
   onSort,
   onFileClick,
   onUpdateDrawingNo,
-  onUpdateTransmittal
+  onUpdateTransmittal,
+  onDeleteRow
 }: FileSpreadsheetTableProps) {
   const [editingDrawingNo, setEditingDrawingNo] = useState<{[key: string]: string}>({});
   const [savingDrawingNo, setSavingDrawingNo] = useState<{[key: string]: boolean}>({});
@@ -250,12 +255,17 @@ export default function FileSpreadsheetTable({
                 {renderSortIcon('revisionCount')}
               </div>
             </TableHead>
+            <TableHead
+              className="w-[80px] px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider text-center"
+            >
+              <span>Actions</span>
+            </TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {files.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={4} className="px-4 py-12 text-center text-gray-500">
+              <TableCell colSpan={5} className="px-4 py-12 text-center text-gray-500">
                 No files found
               </TableCell>
             </TableRow>
@@ -407,6 +417,17 @@ export default function FileSpreadsheetTable({
                     {hasRevisionError && (
                       <p className="text-xs text-red-600 mt-1">{revisionError[file.id]}</p>
                     )}
+                  </TableCell>
+
+                  {/* Actions Column */}
+                  <TableCell className="w-[80px] px-4 py-4 whitespace-nowrap text-center">
+                    <button
+                      onClick={() => onDeleteRow(file.isStandalone ? file.standaloneId! : file.id, !!file.isStandalone)}
+                      className="inline-flex items-center justify-center p-1.5 rounded-md text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                      title="Delete row"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
                   </TableCell>
                 </TableRow>
               );

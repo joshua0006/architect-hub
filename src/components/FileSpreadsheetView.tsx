@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Search, Download, FileSpreadsheet, ArrowLeft, AlertCircle, RefreshCw, Filter, ChevronDown, X, History } from 'lucide-react';
-import { Document, Folder, TransmittalData, TransmittalHistoryEntry } from '../types';
+import { Search, Download, FileSpreadsheet, ArrowLeft, AlertCircle, RefreshCw, Filter, ChevronDown, X, History, FilePlus } from 'lucide-react';
+import { Document, Folder, TransmittalData, TransmittalHistoryEntry, StandaloneTransmittalEntry } from '../types';
 import { documentService } from '../services/documentService';
 import { folderService } from '../services/folderService';
 import { projectService } from '../services';
@@ -43,6 +43,7 @@ export default function FileSpreadsheetView() {
   const [documents, setDocuments] = useState<Document[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [transmittalData, setTransmittalData] = useState<Map<string, TransmittalData>>(new Map());
+  const [standaloneEntries, setStandaloneEntries] = useState<StandaloneTransmittalEntry[]>([]);
   const [projectName, setProjectName] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -62,6 +63,9 @@ export default function FileSpreadsheetView() {
   const [showHistoryDialog, setShowHistoryDialog] = useState(false);
   const [historyEntries, setHistoryEntries] = useState<TransmittalHistoryEntry[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
+  const [showAddRowDialog, setShowAddRowDialog] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<{id: string, isStandalone: boolean} | null>(null);
   const mountedRef = useRef(true);
 
   // Timeout wrapper function
@@ -94,14 +98,15 @@ export default function FileSpreadsheetView() {
           setError(null);
         }
 
-        // Fetch project, folders, documents, and transmittal data in parallel with timeout
+        // Fetch project, folders, documents, transmittal data, and standalone entries in parallel with timeout
         // Using optimized single query for documents (previously N+1 queries)
-        const [project, allFolders, allDocuments, transmittalMap] = await withTimeout(
+        const [project, allFolders, allDocuments, transmittalMap, standalone] = await withTimeout(
           Promise.all([
             projectService.getById(projectId),
             folderService.getByProjectId(projectId),
             documentService.getByProjectId(projectId),  // ✅ Single query instead of N+1
-            transmittalService.getAllTransmittalData(projectId)  // ✅ Batch load transmittal data
+            transmittalService.getAllTransmittalData(projectId),  // ✅ Batch load transmittal data
+            transmittalService.getAllStandaloneEntries(projectId)  // ✅ Load standalone entries
           ]),
           15000
         );
@@ -113,6 +118,7 @@ export default function FileSpreadsheetView() {
           setFolders(allFolders);
           setDocuments(allDocuments);
           setTransmittalData(transmittalMap);
+          setStandaloneEntries(standalone.filter(entry => !entry._deleted));  // Filter out deleted entries
           setLoading(false);
         }
       } catch (error) {
@@ -180,7 +186,8 @@ export default function FileSpreadsheetView() {
 
   // Transform documents to file rows with folder paths and transmittal data
   const fileRows: FileRowData[] = useMemo(() => {
-    return documents.map(doc => {
+    // Document-based rows
+    const documentRows = documents.map(doc => {
       const transmittal = transmittalData.get(doc.id);
 
       return {
@@ -201,10 +208,39 @@ export default function FileSpreadsheetView() {
         isDrawingNoOverridden: !!(transmittal?.drawingNo),
         isTitleOverridden: !!(transmittal?.title),
         isDescriptionOverridden: !!(transmittal?.description),
-        isRevisionOverridden: !!(transmittal?.revision)
+        isRevisionOverridden: !!(transmittal?.revision),
+        isStandalone: false
       };
     });
-  }, [documents, folderPathMap, transmittalData]);
+
+    // Standalone entry rows
+    const standaloneRows = standaloneEntries.map(entry => {
+      return {
+        id: entry.id,
+        drawingNo: entry.drawingNo || '',
+        name: entry.title || 'Untitled Entry',
+        folderPath: '/',
+        type: 'standalone',
+        dateModified: entry.createdAt,
+        url: '',
+        document: undefined,
+        revisionCount: 0,
+        transmittalDrawingNo: entry.drawingNo,
+        transmittalTitle: entry.title,
+        transmittalDescription: entry.description,
+        transmittalRevision: entry.revision,
+        isDrawingNoOverridden: false,
+        isTitleOverridden: false,
+        isDescriptionOverridden: false,
+        isRevisionOverridden: false,
+        isStandalone: true,
+        standaloneId: entry.id
+      };
+    });
+
+    // Merge and return both
+    return [...documentRows, ...standaloneRows];
+  }, [documents, folderPathMap, transmittalData, standaloneEntries]);
 
   // Filter and search
   const filteredFiles = useMemo(() => {
@@ -335,6 +371,49 @@ export default function FileSpreadsheetView() {
     } catch (error) {
       console.error('Error updating transmittal data:', error);
       throw error;
+    }
+  };
+
+  // Handle delete row (show confirmation dialog)
+  const handleDeleteRow = (rowId: string, isStandalone: boolean) => {
+    setDeleteTarget({ id: rowId, isStandalone });
+    setShowDeleteConfirm(true);
+  };
+
+  // Confirm delete and execute
+  const confirmDelete = async () => {
+    if (!deleteTarget || !projectId) return;
+
+    try {
+      if (deleteTarget.isStandalone) {
+        await transmittalService.deleteStandaloneEntry(projectId, deleteTarget.id);
+        setStandaloneEntries(prev => prev.filter(e => e.id !== deleteTarget.id));
+      }
+      // For document-linked rows, we don't actually delete them from the transmittal view
+      // as they represent real documents
+    } catch (error) {
+      console.error('Error deleting row:', error);
+    } finally {
+      setShowDeleteConfirm(false);
+      setDeleteTarget(null);
+    }
+  };
+
+  // Handle add row (create standalone entry)
+  const handleAddRow = async (data: {drawingNo?: string, title?: string, description?: string, revision?: string}) => {
+    if (!projectId || !user) return;
+
+    try {
+      const newEntry = await transmittalService.createStandaloneEntry(
+        projectId,
+        user.id,
+        user.displayName || 'Unknown User',
+        data
+      );
+      setStandaloneEntries(prev => [...prev, newEntry]);
+      setShowAddRowDialog(false);
+    } catch (error) {
+      console.error('Error adding row:', error);
     }
   };
 
@@ -497,8 +576,16 @@ export default function FileSpreadsheetView() {
               </div>
             </div>
 
-            {/* History and Export buttons */}
+            {/* Add Row, History and Export buttons */}
             <div className="flex items-center space-x-2">
+              <button
+                onClick={() => setShowAddRowDialog(true)}
+                className="inline-flex items-center px-4 py-2 border border-green-500 rounded-md text-sm font-medium text-white bg-green-600 hover:bg-green-700 transition-colors"
+                title="Add new row"
+              >
+                <FilePlus className="w-4 h-4 mr-2" />
+                Add Row
+              </button>
               <button
                 onClick={handleViewHistory}
                 className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 transition-colors"
@@ -579,6 +666,7 @@ export default function FileSpreadsheetView() {
               onFileClick={handleFileClick}
               onUpdateDrawingNo={handleUpdateTransmittal}
               onUpdateTransmittal={handleUpdateTransmittal}
+              onDeleteRow={handleDeleteRow}
             />
           </div>
         </motion.div>
@@ -801,6 +889,72 @@ export default function FileSpreadsheetView() {
                 >
                   Close
                 </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {/* Add Row Dialog */}
+        {showAddRowDialog && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="bg-white rounded-lg shadow-xl max-w-md w-full"
+            >
+              <div className="p-6">
+                <h2 className="text-xl font-semibold text-gray-900 mb-4">Add New Row</h2>
+                <form onSubmit={(e) => {
+                  e.preventDefault();
+                  const formData = new FormData(e.currentTarget);
+                  handleAddRow({
+                    drawingNo: formData.get('drawingNo') as string || undefined,
+                    title: formData.get('title') as string || undefined,
+                    description: formData.get('description') as string || undefined,
+                    revision: formData.get('revision') as string || undefined
+                  });
+                }}>
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Drawing No.</label>
+                      <input type="text" name="drawingNo" maxLength={6} className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Title</label>
+                      <input type="text" name="title" className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                      <input type="text" name="description" className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Revision</label>
+                      <input type="text" name="revision" maxLength={4} className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent" />
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-end space-x-3 mt-6">
+                    <button type="button" onClick={() => setShowAddRowDialog(false)} className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">Cancel</button>
+                    <button type="submit" className="px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-md hover:bg-green-700">Add Row</button>
+                  </div>
+                </form>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {/* Delete Confirmation Dialog */}
+        {showDeleteConfirm && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="bg-white rounded-lg shadow-xl max-w-md w-full p-6"
+            >
+              <h2 className="text-xl font-semibold text-gray-900 mb-4">Delete Row?</h2>
+              <p className="text-gray-600 mb-6">Are you sure you want to delete this row? This action cannot be undone.</p>
+              <div className="flex items-center justify-end space-x-3">
+                <button onClick={() => setShowDeleteConfirm(false)} className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">Cancel</button>
+                <button onClick={confirmDelete} className="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-md hover:bg-red-700">Delete</button>
               </div>
             </motion.div>
           </div>
