@@ -22,9 +22,11 @@ export interface FileRowData {
   revisionCount: number;
   // Transmittal-specific fields
   transmittalDrawingNo?: string;
+  transmittalTitle?: string;
   transmittalDescription?: string;
   transmittalRevision?: string;
   isDrawingNoOverridden?: boolean;
+  isTitleOverridden?: boolean;
   isDescriptionOverridden?: boolean;
   isRevisionOverridden?: boolean;
 }
@@ -36,7 +38,7 @@ interface FileSpreadsheetTableProps {
   onSort: (column: string) => void;
   onFileClick: (fileId: string) => void;
   onUpdateDrawingNo: (fileId: string, drawingNo: string) => Promise<void>;
-  onUpdateTransmittal: (fileId: string, field: 'drawingNo' | 'description' | 'revision', value: string) => Promise<void>;
+  onUpdateTransmittal: (fileId: string, field: 'drawingNo' | 'title' | 'description' | 'revision', value: string) => Promise<void>;
 }
 
 export default function FileSpreadsheetTable({
@@ -224,21 +226,19 @@ export default function FileSpreadsheetTable({
               </div>
             </TableHead>
             <TableHead
-              className="w-auto min-w-[200px] px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors"
+              className="w-auto min-w-[250px] px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors"
               onClick={() => onSort('name')}
             >
               <div className="flex items-center space-x-1">
-                <span>Description</span>
+                <span>Title</span>
                 {renderSortIcon('name')}
               </div>
             </TableHead>
             <TableHead
-              className="w-auto min-w-[180px] px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors"
-              onClick={() => onSort('folderPath')}
+              className="w-auto min-w-[200px] px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider"
             >
               <div className="flex items-center space-x-1">
-                <span>Folder Name</span>
-                {renderSortIcon('folderPath')}
+                <span>Description</span>
               </div>
             </TableHead>
             <TableHead
@@ -267,9 +267,12 @@ export default function FileSpreadsheetTable({
               const isSavingDrawingNo = savingDrawingNo[file.id] || false;
               const hasDrawingNoError = !!drawingNoError[file.id];
 
-              // Description field - use transmittal override if available
-              const currentDescription = editingDescription[file.id] ?? file.transmittalDescription ?? file.name;
-              const originalDescription = file.transmittalDescription ?? file.name;
+              // Title field - non-editable, shows document name
+              const titleValue = file.transmittalTitle ?? file.name;
+
+              // Description field - editable, blank by default, use transmittal override if available
+              const currentDescription = editingDescription[file.id] ?? file.transmittalDescription ?? '';
+              const originalDescription = file.transmittalDescription ?? '';
               const isSavingDescription = savingDescription[file.id] || false;
               const hasDescriptionError = !!descriptionError[file.id];
 
@@ -319,7 +322,19 @@ export default function FileSpreadsheetTable({
                     )}
                   </TableCell>
 
-                  {/* Description Column */}
+                  {/* Title Column (Non-editable) */}
+                  <TableCell className="w-auto min-w-[250px] px-4 py-4">
+                    <div className="flex flex-col">
+                      <div className="truncate text-sm text-gray-900 font-medium" title={titleValue}>
+                        {titleValue}
+                      </div>
+                      <div className="truncate text-xs text-gray-500 mt-0.5" title={file.folderPath}>
+                        {file.folderPath}
+                      </div>
+                    </div>
+                  </TableCell>
+
+                  {/* Description Column (Editable) */}
                   <TableCell className="w-auto min-w-[200px] px-4 py-4 whitespace-nowrap">
                     <div className="relative">
                       <input
@@ -338,7 +353,7 @@ export default function FileSpreadsheetTable({
                             ? 'border-gray-200 bg-gray-50 cursor-wait'
                             : 'border-gray-300 focus:ring-blue-500 hover:border-gray-400'
                         }`}
-                        title={hasDescriptionError ? descriptionError[file.id] : file.isDescriptionOverridden ? `Override: ${file.transmittalDescription}\nOriginal: ${file.name}` : currentDescription}
+                        title={hasDescriptionError ? descriptionError[file.id] : file.isDescriptionOverridden ? `Override: ${file.transmittalDescription}` : 'Enter description'}
                       />
                       {isSavingDescription && (
                         <div className="absolute right-2 top-1/2 transform -translate-y-1/2">
@@ -354,13 +369,6 @@ export default function FileSpreadsheetTable({
                     {hasDescriptionError && (
                       <p className="text-xs text-red-600 mt-1">{descriptionError[file.id]}</p>
                     )}
-                  </TableCell>
-
-                  {/* Folder Path Column (Read-only) */}
-                  <TableCell className="w-auto min-w-[180px] px-4 py-4 whitespace-nowrap text-sm text-gray-600">
-                    <div className="truncate max-w-full" title={file.folderPath}>
-                      {file.folderPath}
-                    </div>
                   </TableCell>
 
                   {/* Revision Column */}

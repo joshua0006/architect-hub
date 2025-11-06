@@ -57,7 +57,8 @@ export interface TransmittalData {
   documentId: string;
   projectId: string;
   drawingNo?: string;        // Transmittal-specific drawing number
-  description?: string;       // Override of document.name for transmittal
+  title?: string;             // Document title (non-editable, derived from document.name)
+  description?: string;       // User-editable description for transmittal
   revision?: string;          // Manual revision identifier (e.g., "Rev A", "R01", "3.2")
   editedAt?: string;
   editedBy?: string;          // User ID who made the edit
@@ -71,7 +72,7 @@ export interface TransmittalHistoryEntry {
   documentName: string;       // Snapshot of document name at time of edit
   projectId: string;
   changes: {
-    field: 'drawingNo' | 'description' | 'revision';
+    field: 'drawingNo' | 'title' | 'description' | 'revision';
     oldValue: string;
     newValue: string;
   }[];

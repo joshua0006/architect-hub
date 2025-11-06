@@ -55,8 +55,8 @@ export default function FileSpreadsheetView() {
   const [exportType, setExportType] = useState<'csv' | 'excel'>('excel');
   const [exportColumns, setExportColumns] = useState({
     drawingNo: true,
+    title: true,
     description: true,
-    folderName: false,
     revisions: true
   });
   const [showHistoryDialog, setShowHistoryDialog] = useState(false);
@@ -195,9 +195,11 @@ export default function FileSpreadsheetView() {
         revisionCount: doc.version,
         // Transmittal overrides
         transmittalDrawingNo: transmittal?.drawingNo,
+        transmittalTitle: transmittal?.title,
         transmittalDescription: transmittal?.description,
         transmittalRevision: transmittal?.revision,
         isDrawingNoOverridden: !!(transmittal?.drawingNo),
+        isTitleOverridden: !!(transmittal?.title),
         isDescriptionOverridden: !!(transmittal?.description),
         isRevisionOverridden: !!(transmittal?.revision)
       };
@@ -288,7 +290,7 @@ export default function FileSpreadsheetView() {
   // Handle transmittal data update
   const handleUpdateTransmittal = async (
     fileId: string,
-    field: 'drawingNo' | 'description' | 'revision',
+    field: 'drawingNo' | 'title' | 'description' | 'revision',
     value: string
   ) => {
     if (!projectId || !user) {
@@ -368,11 +370,11 @@ export default function FileSpreadsheetView() {
       if (exportColumns.drawingNo) {
         row['Drawing No.'] = file.transmittalDrawingNo || file.drawingNo || '';
       }
-      if (exportColumns.description) {
-        row['Description'] = file.transmittalDescription || file.name;
+      if (exportColumns.title) {
+        row['Title'] = file.transmittalTitle || file.name;
       }
-      if (exportColumns.folderName) {
-        row['Folder Name'] = file.folderPath;
+      if (exportColumns.description) {
+        row['Description'] = file.transmittalDescription || '';
       }
       if (exportColumns.revisions) {
         row['No. of Revisions'] = file.transmittalRevision || file.revisionCount.toString();
@@ -386,8 +388,8 @@ export default function FileSpreadsheetView() {
     // Set column widths dynamically based on selected columns
     const colWidths = [];
     if (exportColumns.drawingNo) colWidths.push({ wch: 15 });
+    if (exportColumns.title) colWidths.push({ wch: 40 });
     if (exportColumns.description) colWidths.push({ wch: 40 });
-    if (exportColumns.folderName) colWidths.push({ wch: 30 });
     if (exportColumns.revisions) colWidths.push({ wch: 15 });
     worksheet['!cols'] = colWidths;
 
@@ -633,21 +635,21 @@ export default function FileSpreadsheetView() {
                   <label className="flex items-center space-x-3 cursor-pointer hover:bg-gray-50 p-2 rounded">
                     <input
                       type="checkbox"
-                      checked={exportColumns.description}
-                      onChange={(e) => setExportColumns(prev => ({ ...prev, description: e.target.checked }))}
+                      checked={exportColumns.title}
+                      onChange={(e) => setExportColumns(prev => ({ ...prev, title: e.target.checked }))}
                       className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
                     />
-                    <span className="text-sm font-medium text-gray-700">Description</span>
+                    <span className="text-sm font-medium text-gray-700">Title</span>
                   </label>
 
                   <label className="flex items-center space-x-3 cursor-pointer hover:bg-gray-50 p-2 rounded">
                     <input
                       type="checkbox"
-                      checked={exportColumns.folderName}
-                      onChange={(e) => setExportColumns(prev => ({ ...prev, folderName: e.target.checked }))}
+                      checked={exportColumns.description}
+                      onChange={(e) => setExportColumns(prev => ({ ...prev, description: e.target.checked }))}
                       className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
                     />
-                    <span className="text-sm font-medium text-gray-700">Folder Name</span>
+                    <span className="text-sm font-medium text-gray-700">Description</span>
                   </label>
 
                   <label className="flex items-center space-x-3 cursor-pointer hover:bg-gray-50 p-2 rounded">
@@ -753,6 +755,7 @@ export default function FileSpreadsheetView() {
                             {entry.changes.map((change, changeIndex) => {
                               const fieldLabels = {
                                 drawingNo: 'Drawing No.',
+                                title: 'Title',
                                 description: 'Description',
                                 revision: 'Revision'
                               };
