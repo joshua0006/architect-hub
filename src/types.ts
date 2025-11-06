@@ -52,6 +52,18 @@ export interface DocumentVersion {
   };
 }
 
+// Transmittal types - for transmittal-specific overrides that don't affect original documents
+export interface TransmittalData {
+  documentId: string;
+  projectId: string;
+  drawingNo?: string;        // Transmittal-specific drawing number
+  description?: string;       // Override of document.name for transmittal
+  revision?: string;          // Manual revision identifier (e.g., "Rev A", "R01", "3.2")
+  editedAt?: string;
+  editedBy?: string;          // User ID who made the edit
+  editedByName?: string;      // Display name for UI
+}
+
 // Project types
 export interface Project {
   id: string;

@@ -2,20 +2,24 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Search, Download, FileSpreadsheet, ArrowLeft, AlertCircle, RefreshCw, Filter, ChevronDown, X } from 'lucide-react';
-import { Document, Folder } from '../types';
+import { Document, Folder, TransmittalData } from '../types';
 import { documentService } from '../services/documentService';
 import { folderService } from '../services/folderService';
 import { projectService } from '../services';
+import { transmittalService } from '../services/transmittalService';
 import FileSpreadsheetTable, { FileRowData } from './FileSpreadsheetTable';
 import FolderTreeSelect from './FolderTreeSelect';
 import * as XLSX from 'xlsx';
 import { buildFullPath } from '../utils/folderTree';
+import { useAuth } from '../contexts/AuthContext';
 
 export default function FileSpreadsheetView() {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [documents, setDocuments] = useState<Document[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
+  const [transmittalData, setTransmittalData] = useState<Map<string, TransmittalData>>(new Map());
   const [projectName, setProjectName] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -56,13 +60,14 @@ export default function FileSpreadsheetView() {
           setError(null);
         }
 
-        // Fetch project, folders, and all documents in parallel with timeout
+        // Fetch project, folders, documents, and transmittal data in parallel with timeout
         // Using optimized single query for documents (previously N+1 queries)
-        const [project, allFolders, allDocuments] = await withTimeout(
+        const [project, allFolders, allDocuments, transmittalMap] = await withTimeout(
           Promise.all([
             projectService.getById(projectId),
             folderService.getByProjectId(projectId),
-            documentService.getByProjectId(projectId)  // ✅ Single query instead of N+1
+            documentService.getByProjectId(projectId),  // ✅ Single query instead of N+1
+            transmittalService.getAllTransmittalData(projectId)  // ✅ Batch load transmittal data
           ]),
           15000
         );
@@ -73,6 +78,7 @@ export default function FileSpreadsheetView() {
           }
           setFolders(allFolders);
           setDocuments(allDocuments);
+          setTransmittalData(transmittalMap);
           setLoading(false);
         }
       } catch (error) {
@@ -138,20 +144,31 @@ export default function FileSpreadsheetView() {
     };
   }, [filterFolder, folders, documents]);
 
-  // Transform documents to file rows with folder paths
+  // Transform documents to file rows with folder paths and transmittal data
   const fileRows: FileRowData[] = useMemo(() => {
-    return documents.map(doc => ({
-      id: doc.id,
-      drawingNo: doc.drawingNo || '',
-      name: doc.name,
-      folderPath: folderPathMap.get(doc.folderId) || '/',  // ✅ O(1) Map lookup
-      type: doc.type,
-      dateModified: doc.dateModified,
-      url: doc.url,
-      document: doc,
-      revisionCount: doc.version
-    }));
-  }, [documents, folderPathMap]);
+    return documents.map(doc => {
+      const transmittal = transmittalData.get(doc.id);
+
+      return {
+        id: doc.id,
+        drawingNo: doc.drawingNo || '',
+        name: doc.name,
+        folderPath: folderPathMap.get(doc.folderId) || '/',  // ✅ O(1) Map lookup
+        type: doc.type,
+        dateModified: doc.dateModified,
+        url: doc.url,
+        document: doc,
+        revisionCount: doc.version,
+        // Transmittal overrides
+        transmittalDrawingNo: transmittal?.drawingNo,
+        transmittalDescription: transmittal?.description,
+        transmittalRevision: transmittal?.revision,
+        isDrawingNoOverridden: !!(transmittal?.drawingNo),
+        isDescriptionOverridden: !!(transmittal?.description),
+        isRevisionOverridden: !!(transmittal?.revision)
+      };
+    });
+  }, [documents, folderPathMap, transmittalData]);
 
   // Filter and search
   const filteredFiles = useMemo(() => {
@@ -234,24 +251,48 @@ export default function FileSpreadsheetView() {
     }
   };
 
-  // Handle drawing number update
-  const handleUpdateDrawingNo = async (fileId: string, drawingNo: string) => {
-    const file = documents.find(doc => doc.id === fileId);
-    if (!file) {
-      throw new Error('File not found');
+  // Handle transmittal data update
+  const handleUpdateTransmittal = async (
+    fileId: string,
+    field: 'drawingNo' | 'description' | 'revision',
+    value: string
+  ) => {
+    if (!projectId || !user) {
+      throw new Error('Missing project ID or user');
     }
 
     try {
-      await documentService.update(file.folderId, fileId, { drawingNo });
+      const updates: any = {};
+      updates[field] = value;
+
+      await transmittalService.updateTransmittalData(
+        projectId,
+        fileId,
+        user.id,
+        user.displayName || 'Unknown User',
+        updates
+      );
 
       // Update local state to reflect the change
-      setDocuments(prevDocs =>
-        prevDocs.map(doc =>
-          doc.id === fileId ? { ...doc, drawingNo } : doc
-        )
-      );
+      setTransmittalData(prevData => {
+        const newData = new Map(prevData);
+        const existing = newData.get(fileId) || {
+          documentId: fileId,
+          projectId: projectId
+        };
+
+        newData.set(fileId, {
+          ...existing,
+          [field]: value,
+          editedAt: new Date().toISOString(),
+          editedBy: user.id,
+          editedByName: user.displayName || 'Unknown User'
+        });
+
+        return newData;
+      });
     } catch (error) {
-      console.error('Error updating drawing number:', error);
+      console.error('Error updating transmittal data:', error);
       throw error;
     }
   };
@@ -259,15 +300,15 @@ export default function FileSpreadsheetView() {
   // Export to Excel
   const handleExportExcel = () => {
     const exportData = sortedFiles.map(file => ({
-      'Drawing No.': file.drawingNo || '',
-      'Description': file.name,
+      'Drawing No.': file.transmittalDrawingNo || file.drawingNo || '',
+      'Description': file.transmittalDescription || file.name,
       'Folder Name': file.folderPath,
-      'No. of Revisions': file.revisionCount
+      'No. of Revisions': file.transmittalRevision || file.revisionCount.toString()
     }));
 
     const worksheet = XLSX.utils.json_to_sheet(exportData);
     const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Files');
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Transmittal');
 
     // Set column widths
     worksheet['!cols'] = [
@@ -277,16 +318,16 @@ export default function FileSpreadsheetView() {
       { wch: 15 }  // No. of Revisions
     ];
 
-    XLSX.writeFile(workbook, `${projectName || 'project'}-files.xlsx`);
+    XLSX.writeFile(workbook, `${projectName || 'project'}-transmittal.xlsx`);
   };
 
   // Export to CSV
   const handleExportCSV = () => {
     const exportData = sortedFiles.map(file => ({
-      'Drawing No.': file.drawingNo || '',
-      'Description': file.name,
+      'Drawing No.': file.transmittalDrawingNo || file.drawingNo || '',
+      'Description': file.transmittalDescription || file.name,
       'Folder Name': file.folderPath,
-      'No. of Revisions': file.revisionCount
+      'No. of Revisions': file.transmittalRevision || file.revisionCount.toString()
     }));
 
     const worksheet = XLSX.utils.json_to_sheet(exportData);
@@ -295,7 +336,7 @@ export default function FileSpreadsheetView() {
     const blob = new Blob([csv], { type: 'text/csv' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = `${projectName || 'project'}-files.csv`;
+    link.download = `${projectName || 'project'}-transmittal.csv`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -459,7 +500,8 @@ export default function FileSpreadsheetView() {
               sortDirection={sortDirection}
               onSort={handleSort}
               onFileClick={handleFileClick}
-              onUpdateDrawingNo={handleUpdateDrawingNo}
+              onUpdateDrawingNo={handleUpdateTransmittal}
+              onUpdateTransmittal={handleUpdateTransmittal}
             />
           </div>
         </motion.div>
