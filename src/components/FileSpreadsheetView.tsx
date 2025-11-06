@@ -358,12 +358,12 @@ export default function FileSpreadsheetView() {
 
   return (
     <div className="h-screen bg-gray-50 flex flex-col">
-      <div className="flex flex-col h-full max-w-7xl mx-auto w-full">
+      <div className="flex flex-col h-full w-full">
         {/* Header */}
         <motion.div
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="flex-shrink-0 p-6 pb-4"
+          className="flex-shrink-0 px-4 py-6 pb-4"
         >
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center space-x-4">
@@ -450,7 +450,7 @@ export default function FileSpreadsheetView() {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.1 }}
-          className="flex-1 min-h-0 px-6"
+          className="flex-1 min-h-0 px-4"
         >
           <div className="h-full overflow-auto">
             <FileSpreadsheetTable
@@ -470,7 +470,7 @@ export default function FileSpreadsheetView() {
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            className="flex-shrink-0 p-6 pt-4 text-center text-sm text-gray-500"
+            className="flex-shrink-0 px-4 py-6 pt-4 text-center text-sm text-gray-500"
           >
             Showing {sortedFiles.length} of {fileRows.length} total files
           </motion.div>
