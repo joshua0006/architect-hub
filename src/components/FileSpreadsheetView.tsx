@@ -49,9 +49,6 @@ export default function FileSpreadsheetView() {
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterFolder, setFilterFolder] = useState<string>('all');
-  const [sortColumn, setSortColumn] = useState<string>('name');
-  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
-  const [sortMode, setSortMode] = useState<'hierarchical' | 'column'>('hierarchical');
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [showExportDialog, setShowExportDialog] = useState(false);
   const [exportType, setExportType] = useState<'csv' | 'excel'>('excel');
@@ -296,73 +293,29 @@ export default function FileSpreadsheetView() {
     return result;
   }, [fileRows, searchTerm, filterFolder]);
 
-  // Sort files
+  // Sort files hierarchically: Folder hierarchy (A-Z with parent-child), then file name (A-Z)
   const sortedFiles = useMemo(() => {
     const sorted = [...filteredFiles];
 
-    if (sortMode === 'hierarchical') {
-      // Hierarchical sort: Folder hierarchy (A-Z with parent-child), then file name (A-Z)
-      sorted.sort((a, b) => {
-        const aFolderId = a.document?.folderId || '';
-        const bFolderId = b.document?.folderId || '';
+    sorted.sort((a, b) => {
+      const aFolderId = a.document?.folderId || '';
+      const bFolderId = b.document?.folderId || '';
 
-        // Get folder hierarchy order
-        const aFolderOrder = folderHierarchyOrder.get(aFolderId) ?? 999999;
-        const bFolderOrder = folderHierarchyOrder.get(bFolderId) ?? 999999;
+      // Get folder hierarchy order
+      const aFolderOrder = folderHierarchyOrder.get(aFolderId) ?? 999999;
+      const bFolderOrder = folderHierarchyOrder.get(bFolderId) ?? 999999;
 
-        // Primary: Sort by folder hierarchy
-        if (aFolderOrder !== bFolderOrder) {
-          return aFolderOrder - bFolderOrder;
-        }
+      // Primary: Sort by folder hierarchy
+      if (aFolderOrder !== bFolderOrder) {
+        return aFolderOrder - bFolderOrder;
+      }
 
-        // Secondary: Sort by file name (A-Z) within same folder
-        return a.name.toLowerCase().localeCompare(b.name.toLowerCase());
-      });
-    } else {
-      // Column-based sort (existing logic)
-      sorted.sort((a, b) => {
-        let aValue: any;
-        let bValue: any;
-
-        switch (sortColumn) {
-          case 'drawingNo':
-            aValue = (a.drawingNo || '').toLowerCase();
-            bValue = (b.drawingNo || '').toLowerCase();
-            break;
-          case 'name':
-            aValue = a.name.toLowerCase();
-            bValue = b.name.toLowerCase();
-            break;
-          case 'folderPath':
-            aValue = a.folderPath.toLowerCase();
-            bValue = b.folderPath.toLowerCase();
-            break;
-          case 'revisionCount':
-            aValue = a.revisionCount;
-            bValue = b.revisionCount;
-            break;
-          default:
-            return 0;
-        }
-
-        if (aValue < bValue) return sortDirection === 'asc' ? -1 : 1;
-        if (aValue > bValue) return sortDirection === 'asc' ? 1 : -1;
-        return 0;
-      });
-    }
+      // Secondary: Sort by file name (A-Z) within same folder
+      return a.name.toLowerCase().localeCompare(b.name.toLowerCase());
+    });
 
     return sorted;
-  }, [filteredFiles, sortMode, sortColumn, sortDirection, folderHierarchyOrder]);
-
-  // Handle sorting
-  const handleSort = (column: string) => {
-    if (sortColumn === column) {
-      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
-    } else {
-      setSortColumn(column);
-      setSortDirection('asc');
-    }
-  };
+  }, [filteredFiles, folderHierarchyOrder]);
 
   // Handle file click - open in document viewer in new tab
   const handleFileClick = (fileId: string) => {
@@ -679,35 +632,8 @@ export default function FileSpreadsheetView() {
               />
             </div>
 
-            {/* Filter and Sort Buttons */}
+            {/* Filter Buttons */}
             <div className="flex items-center gap-2">
-              {/* Sort Mode Toggle */}
-              <button
-                onClick={() => setSortMode(sortMode === 'hierarchical' ? 'column' : 'hierarchical')}
-                className={`flex items-center gap-2 px-4 py-2 border rounded-lg transition-colors text-sm font-medium whitespace-nowrap ${
-                  sortMode === 'hierarchical'
-                    ? 'border-blue-500 bg-blue-50 text-blue-700 hover:bg-blue-100'
-                    : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
-                }`}
-                title={sortMode === 'hierarchical' ? 'Switch to column sorting' : 'Switch to hierarchical sorting'}
-              >
-                {sortMode === 'hierarchical' ? (
-                  <>
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4h18M3 8h18M3 12h12M3 16h12M3 20h8" />
-                    </svg>
-                    <span>Hierarchical Sort</span>
-                  </>
-                ) : (
-                  <>
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4h18M3 8h12M3 12h18M3 16h12M3 20h18" />
-                    </svg>
-                    <span>Column Sort</span>
-                  </>
-                )}
-              </button>
-
               {/* Compact Filter Button */}
               <button
                 onClick={() => setIsFilterOpen(true)}
@@ -741,10 +667,6 @@ export default function FileSpreadsheetView() {
           <div className="h-full overflow-auto">
             <FileSpreadsheetTable
               files={sortedFiles}
-              sortColumn={sortColumn}
-              sortDirection={sortDirection}
-              sortMode={sortMode}
-              onSort={handleSort}
               onFileClick={handleFileClick}
               onUpdateDrawingNo={handleUpdateTransmittal}
               onUpdateTransmittal={handleUpdateTransmittal}

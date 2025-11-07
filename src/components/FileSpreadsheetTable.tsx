@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ChevronUp, ChevronDown, Loader2, Edit3, Trash2 } from 'lucide-react';
+import { Loader2, Edit3, Trash2 } from 'lucide-react';
 import { Document } from '../types';
 import {
   Table,
@@ -36,10 +36,6 @@ export interface FileRowData {
 
 interface FileSpreadsheetTableProps {
   files: FileRowData[];
-  sortColumn: string;
-  sortDirection: 'asc' | 'desc';
-  sortMode: 'hierarchical' | 'column';
-  onSort: (column: string) => void;
   onFileClick: (fileId: string) => void;
   onUpdateDrawingNo: (fileId: string, drawingNo: string) => Promise<void>;
   onUpdateTransmittal: (fileId: string, field: 'drawingNo' | 'title' | 'description' | 'revision', value: string) => Promise<void>;
@@ -48,10 +44,6 @@ interface FileSpreadsheetTableProps {
 
 export default function FileSpreadsheetTable({
   files,
-  sortColumn,
-  sortDirection,
-  sortMode,
-  onSort,
   onFileClick,
   onUpdateDrawingNo,
   onUpdateTransmittal,
@@ -68,17 +60,6 @@ export default function FileSpreadsheetTable({
   const [editingRevision, setEditingRevision] = useState<{[key: string]: string}>({});
   const [savingRevision, setSavingRevision] = useState<{[key: string]: boolean}>({});
   const [revisionError, setRevisionError] = useState<{[key: string]: string}>({});
-
-  const renderSortIcon = (column: string) => {
-    if (sortColumn !== column) {
-      return <ChevronDown className="w-4 h-4 text-gray-400" />;
-    }
-    return sortDirection === 'asc' ? (
-      <ChevronUp className="w-4 h-4 text-blue-600" />
-    ) : (
-      <ChevronDown className="w-4 h-4 text-blue-600" />
-    );
-  };
 
   const handleDrawingNoChange = (fileId: string, value: string) => {
     // Only allow alphanumeric characters (A-Z, 0-9)
@@ -223,49 +204,19 @@ export default function FileSpreadsheetTable({
       <Table>
         <TableHeader>
           <TableRow className="bg-gray-50 hover:bg-gray-50 sticky top-0 z-10">
-            <TableHead
-              className={`w-[120px] px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider ${
-                sortMode === 'column' ? 'cursor-pointer hover:bg-gray-100' : 'cursor-default'
-              } transition-colors`}
-              onClick={() => sortMode === 'column' && onSort('drawingNo')}
-            >
-              <div className="flex items-center space-x-1">
-                <span>Drawing No.</span>
-                {sortMode === 'column' && renderSortIcon('drawingNo')}
-              </div>
+            <TableHead className="w-[120px] px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <span>Drawing No.</span>
             </TableHead>
-            <TableHead
-              className={`w-auto min-w-[250px] px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider ${
-                sortMode === 'column' ? 'cursor-pointer hover:bg-gray-100' : 'cursor-default'
-              } transition-colors`}
-              onClick={() => sortMode === 'column' && onSort('name')}
-            >
-              <div className="flex items-center space-x-1">
-                <span>Title</span>
-                {sortMode === 'column' && renderSortIcon('name')}
-              </div>
+            <TableHead className="w-auto min-w-[250px] px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <span>Title</span>
             </TableHead>
-            <TableHead
-              className="w-auto min-w-[200px] px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider"
-            >
-              <div className="flex items-center space-x-1">
-                <span>Description</span>
-              </div>
+            <TableHead className="w-auto min-w-[200px] px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <span>Description</span>
             </TableHead>
-            <TableHead
-              className={`w-[120px] px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider ${
-                sortMode === 'column' ? 'cursor-pointer hover:bg-gray-100' : 'cursor-default'
-              } transition-colors`}
-              onClick={() => sortMode === 'column' && onSort('revisionCount')}
-            >
-              <div className="flex items-center space-x-1">
-                <span>No. of Revisions</span>
-                {sortMode === 'column' && renderSortIcon('revisionCount')}
-              </div>
+            <TableHead className="w-[120px] px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <span>No. of Revisions</span>
             </TableHead>
-            <TableHead
-              className="w-[80px] px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider text-center"
-            >
+            <TableHead className="w-[80px] px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider text-center">
               <span>Actions</span>
             </TableHead>
           </TableRow>
