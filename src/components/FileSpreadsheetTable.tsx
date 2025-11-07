@@ -38,6 +38,7 @@ interface FileSpreadsheetTableProps {
   files: FileRowData[];
   sortColumn: string;
   sortDirection: 'asc' | 'desc';
+  sortMode: 'hierarchical' | 'column';
   onSort: (column: string) => void;
   onFileClick: (fileId: string) => void;
   onUpdateDrawingNo: (fileId: string, drawingNo: string) => Promise<void>;
@@ -49,6 +50,7 @@ export default function FileSpreadsheetTable({
   files,
   sortColumn,
   sortDirection,
+  sortMode,
   onSort,
   onFileClick,
   onUpdateDrawingNo,
@@ -222,21 +224,25 @@ export default function FileSpreadsheetTable({
         <TableHeader>
           <TableRow className="bg-gray-50 hover:bg-gray-50 sticky top-0 z-10">
             <TableHead
-              className="w-[120px] px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors"
-              onClick={() => onSort('drawingNo')}
+              className={`w-[120px] px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider ${
+                sortMode === 'column' ? 'cursor-pointer hover:bg-gray-100' : 'cursor-default'
+              } transition-colors`}
+              onClick={() => sortMode === 'column' && onSort('drawingNo')}
             >
               <div className="flex items-center space-x-1">
                 <span>Drawing No.</span>
-                {renderSortIcon('drawingNo')}
+                {sortMode === 'column' && renderSortIcon('drawingNo')}
               </div>
             </TableHead>
             <TableHead
-              className="w-auto min-w-[250px] px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors"
-              onClick={() => onSort('name')}
+              className={`w-auto min-w-[250px] px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider ${
+                sortMode === 'column' ? 'cursor-pointer hover:bg-gray-100' : 'cursor-default'
+              } transition-colors`}
+              onClick={() => sortMode === 'column' && onSort('name')}
             >
               <div className="flex items-center space-x-1">
                 <span>Title</span>
-                {renderSortIcon('name')}
+                {sortMode === 'column' && renderSortIcon('name')}
               </div>
             </TableHead>
             <TableHead
@@ -247,12 +253,14 @@ export default function FileSpreadsheetTable({
               </div>
             </TableHead>
             <TableHead
-              className="w-[120px] px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors"
-              onClick={() => onSort('revisionCount')}
+              className={`w-[120px] px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider ${
+                sortMode === 'column' ? 'cursor-pointer hover:bg-gray-100' : 'cursor-default'
+              } transition-colors`}
+              onClick={() => sortMode === 'column' && onSort('revisionCount')}
             >
               <div className="flex items-center space-x-1">
                 <span>No. of Revisions</span>
-                {renderSortIcon('revisionCount')}
+                {sortMode === 'column' && renderSortIcon('revisionCount')}
               </div>
             </TableHead>
             <TableHead
