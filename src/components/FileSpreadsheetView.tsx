@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Search, Download, FileSpreadsheet, ArrowLeft, AlertCircle, RefreshCw, Filter, ChevronDown, X, History, FilePlus } from 'lucide-react';
+import { Search, Download, FileSpreadsheet, ArrowLeft, AlertCircle, RefreshCw, Filter, ChevronDown, X, History, FilePlus, FileText, FileImage, File } from 'lucide-react';
 import { Document, Folder, TransmittalData, TransmittalHistoryEntry, StandaloneTransmittalEntry } from '../types';
 import { documentService } from '../services/documentService';
 import { folderService } from '../services/folderService';
@@ -50,6 +50,8 @@ export default function FileSpreadsheetView() {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterFolder, setFilterFolder] = useState<string>('all');
   const [isFilterOpen, setIsFilterOpen] = useState(false);
+  const [fileTypeFilter, setFileTypeFilter] = useState<string[]>([]);
+  const [isFileTypeDropdownOpen, setIsFileTypeDropdownOpen] = useState(false);
   const [showExportDialog, setShowExportDialog] = useState(false);
   const [exportType, setExportType] = useState<'csv' | 'excel'>('excel');
   const [exportColumns, setExportColumns] = useState({
@@ -75,6 +77,21 @@ export default function FileSpreadsheetView() {
       )
     ]);
   };
+
+  // Close file type dropdown when clicking outside
+  useEffect(() => {
+    if (!isFileTypeDropdownOpen) return;
+
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      if (!target.closest('.relative')) {
+        setIsFileTypeDropdownOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isFileTypeDropdownOpen]);
 
   // Fetch project, documents, and folders
   useEffect(() => {
@@ -281,6 +298,11 @@ export default function FileSpreadsheetView() {
       result = result.filter(file => file.document.folderId === filterFolder);
     }
 
+    // Apply file type filter
+    if (fileTypeFilter.length > 0) {
+      result = result.filter(file => fileTypeFilter.includes(file.type));
+    }
+
     // Apply search
     if (searchTerm) {
       const term = searchTerm.toLowerCase();
@@ -291,7 +313,7 @@ export default function FileSpreadsheetView() {
     }
 
     return result;
-  }, [fileRows, searchTerm, filterFolder]);
+  }, [fileRows, searchTerm, filterFolder, fileTypeFilter]);
 
   // Sort files hierarchically: Folder hierarchy (A-Z with parent-child), then file name (A-Z)
   const sortedFiles = useMemo(() => {
@@ -634,7 +656,7 @@ export default function FileSpreadsheetView() {
 
             {/* Filter Buttons */}
             <div className="flex items-center gap-2">
-              {/* Compact Filter Button */}
+              {/* Folder Filter Button */}
               <button
                 onClick={() => setIsFilterOpen(true)}
                 className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg bg-white hover:bg-gray-50 transition-colors text-sm font-medium text-gray-700 whitespace-nowrap"
@@ -644,13 +666,152 @@ export default function FileSpreadsheetView() {
                 <ChevronDown className="w-4 h-4" />
               </button>
 
-              {/* Clear Filter Button - Only show when filter is active */}
+              {/* File Type Filter Dropdown */}
+              <div className="relative">
+                <button
+                  onClick={() => setIsFileTypeDropdownOpen(!isFileTypeDropdownOpen)}
+                  className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg bg-white hover:bg-gray-50 transition-colors text-sm font-medium text-gray-700 whitespace-nowrap"
+                >
+                  <File className="w-4 h-4" />
+                  <span>
+                    File Type: {fileTypeFilter.length === 0 ? 'All' : `${fileTypeFilter.length} selected`}
+                  </span>
+                  <ChevronDown className="w-4 h-4" />
+                </button>
+
+                {/* Dropdown Menu */}
+                {isFileTypeDropdownOpen && (
+                  <div className="absolute right-0 mt-2 w-64 bg-white rounded-lg shadow-lg border border-gray-200 z-50">
+                    <div className="p-2">
+                      {/* PDF Option */}
+                      <label className="flex items-center justify-between p-2 hover:bg-gray-50 rounded cursor-pointer">
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={fileTypeFilter.includes('pdf')}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setFileTypeFilter([...fileTypeFilter, 'pdf']);
+                              } else {
+                                setFileTypeFilter(fileTypeFilter.filter(t => t !== 'pdf'));
+                              }
+                            }}
+                            className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                          />
+                          <FileText className="w-4 h-4 text-red-500" />
+                          <span className="text-sm font-medium text-gray-700">PDF</span>
+                        </div>
+                        <span className="text-xs text-gray-500">
+                          {fileRows.filter(f => f.type === 'pdf').length}
+                        </span>
+                      </label>
+
+                      {/* DWG Option */}
+                      <label className="flex items-center justify-between p-2 hover:bg-gray-50 rounded cursor-pointer">
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={fileTypeFilter.includes('dwg')}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setFileTypeFilter([...fileTypeFilter, 'dwg']);
+                              } else {
+                                setFileTypeFilter(fileTypeFilter.filter(t => t !== 'dwg'));
+                              }
+                            }}
+                            className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                          />
+                          <File className="w-4 h-4 text-blue-500" />
+                          <span className="text-sm font-medium text-gray-700">DWG</span>
+                        </div>
+                        <span className="text-xs text-gray-500">
+                          {fileRows.filter(f => f.type === 'dwg').length}
+                        </span>
+                      </label>
+
+                      {/* Image Option */}
+                      <label className="flex items-center justify-between p-2 hover:bg-gray-50 rounded cursor-pointer">
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={fileTypeFilter.includes('image')}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setFileTypeFilter([...fileTypeFilter, 'image']);
+                              } else {
+                                setFileTypeFilter(fileTypeFilter.filter(t => t !== 'image'));
+                              }
+                            }}
+                            className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                          />
+                          <FileImage className="w-4 h-4 text-green-500" />
+                          <span className="text-sm font-medium text-gray-700">Image</span>
+                        </div>
+                        <span className="text-xs text-gray-500">
+                          {fileRows.filter(f => f.type === 'image').length}
+                        </span>
+                      </label>
+
+                      {/* Other Option */}
+                      <label className="flex items-center justify-between p-2 hover:bg-gray-50 rounded cursor-pointer">
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={fileTypeFilter.includes('other')}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setFileTypeFilter([...fileTypeFilter, 'other']);
+                              } else {
+                                setFileTypeFilter(fileTypeFilter.filter(t => t !== 'other'));
+                              }
+                            }}
+                            className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                          />
+                          <File className="w-4 h-4 text-gray-500" />
+                          <span className="text-sm font-medium text-gray-700">Other</span>
+                        </div>
+                        <span className="text-xs text-gray-500">
+                          {fileRows.filter(f => f.type === 'other').length}
+                        </span>
+                      </label>
+
+                      {/* Clear All */}
+                      {fileTypeFilter.length > 0 && (
+                        <>
+                          <div className="border-t border-gray-200 my-2"></div>
+                          <button
+                            onClick={() => {
+                              setFileTypeFilter([]);
+                              setIsFileTypeDropdownOpen(false);
+                            }}
+                            className="w-full text-left px-2 py-2 text-sm text-red-600 hover:bg-red-50 rounded font-medium"
+                          >
+                            Clear All
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Clear Folder Filter Button - Only show when filter is active */}
               {filterFolder !== 'all' && (
                 <button
                   onClick={() => setFilterFolder('all')}
                   className="px-3 py-2 border border-gray-300 rounded-lg bg-white hover:bg-gray-50 transition-colors text-sm font-medium text-gray-700 hover:text-gray-900 whitespace-nowrap"
                 >
-                  Remove Filter
+                  Remove Folder Filter
+                </button>
+              )}
+
+              {/* Clear File Type Filter Button - Only show when file types are selected */}
+              {fileTypeFilter.length > 0 && (
+                <button
+                  onClick={() => setFileTypeFilter([])}
+                  className="px-3 py-2 border border-gray-300 rounded-lg bg-white hover:bg-gray-50 transition-colors text-sm font-medium text-gray-700 hover:text-gray-900 whitespace-nowrap"
+                >
+                  Clear File Types
                 </button>
               )}
             </div>
@@ -676,7 +837,7 @@ export default function FileSpreadsheetView() {
         </motion.div>
 
         {/* Results summary */}
-        {searchTerm || filterFolder !== 'all' ? (
+        {searchTerm || filterFolder !== 'all' || fileTypeFilter.length > 0 ? (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
