@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Search, Download, FileSpreadsheet, ArrowLeft, AlertCircle, RefreshCw, Filter, ChevronDown, X, History, FilePlus, FileText, FileImage, File } from 'lucide-react';
+import { Search, Download, FileSpreadsheet, ArrowLeft, AlertCircle, RefreshCw, Filter, ChevronDown, X, History, FilePlus, FileText, FileImage, File, Film } from 'lucide-react';
 import { Document, Folder, TransmittalData, TransmittalHistoryEntry, StandaloneTransmittalEntry } from '../types';
 import { documentService } from '../services/documentService';
 import { folderService } from '../services/folderService';
@@ -12,6 +12,7 @@ import FolderTreeSelect from './FolderTreeSelect';
 import * as XLSX from 'xlsx';
 import { buildFullPath } from '../utils/folderTree';
 import { useAuth } from '../contexts/AuthContext';
+import { isVideo } from '../utils/mediaUtils';
 
 // Helper function to format time ago
 const formatTimeAgo = (date: Date): string => {
@@ -231,6 +232,17 @@ export default function FileSpreadsheetView() {
     };
   }, [filterFolder, folders, documents]);
 
+  // Helper function to check if a file is a video
+  const isVideoFile = useCallback((file: FileRowData): boolean => {
+    if (file.type !== 'other') return false;
+    if (!file.document) return false;
+
+    const filename = file.document.metadata?.originalFilename || file.document.name || file.name;
+    const contentType = file.document.metadata?.contentType;
+
+    return isVideo(filename, contentType);
+  }, []);
+
   // Transform documents to file rows with folder paths and transmittal data
   const fileRows: FileRowData[] = useMemo(() => {
     // Document-based rows
@@ -300,7 +312,23 @@ export default function FileSpreadsheetView() {
 
     // Apply file type filter
     if (fileTypeFilter.length > 0) {
-      result = result.filter(file => fileTypeFilter.includes(file.type));
+      result = result.filter(file => {
+        // Check for standard types (pdf, dwg, image, other)
+        if (fileTypeFilter.includes(file.type)) {
+          // If 'video' is also selected and this is an 'other' type, exclude videos
+          if (file.type === 'other' && fileTypeFilter.includes('video') && isVideoFile(file)) {
+            return false;
+          }
+          return true;
+        }
+
+        // Check for video filter
+        if (fileTypeFilter.includes('video') && isVideoFile(file)) {
+          return true;
+        }
+
+        return false;
+      });
     }
 
     // Apply search
@@ -313,7 +341,7 @@ export default function FileSpreadsheetView() {
     }
 
     return result;
-  }, [fileRows, searchTerm, filterFolder, fileTypeFilter]);
+  }, [fileRows, searchTerm, filterFolder, fileTypeFilter, isVideoFile]);
 
   // Sort files hierarchically: Folder hierarchy (A-Z with parent-child), then file name (A-Z)
   const sortedFiles = useMemo(() => {
@@ -749,6 +777,29 @@ export default function FileSpreadsheetView() {
                         </div>
                         <span className="text-xs text-gray-500">
                           {fileRows.filter(f => f.type === 'image').length}
+                        </span>
+                      </label>
+
+                      {/* Video Option */}
+                      <label className="flex items-center justify-between p-2 hover:bg-gray-50 rounded cursor-pointer">
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={fileTypeFilter.includes('video')}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setFileTypeFilter([...fileTypeFilter, 'video']);
+                              } else {
+                                setFileTypeFilter(fileTypeFilter.filter(t => t !== 'video'));
+                              }
+                            }}
+                            className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                          />
+                          <Film className="w-4 h-4 text-purple-500" />
+                          <span className="text-sm font-medium text-gray-700">Video</span>
+                        </div>
+                        <span className="text-xs text-gray-500">
+                          {fileRows.filter(f => isVideoFile(f)).length}
                         </span>
                       </label>
 
