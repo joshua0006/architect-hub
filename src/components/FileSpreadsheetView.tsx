@@ -795,23 +795,16 @@ export default function FileSpreadsheetView() {
                 )}
               </div>
 
-              {/* Clear Folder Filter Button - Only show when filter is active */}
-              {filterFolder !== 'all' && (
+              {/* Clear All Filters Button - Shows when any filter is active */}
+              {(filterFolder !== 'all' || fileTypeFilter.length > 0) && (
                 <button
-                  onClick={() => setFilterFolder('all')}
-                  className="px-3 py-2 border border-gray-300 rounded-lg bg-white hover:bg-gray-50 transition-colors text-sm font-medium text-gray-700 hover:text-gray-900 whitespace-nowrap"
+                  onClick={() => {
+                    setFilterFolder('all');
+                    setFileTypeFilter([]);
+                  }}
+                  className="px-3 py-2 border border-red-200 rounded-lg bg-red-50 hover:bg-red-100 transition-colors text-sm font-medium text-red-600 hover:text-red-700 whitespace-nowrap"
                 >
-                  Remove Folder Filter
-                </button>
-              )}
-
-              {/* Clear File Type Filter Button - Only show when file types are selected */}
-              {fileTypeFilter.length > 0 && (
-                <button
-                  onClick={() => setFileTypeFilter([])}
-                  className="px-3 py-2 border border-gray-300 rounded-lg bg-white hover:bg-gray-50 transition-colors text-sm font-medium text-gray-700 hover:text-gray-900 whitespace-nowrap"
-                >
-                  Clear File Types
+                  Clear All Filters
                 </button>
               )}
             </div>

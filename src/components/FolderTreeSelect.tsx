@@ -239,16 +239,48 @@ export default function FolderTreeSelect({
         </UncontrolledTreeEnvironment>
       </div>
 
-        {/* Footer with count */}
-        {searchTerm && (
-          <div className="flex-shrink-0 px-3 py-2 border-t border-gray-200 bg-gray-50 text-xs text-gray-600">
-            {matchingItems.size > 0 ? (
-              <span>{matchingItems.size} folder{matchingItems.size !== 1 ? 's' : ''} found</span>
-            ) : (
-              <span>No folders found</span>
-            )}
+        {/* Footer with actions and info */}
+        <div className="flex-shrink-0 px-4 py-3 border-t border-gray-200 bg-gray-50">
+          <div className="flex items-center justify-between">
+            {/* Left side - Search results or current selection */}
+            <div className="text-sm text-gray-600">
+              {searchTerm ? (
+                matchingItems.size > 0 ? (
+                  <span>{matchingItems.size} folder{matchingItems.size !== 1 ? 's' : ''} found</span>
+                ) : (
+                  <span>No folders found</span>
+                )
+              ) : selectedFolderId !== 'all' ? (
+                <span className="font-medium">
+                  {selectedFolderId === '' ? 'Root' : folders.find(f => f.id === selectedFolderId)?.name || 'Unknown'}
+                </span>
+              ) : (
+                <span className="text-gray-500">All folders</span>
+              )}
+            </div>
+
+            {/* Right side - Action buttons */}
+            <div className="flex items-center gap-2">
+              {selectedFolderId !== 'all' && (
+                <button
+                  onClick={() => {
+                    onFolderSelect('all');
+                    onClose();
+                  }}
+                  className="px-3 py-1.5 text-sm font-medium text-red-600 bg-red-50 border border-red-200 rounded-md hover:bg-red-100 transition-colors"
+                >
+                  Remove Filter
+                </button>
+              )}
+              <button
+                onClick={onClose}
+                className="px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
+              >
+                Close
+              </button>
+            </div>
           </div>
-        )}
+        </div>
       </div>
     </div>
   );
