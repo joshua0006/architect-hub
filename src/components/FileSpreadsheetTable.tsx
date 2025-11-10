@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
-import { Loader2, Edit3, Trash2, Folder } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Loader2, Edit3, Trash2, Folder, ChevronDown } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { Document } from '../types';
 import {
   Table,
@@ -49,6 +50,15 @@ export default function FileSpreadsheetTable({
   onUpdateTransmittal,
   onDeleteRow
 }: FileSpreadsheetTableProps) {
+  // State for folder expand/collapse
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
+
+  // Initialize all folders as expanded when files change
+  useEffect(() => {
+    const uniqueFolders = new Set(files.map(file => file.folderPath));
+    setExpandedFolders(uniqueFolders);
+  }, [files]);
+
   const [editingDrawingNo, setEditingDrawingNo] = useState<{[key: string]: string}>({});
   const [savingDrawingNo, setSavingDrawingNo] = useState<{[key: string]: boolean}>({});
   const [drawingNoError, setDrawingNoError] = useState<{[key: string]: string}>({});
@@ -60,6 +70,19 @@ export default function FileSpreadsheetTable({
   const [editingRevision, setEditingRevision] = useState<{[key: string]: string}>({});
   const [savingRevision, setSavingRevision] = useState<{[key: string]: boolean}>({});
   const [revisionError, setRevisionError] = useState<{[key: string]: string}>({});
+
+  // Toggle folder expand/collapse
+  const toggleFolder = (folderPath: string) => {
+    setExpandedFolders(prev => {
+      const next = new Set(prev);
+      if (next.has(folderPath)) {
+        next.delete(folderPath);
+      } else {
+        next.add(folderPath);
+      }
+      return next;
+    });
+  };
 
   const handleDrawingNoChange = (fileId: string, value: string) => {
     // Only allow alphanumeric characters (A-Z, 0-9)
@@ -258,9 +281,14 @@ export default function FileSpreadsheetTable({
                 <React.Fragment key={file.id}>
                   {/* Folder Header Row */}
                   {isNewFolder && (
-                    <TableRow className="bg-gray-50 hover:bg-gray-50 border-t-2 border-gray-200">
-                      <TableCell colSpan={5} className="px-4 py-2">
+                    <TableRow className="bg-gray-50 hover:bg-gray-100 border-t-2 border-gray-200 cursor-pointer transition-colors">
+                      <TableCell colSpan={5} className="px-4 py-2" onClick={() => toggleFolder(file.folderPath)}>
                         <div className="flex items-center gap-2">
+                          <ChevronDown
+                            className={`w-4 h-4 text-gray-600 transition-transform duration-200 ease-in-out ${
+                              expandedFolders.has(file.folderPath) ? 'rotate-0' : '-rotate-90'
+                            }`}
+                          />
                           <Folder className="w-4 h-4 text-gray-600" />
                           <span className="text-sm font-medium text-gray-700">{file.folderPath}</span>
                           <span className="text-xs text-gray-500 ml-1">({filesInFolder} {filesInFolder === 1 ? 'file' : 'files'})</span>
@@ -269,8 +297,9 @@ export default function FileSpreadsheetTable({
                     </TableRow>
                   )}
 
-                  {/* File Row */}
-                  <TableRow>
+                  {/* File Row - conditionally render based on folder expansion */}
+                  {expandedFolders.has(file.folderPath) && (
+                  <TableRow className="transition-opacity duration-200 ease-in-out">
                   {/* Drawing No. Column */}
                   <TableCell className="w-[120px] px-4 py-4 whitespace-nowrap">
                     <div className="relative">
@@ -402,6 +431,7 @@ export default function FileSpreadsheetTable({
                     </button>
                   </TableCell>
                 </TableRow>
+                  )}
                 </React.Fragment>
               );
             })
