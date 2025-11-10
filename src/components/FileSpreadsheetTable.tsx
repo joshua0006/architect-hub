@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Loader2, Edit3, Trash2 } from 'lucide-react';
+import { Loader2, Edit3, Trash2, Folder } from 'lucide-react';
 import { Document } from '../types';
 import {
   Table,
@@ -229,7 +229,10 @@ export default function FileSpreadsheetTable({
               </TableCell>
             </TableRow>
           ) : (
-            files.map((file) => {
+            files.map((file, index) => {
+              // Check if this is a new folder (different from previous file's folder)
+              const isNewFolder = index === 0 || files[index - 1].folderPath !== file.folderPath;
+              const filesInFolder = isNewFolder ? files.filter(f => f.folderPath === file.folderPath).length : 0;
               // Drawing No. field - use transmittal override if available
               const currentDrawingNo = editingDrawingNo[file.id] ?? file.transmittalDrawingNo ?? file.drawingNo ?? '';
               const originalDrawingNo = file.transmittalDrawingNo ?? file.drawingNo ?? '';
@@ -252,7 +255,22 @@ export default function FileSpreadsheetTable({
               const hasRevisionError = !!revisionError[file.id];
 
               return (
-                <TableRow key={file.id}>
+                <React.Fragment key={file.id}>
+                  {/* Folder Header Row */}
+                  {isNewFolder && (
+                    <TableRow className="bg-gray-50 hover:bg-gray-50 border-t-2 border-gray-200">
+                      <TableCell colSpan={5} className="px-4 py-2">
+                        <div className="flex items-center gap-2">
+                          <Folder className="w-4 h-4 text-gray-600" />
+                          <span className="text-sm font-medium text-gray-700">{file.folderPath}</span>
+                          <span className="text-xs text-gray-500 ml-1">({filesInFolder} {filesInFolder === 1 ? 'file' : 'files'})</span>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  )}
+
+                  {/* File Row */}
+                  <TableRow>
                   {/* Drawing No. Column */}
                   <TableCell className="w-[120px] px-4 py-4 whitespace-nowrap">
                     <div className="relative">
@@ -293,13 +311,8 @@ export default function FileSpreadsheetTable({
 
                   {/* Title Column (Non-editable) */}
                   <TableCell className="w-auto min-w-[250px] px-4 py-4">
-                    <div className="flex flex-col">
-                      <div className="truncate text-sm text-gray-900 font-medium" title={titleValue}>
-                        {titleValue}
-                      </div>
-                      <div className="truncate text-xs text-gray-500 mt-0.5" title={file.folderPath}>
-                        {file.folderPath}
-                      </div>
+                    <div className="truncate text-sm text-gray-900 font-medium" title={titleValue}>
+                      {titleValue}
                     </div>
                   </TableCell>
 
@@ -389,6 +402,7 @@ export default function FileSpreadsheetTable({
                     </button>
                   </TableCell>
                 </TableRow>
+                </React.Fragment>
               );
             })
           )}
