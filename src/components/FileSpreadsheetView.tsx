@@ -51,7 +51,7 @@ export default function FileSpreadsheetView() {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterFolder, setFilterFolder] = useState<string>('all');
   const [isFilterOpen, setIsFilterOpen] = useState(false);
-  const [fileTypeFilter, setFileTypeFilter] = useState<string[]>([]);
+  const [fileTypeFilter, setFileTypeFilter] = useState<string[]>(['pdf', 'dwg']);
   const [isFileTypeDropdownOpen, setIsFileTypeDropdownOpen] = useState(false);
   const [showExportDialog, setShowExportDialog] = useState(false);
   const [exportType, setExportType] = useState<'csv' | 'excel'>('excel');
