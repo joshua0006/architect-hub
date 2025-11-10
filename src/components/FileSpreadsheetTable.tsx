@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Loader2, Edit3, Trash2, Folder, ChevronDown } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Document } from '../types';
@@ -83,6 +83,19 @@ export default function FileSpreadsheetTable({
       return next;
     });
   };
+
+  // Group files by folder for animation
+  const folderGroups = useMemo(() => {
+    const groups = new Map<string, FileRowData[]>();
+    files.forEach(file => {
+      const folderPath = file.folderPath;
+      if (!groups.has(folderPath)) {
+        groups.set(folderPath, []);
+      }
+      groups.get(folderPath)!.push(file);
+    });
+    return Array.from(groups.entries());
+  }, [files]);
 
   const handleDrawingNoChange = (fileId: string, value: string) => {
     // Only allow alphanumeric characters (A-Z, 0-9)
@@ -252,54 +265,76 @@ export default function FileSpreadsheetTable({
               </TableCell>
             </TableRow>
           ) : (
-            files.map((file, index) => {
-              // Check if this is a new folder (different from previous file's folder)
-              const isNewFolder = index === 0 || files[index - 1].folderPath !== file.folderPath;
-              const filesInFolder = isNewFolder ? files.filter(f => f.folderPath === file.folderPath).length : 0;
-              // Drawing No. field - use transmittal override if available
-              const currentDrawingNo = editingDrawingNo[file.id] ?? file.transmittalDrawingNo ?? file.drawingNo ?? '';
-              const originalDrawingNo = file.transmittalDrawingNo ?? file.drawingNo ?? '';
-              const isSavingDrawingNo = savingDrawingNo[file.id] || false;
-              const hasDrawingNoError = !!drawingNoError[file.id];
-
-              // Title field - non-editable, shows document name
-              const titleValue = file.transmittalTitle ?? file.name;
-
-              // Description field - editable, blank by default, use transmittal override if available
-              const currentDescription = editingDescription[file.id] ?? file.transmittalDescription ?? '';
-              const originalDescription = file.transmittalDescription ?? '';
-              const isSavingDescription = savingDescription[file.id] || false;
-              const hasDescriptionError = !!descriptionError[file.id];
-
-              // Revision field - use transmittal override if available (don't show document version count)
-              const currentRevision = editingRevision[file.id] ?? file.transmittalRevision ?? '';
-              const originalRevision = file.transmittalRevision ?? '';
-              const isSavingRevision = savingRevision[file.id] || false;
-              const hasRevisionError = !!revisionError[file.id];
+            folderGroups.map(([folderPath, folderFiles]) => {
+              const filesInFolder = folderFiles.length;
 
               return (
-                <React.Fragment key={file.id}>
+                <React.Fragment key={folderPath}>
                   {/* Folder Header Row */}
-                  {isNewFolder && (
-                    <TableRow className="bg-gray-50 hover:bg-gray-100 border-t-2 border-gray-200 cursor-pointer transition-colors">
-                      <TableCell colSpan={5} className="px-4 py-2" onClick={() => toggleFolder(file.folderPath)}>
-                        <div className="flex items-center gap-2">
-                          <ChevronDown
-                            className={`w-4 h-4 text-gray-600 transition-transform duration-200 ease-in-out ${
-                              expandedFolders.has(file.folderPath) ? 'rotate-0' : '-rotate-90'
-                            }`}
-                          />
-                          <Folder className="w-4 h-4 text-gray-600" />
-                          <span className="text-sm font-medium text-gray-700">{file.folderPath}</span>
-                          <span className="text-xs text-gray-500 ml-1">({filesInFolder} {filesInFolder === 1 ? 'file' : 'files'})</span>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  )}
+                  <TableRow className="bg-gray-50 hover:bg-gray-100 border-t-2 border-gray-200 cursor-pointer transition-colors">
+                    <TableCell colSpan={5} className="px-4 py-2" onClick={() => toggleFolder(folderPath)}>
+                      <div className="flex items-center gap-2">
+                        <ChevronDown
+                          className={`w-4 h-4 text-gray-600 transition-transform duration-[250ms] ease-[cubic-bezier(0.4,0,0.2,1)] ${
+                            expandedFolders.has(folderPath) ? 'rotate-0' : '-rotate-90'
+                          }`}
+                        />
+                        <Folder className="w-4 h-4 text-gray-600" />
+                        <span className="text-sm font-medium text-gray-700">{folderPath}</span>
+                        <span className="text-xs text-gray-500 ml-1">({filesInFolder} {filesInFolder === 1 ? 'file' : 'files'})</span>
+                      </div>
+                    </TableCell>
+                  </TableRow>
 
-                  {/* File Row - conditionally render based on folder expansion */}
-                  {expandedFolders.has(file.folderPath) && (
-                  <TableRow className="transition-opacity duration-200 ease-in-out">
+                  {/* File Rows - animate entire folder content together */}
+                  <AnimatePresence initial={false}>
+                  {expandedFolders.has(folderPath) && (
+                    <>
+                    {folderFiles.map((file) => {
+                      // Drawing No. field - use transmittal override if available
+                      const currentDrawingNo = editingDrawingNo[file.id] ?? file.transmittalDrawingNo ?? file.drawingNo ?? '';
+                      const originalDrawingNo = file.transmittalDrawingNo ?? file.drawingNo ?? '';
+                      const isSavingDrawingNo = savingDrawingNo[file.id] || false;
+                      const hasDrawingNoError = !!drawingNoError[file.id];
+
+                      // Title field - non-editable, shows document name
+                      const titleValue = file.transmittalTitle ?? file.name;
+
+                      // Description field - editable, blank by default, use transmittal override if available
+                      const currentDescription = editingDescription[file.id] ?? file.transmittalDescription ?? '';
+                      const originalDescription = file.transmittalDescription ?? '';
+                      const isSavingDescription = savingDescription[file.id] || false;
+                      const hasDescriptionError = !!descriptionError[file.id];
+
+                      // Revision field - use transmittal override if available (don't show document version count)
+                      const currentRevision = editingRevision[file.id] ?? file.transmittalRevision ?? '';
+                      const originalRevision = file.transmittalRevision ?? '';
+                      const isSavingRevision = savingRevision[file.id] || false;
+                      const hasRevisionError = !!revisionError[file.id];
+
+                      return (
+                        <motion.tr
+                          key={`file-row-${file.id}`}
+                          initial={{ opacity: 0, scaleY: 0 }}
+                          animate={{
+                            opacity: 1,
+                            scaleY: 1,
+                            transition: {
+                              opacity: { duration: 0.2, ease: [0.4, 0, 0.2, 1] },
+                              scaleY: { duration: 0.25, ease: [0.4, 0, 0.2, 1] }
+                            }
+                          }}
+                          exit={{
+                            opacity: 0,
+                            scaleY: 0,
+                            transition: {
+                              opacity: { duration: 0.15, ease: [0.4, 0, 0.2, 1] },
+                              scaleY: { duration: 0.2, ease: [0.4, 0, 0.2, 1] }
+                            }
+                          }}
+                          style={{ transformOrigin: "top" }}
+                          className="border-b transition-colors hover:bg-muted/50 data-[state=selected]:bg-muted"
+                        >
                   {/* Drawing No. Column */}
                   <TableCell className="w-[120px] px-4 py-4 whitespace-nowrap">
                     <div className="relative">
@@ -430,8 +465,12 @@ export default function FileSpreadsheetTable({
                       <Trash2 className="w-4 h-4" />
                     </button>
                   </TableCell>
-                </TableRow>
+                        </motion.tr>
+                      );
+                    })}
+                    </>
                   )}
+                  </AnimatePresence>
                 </React.Fragment>
               );
             })
