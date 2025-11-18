@@ -13,7 +13,11 @@ import {
   orderBy,
   setDoc,
   Timestamp,
-  onSnapshot
+  onSnapshot,
+  limit,
+  startAfter,
+  QueryDocumentSnapshot,
+  DocumentData
 } from 'firebase/firestore';
 import {
   ref,
@@ -84,6 +88,76 @@ export const documentService = {
     } catch (error) {
       console.error('Error getting documents by projectId:', error);
       throw new Error('Failed to get documents for project');
+    }
+  },
+
+  // Get paginated documents for a project with filters (for infinite scroll)
+  async getByProjectIdPaginated(
+    projectId: string,
+    pageSize: number = 50,
+    lastDoc?: QueryDocumentSnapshot<DocumentData> | null,
+    filters?: {
+      fileTypes?: string[];
+      folderId?: string;
+    }
+  ): Promise<{
+    documents: Document[];
+    lastVisible: QueryDocumentSnapshot<DocumentData> | null;
+    hasMore: boolean;
+  }> {
+    try {
+      // Build query constraints
+      const constraints: any[] = [
+        where('projectId', '==', projectId)
+      ];
+
+      // Apply folder filter if specified
+      if (filters?.folderId && filters.folderId !== 'all') {
+        constraints.push(where('folderId', '==', filters.folderId));
+      }
+
+      // Apply file type filter if specified
+      // Note: Firestore doesn't support 'in' with large arrays efficiently
+      // So if multiple file types, we'll need to handle this client-side
+      // For now, we'll fetch all and filter client-side for multiple types
+
+      // Add ordering for consistent pagination
+      constraints.push(orderBy('createdAt', 'desc'));
+
+      // Add pagination
+      constraints.push(limit(pageSize));
+
+      // Add cursor if provided
+      if (lastDoc) {
+        constraints.push(startAfter(lastDoc));
+      }
+
+      const q = query(collection(db, 'documents'), ...constraints);
+      const snapshot = await getDocs(q);
+
+      const documents = snapshot.docs
+        .filter(doc => doc.id !== '_metadata')
+        .map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        } as Document));
+
+      // Get the last visible document for next page
+      const lastVisible = snapshot.docs.length > 0
+        ? snapshot.docs[snapshot.docs.length - 1]
+        : null;
+
+      // Check if there are more documents
+      const hasMore = snapshot.docs.length === pageSize;
+
+      return {
+        documents,
+        lastVisible,
+        hasMore
+      };
+    } catch (error) {
+      console.error('Error getting paginated documents:', error);
+      throw new Error('Failed to get paginated documents for project');
     }
   },
 

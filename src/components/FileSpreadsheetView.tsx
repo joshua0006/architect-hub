@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Search, Download, FileSpreadsheet, ArrowLeft, AlertCircle, RefreshCw, Filter, ChevronDown, X, History, FilePlus, FileText, FileImage, File, Film } from 'lucide-react';
+import { Search, Download, FileSpreadsheet, ArrowLeft, AlertCircle, RefreshCw, Filter, ChevronDown, X, History, FilePlus, FileText, FileImage, File, Film, Loader2 } from 'lucide-react';
 import { Document, Folder, TransmittalData, TransmittalHistoryEntry, StandaloneTransmittalEntry } from '../types';
 import { documentService } from '../services/documentService';
 import { folderService } from '../services/folderService';
@@ -13,6 +13,7 @@ import * as XLSX from 'xlsx';
 import { buildFullPath } from '../utils/folderTree';
 import { useAuth } from '../contexts/AuthContext';
 import { isVideo } from '../utils/mediaUtils';
+import { QueryDocumentSnapshot, DocumentData } from 'firebase/firestore';
 
 // Helper function to format time ago
 const formatTimeAgo = (date: Date): string => {
@@ -69,6 +70,13 @@ export default function FileSpreadsheetView() {
   const [deleteTarget, setDeleteTarget] = useState<{id: string, isStandalone: boolean} | null>(null);
   const mountedRef = useRef(true);
 
+  // Pagination state
+  const [lastVisible, setLastVisible] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
+  const [hasMore, setHasMore] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [allFoldersData, setAllFoldersData] = useState<Folder[]>([]); // For folder count display
+  const loadMoreTriggerRef = useRef<HTMLDivElement>(null);
+
   // Timeout wrapper function
   const withTimeout = <T,>(promise: Promise<T>, timeoutMs: number): Promise<T> => {
     return Promise.race([
@@ -94,12 +102,12 @@ export default function FileSpreadsheetView() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [isFileTypeDropdownOpen]);
 
-  // Fetch project, documents, and folders
+  // Fetch project, folders, and initial page of documents
   useEffect(() => {
     // Set mounted ref
     mountedRef.current = true;
 
-    const fetchData = async () => {
+    const fetchInitialData = async () => {
       if (!projectId) {
         if (mountedRef.current) {
           setLoading(false);
@@ -114,31 +122,39 @@ export default function FileSpreadsheetView() {
           setError(null);
         }
 
-        // Fetch project, folders, documents, transmittal data, and standalone entries in parallel with timeout
-        // Using optimized single query for documents (previously N+1 queries)
-        const [project, allFolders, allDocuments, transmittalMap, standalone] = await withTimeout(
+        // Fetch project, folders, and standalone entries (these don't need pagination)
+        const [project, allFolders, standalone] = await withTimeout(
           Promise.all([
             projectService.getById(projectId),
             folderService.getByProjectId(projectId),
-            documentService.getByProjectId(projectId),  // ✅ Single query instead of N+1
-            transmittalService.getAllTransmittalData(projectId),  // ✅ Batch load transmittal data
-            transmittalService.getAllStandaloneEntries(projectId)  // ✅ Load standalone entries
+            transmittalService.getAllStandaloneEntries(projectId)
           ]),
           15000
         );
+
+        // Fetch first page of documents (50 docs)
+        const { documents: firstPageDocs, lastVisible: lastDoc, hasMore: more } =
+          await documentService.getByProjectIdPaginated(projectId, 50);
+
+        // Fetch transmittal data only for loaded documents
+        const docIds = firstPageDocs.map(doc => doc.id);
+        const transmittalMap = await transmittalService.getTransmittalDataForDocuments(projectId, docIds);
 
         if (mountedRef.current) {
           if (project) {
             setProjectName(project.name);
           }
           setFolders(allFolders);
-          setDocuments(allDocuments);
+          setAllFoldersData(allFolders); // Store for folder filter counts
+          setDocuments(firstPageDocs);
+          setLastVisible(lastDoc);
+          setHasMore(more);
           setTransmittalData(transmittalMap);
-          setStandaloneEntries(standalone.filter(entry => !entry._deleted));  // Filter out deleted entries
+          setStandaloneEntries(standalone.filter(entry => !entry._deleted));
           setLoading(false);
         }
       } catch (error) {
-        console.error('Error fetching data:', error);
+        console.error('Error fetching initial data:', error);
         if (mountedRef.current) {
           const errorMessage = error instanceof Error
             ? error.message
@@ -149,13 +165,106 @@ export default function FileSpreadsheetView() {
       }
     };
 
-    fetchData();
+    fetchInitialData();
 
     // Cleanup function
     return () => {
       mountedRef.current = false;
     };
   }, [projectId]);
+
+  // Load more documents (infinite scroll)
+  const loadMoreDocuments = useCallback(async () => {
+    if (!projectId || !hasMore || isLoadingMore || !lastVisible) {
+      return;
+    }
+
+    try {
+      setIsLoadingMore(true);
+
+      // Fetch next page
+      const { documents: nextPageDocs, lastVisible: lastDoc, hasMore: more } =
+        await documentService.getByProjectIdPaginated(projectId, 50, lastVisible);
+
+      // Fetch transmittal data for new documents
+      const docIds = nextPageDocs.map(doc => doc.id);
+      const newTransmittalMap = await transmittalService.getTransmittalDataForDocuments(projectId, docIds);
+
+      // Merge new documents and transmittal data
+      setDocuments(prev => [...prev, ...nextPageDocs]);
+      setTransmittalData(prev => new Map([...prev, ...newTransmittalMap]));
+      setLastVisible(lastDoc);
+      setHasMore(more);
+    } catch (error) {
+      console.error('Error loading more documents:', error);
+    } finally {
+      setIsLoadingMore(false);
+    }
+  }, [projectId, hasMore, isLoadingMore, lastVisible]);
+
+  // Set up intersection observer for infinite scroll
+  useEffect(() => {
+    if (!loadMoreTriggerRef.current || !hasMore || isLoadingMore) {
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const firstEntry = entries[0];
+        if (firstEntry.isIntersecting) {
+          loadMoreDocuments();
+        }
+      },
+      {
+        root: null,
+        rootMargin: '100px', // Start loading 100px before the trigger element is visible
+        threshold: 0.1
+      }
+    );
+
+    observer.observe(loadMoreTriggerRef.current);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [loadMoreDocuments, hasMore, isLoadingMore]);
+
+  // Reset pagination when filters change
+  useEffect(() => {
+    const resetPagination = async () => {
+      if (!projectId) return;
+
+      // Only reset if we're actually filtering (not on initial load)
+      if (filterFolder === 'all' && fileTypeFilter.length === 2) {
+        return; // Skip reset on initial state
+      }
+
+      try {
+        setIsLoadingMore(true);
+
+        // Fetch first page with filters
+        const { documents: firstPageDocs, lastVisible: lastDoc, hasMore: more } =
+          await documentService.getByProjectIdPaginated(projectId, 50, null, {
+            folderId: filterFolder
+          });
+
+        // Fetch transmittal data
+        const docIds = firstPageDocs.map(doc => doc.id);
+        const transmittalMap = await transmittalService.getTransmittalDataForDocuments(projectId, docIds);
+
+        setDocuments(firstPageDocs);
+        setLastVisible(lastDoc);
+        setHasMore(more);
+        setTransmittalData(transmittalMap);
+      } catch (error) {
+        console.error('Error resetting pagination with filters:', error);
+      } finally {
+        setIsLoadingMore(false);
+      }
+    };
+
+    resetPagination();
+  }, [filterFolder]); // Only reset when folder filter changes
 
   // Create folder map for lookups and build full paths
   const folderPathMap = useMemo(() => {
@@ -877,6 +986,28 @@ export default function FileSpreadsheetView() {
               onUpdateTransmittal={handleUpdateTransmittal}
               onDeleteRow={handleDeleteRow}
             />
+
+            {/* Infinite scroll trigger */}
+            {hasMore && (
+              <div
+                ref={loadMoreTriggerRef}
+                className="flex items-center justify-center py-8"
+              >
+                {isLoadingMore && (
+                  <div className="flex items-center space-x-2 text-gray-500">
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                    <span className="text-sm">Loading more files...</span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* All loaded message */}
+            {!hasMore && documents.length > 0 && (
+              <div className="flex items-center justify-center py-8 text-gray-400 text-sm">
+                All files loaded ({documents.length} total)
+              </div>
+            )}
           </div>
         </motion.div>
 

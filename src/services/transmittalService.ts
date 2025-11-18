@@ -64,6 +64,47 @@ export const transmittalService = {
   },
 
   /**
+   * Get transmittal data for specific document IDs (for pagination)
+   */
+  async getTransmittalDataForDocuments(
+    projectId: string,
+    documentIds: string[]
+  ): Promise<Map<string, TransmittalData>> {
+    try {
+      const transmittalMap = new Map<string, TransmittalData>();
+
+      // If no document IDs provided, return empty map
+      if (documentIds.length === 0) {
+        return transmittalMap;
+      }
+
+      // Fetch transmittal data for each document ID
+      // Note: Firestore doesn't have a good way to batch get subcollection docs
+      // So we'll use Promise.all for parallel fetching
+      const promises = documentIds.map(async (docId) => {
+        const docRef = doc(db, 'transmittals', projectId, 'documents', docId);
+        const docSnap = await getDoc(docRef);
+
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          transmittalMap.set(docId, {
+            documentId: docId,
+            projectId,
+            ...data
+          } as TransmittalData);
+        }
+      });
+
+      await Promise.all(promises);
+
+      return transmittalMap;
+    } catch (error) {
+      console.error('Error getting transmittal data for documents:', error);
+      throw new Error('Failed to get transmittal data for specific documents');
+    }
+  },
+
+  /**
    * Update transmittal data for a document
    */
   async updateTransmittalData(
