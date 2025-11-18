@@ -98,7 +98,6 @@ export const documentService = {
     lastDoc?: QueryDocumentSnapshot<DocumentData> | null,
     filters?: {
       fileTypes?: string[];
-      folderId?: string;
     }
   ): Promise<{
     documents: Document[];
@@ -110,11 +109,6 @@ export const documentService = {
       const constraints: any[] = [
         where('projectId', '==', projectId)
       ];
-
-      // Apply folder filter if specified
-      if (filters?.folderId && filters.folderId !== 'all') {
-        constraints.push(where('folderId', '==', filters.folderId));
-      }
 
       // Apply file type filter if specified
       // Note: Firestore doesn't support 'in' with large arrays efficiently

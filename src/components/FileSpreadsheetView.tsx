@@ -1,14 +1,13 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Search, Download, FileSpreadsheet, ArrowLeft, AlertCircle, RefreshCw, Filter, ChevronDown, X, History, FilePlus, FileText, FileImage, File, Film, Loader2 } from 'lucide-react';
+import { Search, Download, FileSpreadsheet, ArrowLeft, AlertCircle, RefreshCw, ChevronDown, X, History, FilePlus, FileText, FileImage, File, Film, Loader2 } from 'lucide-react';
 import { Document, Folder, TransmittalData, TransmittalHistoryEntry, StandaloneTransmittalEntry } from '../types';
 import { documentService } from '../services/documentService';
 import { folderService } from '../services/folderService';
 import { projectService } from '../services';
 import { transmittalService } from '../services/transmittalService';
 import FileSpreadsheetTable, { FileRowData } from './FileSpreadsheetTable';
-import FolderTreeSelect from './FolderTreeSelect';
 import * as XLSX from 'xlsx';
 import { buildFullPath } from '../utils/folderTree';
 import { useAuth } from '../contexts/AuthContext';
@@ -50,8 +49,6 @@ export default function FileSpreadsheetView() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
-  const [filterFolder, setFilterFolder] = useState<string>('all');
-  const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [fileTypeFilter, setFileTypeFilter] = useState<string[]>(['pdf', 'dwg']);
   const [isFileTypeDropdownOpen, setIsFileTypeDropdownOpen] = useState(false);
   const [showExportDialog, setShowExportDialog] = useState(false);
@@ -229,43 +226,6 @@ export default function FileSpreadsheetView() {
     };
   }, [loadMoreDocuments, hasMore, isLoadingMore]);
 
-  // Reset pagination when filters change
-  useEffect(() => {
-    const resetPagination = async () => {
-      if (!projectId) return;
-
-      // Only reset if we're actually filtering (not on initial load)
-      if (filterFolder === 'all' && fileTypeFilter.length === 2) {
-        return; // Skip reset on initial state
-      }
-
-      try {
-        setIsLoadingMore(true);
-
-        // Fetch first page with filters
-        const { documents: firstPageDocs, lastVisible: lastDoc, hasMore: more } =
-          await documentService.getByProjectIdPaginated(projectId, 50, null, {
-            folderId: filterFolder
-          });
-
-        // Fetch transmittal data
-        const docIds = firstPageDocs.map(doc => doc.id);
-        const transmittalMap = await transmittalService.getTransmittalDataForDocuments(projectId, docIds);
-
-        setDocuments(firstPageDocs);
-        setLastVisible(lastDoc);
-        setHasMore(more);
-        setTransmittalData(transmittalMap);
-      } catch (error) {
-        console.error('Error resetting pagination with filters:', error);
-      } finally {
-        setIsLoadingMore(false);
-      }
-    };
-
-    resetPagination();
-  }, [filterFolder]); // Only reset when folder filter changes
-
   // Create folder map for lookups and build full paths
   const folderPathMap = useMemo(() => {
     const map = new Map<string, string>();
@@ -315,31 +275,6 @@ export default function FileSpreadsheetView() {
 
     return map;
   }, [folders]);
-
-  // Calculate filter button display text and count
-  const filterDisplayInfo = useMemo(() => {
-    if (filterFolder === 'all') {
-      return {
-        name: 'All Folders',
-        count: documents.length
-      };
-    }
-
-    if (filterFolder === '') {
-      return {
-        name: 'Root',
-        count: documents.filter(doc => !doc.folderId).length
-      };
-    }
-
-    const folder = folders.find(f => f.id === filterFolder);
-    const count = documents.filter(doc => doc.folderId === filterFolder).length;
-
-    return {
-      name: folder?.name || 'Unknown Folder',
-      count
-    };
-  }, [filterFolder, folders, documents]);
 
   // Helper function to check if a file is a video
   const isVideoFile = useCallback((file: FileRowData): boolean => {
@@ -414,11 +349,6 @@ export default function FileSpreadsheetView() {
   const filteredFiles = useMemo(() => {
     let result = fileRows;
 
-    // Apply folder filter
-    if (filterFolder !== 'all') {
-      result = result.filter(file => file.document.folderId === filterFolder);
-    }
-
     // Apply file type filter
     if (fileTypeFilter.length > 0) {
       result = result.filter(file => {
@@ -450,7 +380,7 @@ export default function FileSpreadsheetView() {
     }
 
     return result;
-  }, [fileRows, searchTerm, filterFolder, fileTypeFilter, isVideoFile]);
+  }, [fileRows, searchTerm, fileTypeFilter, isVideoFile]);
 
   // Sort files hierarchically: Folder hierarchy (A-Z with parent-child), then file name (A-Z)
   const sortedFiles = useMemo(() => {
@@ -793,16 +723,6 @@ export default function FileSpreadsheetView() {
 
             {/* Filter Buttons */}
             <div className="flex items-center gap-2">
-              {/* Folder Filter Button */}
-              <button
-                onClick={() => setIsFilterOpen(true)}
-                className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg bg-white hover:bg-gray-50 transition-colors text-sm font-medium text-gray-700 whitespace-nowrap"
-              >
-                <Filter className="w-4 h-4" />
-                <span>Filter: {filterDisplayInfo.name} ({filterDisplayInfo.count})</span>
-                <ChevronDown className="w-4 h-4" />
-              </button>
-
               {/* File Type Filter Dropdown */}
               <div className="relative">
                 <button
@@ -956,10 +876,9 @@ export default function FileSpreadsheetView() {
               </div>
 
               {/* Clear All Filters Button - Shows when any filter is active */}
-              {(filterFolder !== 'all' || fileTypeFilter.length > 0) && (
+              {fileTypeFilter.length > 0 && (
                 <button
                   onClick={() => {
-                    setFilterFolder('all');
                     setFileTypeFilter([]);
                   }}
                   className="px-3 py-2 border border-red-200 rounded-lg bg-red-50 hover:bg-red-100 transition-colors text-sm font-medium text-red-600 hover:text-red-700 whitespace-nowrap"
@@ -1012,7 +931,7 @@ export default function FileSpreadsheetView() {
         </motion.div>
 
         {/* Results summary */}
-        {searchTerm || filterFolder !== 'all' || fileTypeFilter.length > 0 ? (
+        {searchTerm || fileTypeFilter.length > 0 ? (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -1021,16 +940,6 @@ export default function FileSpreadsheetView() {
             Showing {sortedFiles.length} of {fileRows.length} total files
           </motion.div>
         ) : null}
-
-        {/* Folder Filter Modal */}
-        <FolderTreeSelect
-          folders={folders}
-          documents={documents}
-          selectedFolderId={filterFolder}
-          onFolderSelect={setFilterFolder}
-          isOpen={isFilterOpen}
-          onClose={() => setIsFilterOpen(false)}
-        />
 
         {/* Export Column Selection Dialog */}
         {showExportDialog && (
