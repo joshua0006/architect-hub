@@ -114,7 +114,7 @@ export default function ProjectDetails({
         <div className="flex items-center space-x-3">
           <button
             onClick={() => window.open(`/${project.id}/files-spreadsheet`, '_blank')}
-            className="px-4 py-2 text-sm text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors flex items-center space-x-2"
+            className="hidden px-4 py-2 text-sm text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors flex items-center space-x-2"
             title="View transmittal"
           >
             <FileSpreadsheet className="w-4 h-4" />
@@ -134,11 +134,34 @@ export default function ProjectDetails({
       </motion.div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Project Details Section */}
+        {/* Progress Section with Milestones */}
         <motion.div
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
           transition={{ delay: 0.2 }}
+          className="bg-white rounded-xl p-6 shadow-sm"
+        >
+          <h2 className="text-lg font-medium text-gray-900 mb-6">
+            Project Progress
+          </h2>
+          <div className="flex flex-col items-center">
+            <CircularProgress progress={progress} milestones={milestones} />
+            <div className="mt-4 text-center">
+              <p className="text-sm text-gray-500">
+                {milestones.filter((m) => m.status === "completed").length} of{" "}
+                {milestones.length} milestones completed
+              </p>
+            </div>
+          </div>
+
+          <TaskSummary tasks={tasks} projectId={project.id} />
+        </motion.div>
+
+        {/* Project Details Section */}
+        <motion.div
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ delay: 0.3 }}
           className="bg-white rounded-xl p-6 shadow-sm"
         >
           <h2 className="text-lg font-medium text-gray-900 mb-6">
@@ -272,29 +295,6 @@ export default function ProjectDetails({
               )}
             </div>
           </div>
-        </motion.div>
-
-        {/* Progress Section with Milestones */}
-        <motion.div
-          initial={{ opacity: 0, scale: 0.95 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ delay: 0.3 }}
-          className="bg-white rounded-xl p-6 shadow-sm"
-        >
-          <h2 className="text-lg font-medium text-gray-900 mb-6">
-            Project Progress
-          </h2>
-          <div className="flex flex-col items-center">
-            <CircularProgress progress={progress} milestones={milestones} />
-            <div className="mt-4 text-center">
-              <p className="text-sm text-gray-500">
-                {milestones.filter((m) => m.status === "completed").length} of{" "}
-                {milestones.length} milestones completed
-              </p>
-            </div>
-          </div>
-
-          <TaskSummary tasks={tasks} projectId={project.id} />
         </motion.div>
       </div>
 
