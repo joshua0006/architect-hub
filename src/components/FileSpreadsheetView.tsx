@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Search, Download, FileSpreadsheet, ArrowLeft, AlertCircle, RefreshCw, ChevronDown, X, History, FilePlus, FileText, FileImage, File, Film, Loader2 } from 'lucide-react';
+import { Search, Download, FileSpreadsheet, ArrowLeft, AlertCircle, RefreshCw, ChevronDown, X, History, FilePlus, FileText, FileImage, File, Film, Loader2, Users } from 'lucide-react';
 import { Document, Folder, TransmittalData, TransmittalHistoryEntry, StandaloneTransmittalEntry } from '../types';
 import { documentService } from '../services/documentService';
 import { folderService } from '../services/folderService';
@@ -12,6 +12,7 @@ import * as XLSX from 'xlsx';
 import { buildFullPath } from '../utils/folderTree';
 import { useAuth } from '../contexts/AuthContext';
 import { isVideo } from '../utils/mediaUtils';
+import { getUploaderNamesFromNotifications } from '../utils/uploaderUtils';
 import { QueryDocumentSnapshot, DocumentData } from 'firebase/firestore';
 
 // Helper function to format time ago
@@ -51,12 +52,17 @@ export default function FileSpreadsheetView() {
   const [searchTerm, setSearchTerm] = useState('');
   const [fileTypeFilter, setFileTypeFilter] = useState<string[]>(['pdf', 'dwg']);
   const [isFileTypeDropdownOpen, setIsFileTypeDropdownOpen] = useState(false);
+  const [uploaderFilter, setUploaderFilter] = useState<string[]>([]);
+  const [isUploaderDropdownOpen, setIsUploaderDropdownOpen] = useState(false);
+  const [legacyUploaderNames, setLegacyUploaderNames] = useState<Map<string, string>>(new Map());
+  const [allProjectUploaders, setAllProjectUploaders] = useState<Map<string, number>>(new Map());
   const [showExportDialog, setShowExportDialog] = useState(false);
   const [exportType, setExportType] = useState<'csv' | 'excel'>('excel');
   const [exportColumns, setExportColumns] = useState({
     drawingNo: true,
     title: true,
     description: true,
+    uploader: true,
     revisions: true
   });
   const [showHistoryDialog, setShowHistoryDialog] = useState(false);
@@ -119,12 +125,13 @@ export default function FileSpreadsheetView() {
           setError(null);
         }
 
-        // Fetch project, folders, and standalone entries (these don't need pagination)
-        const [project, allFolders, standalone] = await withTimeout(
+        // Fetch project, folders, standalone entries, and ALL uploader names (these don't need pagination)
+        const [project, allFolders, standalone, uploaderNames] = await withTimeout(
           Promise.all([
             projectService.getById(projectId),
             folderService.getByProjectId(projectId),
-            transmittalService.getAllStandaloneEntries(projectId)
+            transmittalService.getAllStandaloneEntries(projectId),
+            documentService.getAllUploaderNames(projectId)
           ]),
           15000
         );
@@ -148,6 +155,7 @@ export default function FileSpreadsheetView() {
           setHasMore(more);
           setTransmittalData(transmittalMap);
           setStandaloneEntries(standalone.filter(entry => !entry._deleted));
+          setAllProjectUploaders(uploaderNames);
           setLoading(false);
         }
       } catch (error) {
@@ -169,6 +177,35 @@ export default function FileSpreadsheetView() {
       mountedRef.current = false;
     };
   }, [projectId]);
+
+  // Fetch legacy uploader names from notifications for documents without createdByName
+  useEffect(() => {
+    const fetchLegacyUploaderNames = async () => {
+      // Find documents that don't have createdByName (legacy documents)
+      const legacyDocs = documents.filter(doc => !doc.createdByName);
+
+      if (legacyDocs.length === 0) {
+        return; // No legacy documents, nothing to fetch
+      }
+
+      try {
+        // Get document IDs of legacy documents
+        const legacyDocIds = legacyDocs.map(doc => doc.id);
+
+        // Fetch uploader names from notifications
+        const uploaderNamesMap = await getUploaderNamesFromNotifications(legacyDocIds);
+
+        if (mountedRef.current) {
+          setLegacyUploaderNames(uploaderNamesMap);
+        }
+      } catch (error) {
+        console.error('Error fetching legacy uploader names:', error);
+        // Don't block the UI if this fails, just log the error
+      }
+    };
+
+    fetchLegacyUploaderNames();
+  }, [documents]);
 
   // Load more documents (infinite scroll)
   const loadMoreDocuments = useCallback(async () => {
@@ -303,6 +340,9 @@ export default function FileSpreadsheetView() {
         url: doc.url,
         document: doc,
         revisionCount: doc.version,
+        // Uploader information - use legacy uploader names as fallback
+        createdBy: doc.createdBy,
+        createdByName: doc.createdByName || legacyUploaderNames.get(doc.id) || 'Unknown User',
         // Transmittal overrides
         transmittalDrawingNo: transmittal?.drawingNo,
         transmittalTitle: transmittal?.title,
@@ -328,6 +368,9 @@ export default function FileSpreadsheetView() {
         url: '',
         document: undefined,
         revisionCount: 0,
+        // Uploader information
+        createdBy: entry.createdBy,
+        createdByName: entry.createdByName,
         transmittalDrawingNo: entry.drawingNo,
         transmittalTitle: entry.title,
         transmittalDescription: entry.description,
@@ -343,7 +386,7 @@ export default function FileSpreadsheetView() {
 
     // Merge and return both
     return [...documentRows, ...standaloneRows];
-  }, [documents, folderPathMap, transmittalData, standaloneEntries]);
+  }, [documents, folderPathMap, transmittalData, standaloneEntries, legacyUploaderNames]);
 
   // Filter and search
   const filteredFiles = useMemo(() => {
@@ -370,17 +413,26 @@ export default function FileSpreadsheetView() {
       });
     }
 
+    // Apply uploader filter
+    if (uploaderFilter.length > 0) {
+      result = result.filter(file => {
+        const createdByName = file.createdByName || 'Unknown User';
+        return uploaderFilter.includes(createdByName);
+      });
+    }
+
     // Apply search
     if (searchTerm) {
       const term = searchTerm.toLowerCase();
       result = result.filter(file =>
         file.name.toLowerCase().includes(term) ||
-        file.folderPath.toLowerCase().includes(term)
+        file.folderPath.toLowerCase().includes(term) ||
+        (file.createdByName?.toLowerCase().includes(term))
       );
     }
 
     return result;
-  }, [fileRows, searchTerm, fileTypeFilter, isVideoFile]);
+  }, [fileRows, searchTerm, fileTypeFilter, uploaderFilter, isVideoFile]);
 
   // Sort files hierarchically: Folder hierarchy (A-Z with parent-child), then file name (A-Z)
   const sortedFiles = useMemo(() => {
@@ -405,6 +457,44 @@ export default function FileSpreadsheetView() {
 
     return sorted;
   }, [filteredFiles, folderHierarchyOrder]);
+
+  // Get unique uploaders with file counts for filter dropdown
+  // Use allProjectUploaders to show ALL uploaders, not just from loaded documents
+  const uniqueUploaders = useMemo(() => {
+    // Start with all project uploaders (from initial fetch)
+    const uploaders = new Map<string, number>(allProjectUploaders);
+
+    // Filter out any legacy placeholder keys from allProjectUploaders
+    const filteredUploaders = new Map<string, number>();
+    uploaders.forEach((count, name) => {
+      if (!name.startsWith('_legacy_')) {
+        filteredUploaders.set(name, count);
+      }
+    });
+
+    // Handle legacy documents by checking if we have their names from notifications
+    allProjectUploaders.forEach((count, key) => {
+      if (key.startsWith('_legacy_')) {
+        const docId = key.replace('_legacy_', '');
+        const legacyName = legacyUploaderNames.get(docId);
+        if (legacyName) {
+          filteredUploaders.set(
+            legacyName,
+            (filteredUploaders.get(legacyName) || 0) + count
+          );
+        } else {
+          // Still waiting for notification lookup, show as Unknown User
+          filteredUploaders.set(
+            'Unknown User',
+            (filteredUploaders.get('Unknown User') || 0) + count
+          );
+        }
+      }
+    });
+
+    return Array.from(filteredUploaders.entries())
+      .sort((a, b) => a[0].localeCompare(b[0])); // A-Z sort
+  }, [allProjectUploaders, legacyUploaderNames]);
 
   // Handle file click - open in document viewer in new tab
   const handleFileClick = (fileId: string) => {
@@ -551,6 +641,9 @@ export default function FileSpreadsheetView() {
       if (exportColumns.description) {
         row['Description'] = file.transmittalDescription || '';
       }
+      if (exportColumns.uploader) {
+        row['Uploaded By'] = file.createdByName || 'Unknown User';
+      }
       if (exportColumns.revisions) {
         row['No. of Revisions'] = file.transmittalRevision || file.revisionCount.toString();
       }
@@ -565,6 +658,7 @@ export default function FileSpreadsheetView() {
     if (exportColumns.drawingNo) colWidths.push({ wch: 15 });
     if (exportColumns.title) colWidths.push({ wch: 40 });
     if (exportColumns.description) colWidths.push({ wch: 40 });
+    if (exportColumns.uploader) colWidths.push({ wch: 20 });
     if (exportColumns.revisions) colWidths.push({ wch: 15 });
     worksheet['!cols'] = colWidths;
 
@@ -875,11 +969,76 @@ export default function FileSpreadsheetView() {
                 )}
               </div>
 
+              {/* Uploader Filter Dropdown */}
+              <div className="relative">
+                <button
+                  onClick={() => setIsUploaderDropdownOpen(!isUploaderDropdownOpen)}
+                  className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg bg-white hover:bg-gray-50 transition-colors text-sm font-medium text-gray-700 whitespace-nowrap"
+                >
+                  <Users className="w-4 h-4" />
+                  <span>
+                    Uploader: {uploaderFilter.length === 0 ? 'All' : `${uploaderFilter.length} selected`}
+                  </span>
+                  <ChevronDown className="w-4 h-4" />
+                </button>
+
+                {/* Dropdown Menu */}
+                {isUploaderDropdownOpen && (
+                  <div className="absolute right-0 mt-2 w-64 bg-white rounded-lg shadow-lg border border-gray-200 z-50">
+                    <div className="p-2 max-h-64 overflow-y-auto">
+                      {/* Show all uploaders */}
+                      {uniqueUploaders.length === 0 ? (
+                        <div className="px-2 py-2 text-sm text-gray-500">No uploaders found</div>
+                      ) : (
+                        uniqueUploaders.map(([uploaderName, count]) => (
+                          <label key={uploaderName} className="flex items-center justify-between p-2 hover:bg-gray-50 rounded cursor-pointer">
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="checkbox"
+                                checked={uploaderFilter.includes(uploaderName)}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setUploaderFilter([...uploaderFilter, uploaderName]);
+                                  } else {
+                                    setUploaderFilter(uploaderFilter.filter(u => u !== uploaderName));
+                                  }
+                                }}
+                                className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                              />
+                              <Users className="w-4 h-4 text-gray-400" />
+                              <span className="text-sm font-medium text-gray-700">{uploaderName}</span>
+                            </div>
+                            <span className="text-xs text-gray-500">{count}</span>
+                          </label>
+                        ))
+                      )}
+
+                      {/* Clear All */}
+                      {uploaderFilter.length > 0 && (
+                        <>
+                          <div className="border-t border-gray-200 my-2"></div>
+                          <button
+                            onClick={() => {
+                              setUploaderFilter([]);
+                              setIsUploaderDropdownOpen(false);
+                            }}
+                            className="w-full text-left px-2 py-2 text-sm text-red-600 hover:bg-red-50 rounded font-medium"
+                          >
+                            Clear All
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {/* Clear All Filters Button - Shows when any filter is active */}
-              {fileTypeFilter.length > 0 && (
+              {(fileTypeFilter.length > 0 || uploaderFilter.length > 0) && (
                 <button
                   onClick={() => {
                     setFileTypeFilter([]);
+                    setUploaderFilter([]);
                   }}
                   className="px-3 py-2 border border-red-200 rounded-lg bg-red-50 hover:bg-red-100 transition-colors text-sm font-medium text-red-600 hover:text-red-700 whitespace-nowrap"
                 >

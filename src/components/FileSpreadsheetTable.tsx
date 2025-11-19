@@ -21,6 +21,9 @@ export interface FileRowData {
   url: string;
   document?: Document;
   revisionCount: number;
+  // Uploader information
+  createdBy?: string;        // User ID of uploader
+  createdByName?: string;    // Display name of uploader
   // Transmittal-specific fields
   transmittalDrawingNo?: string;
   transmittalTitle?: string;
@@ -249,6 +252,9 @@ export default function FileSpreadsheetTable({
             <TableHead className="w-auto min-w-[200px] px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
               <span>Description</span>
             </TableHead>
+            <TableHead className="w-[150px] px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <span>Uploaded By</span>
+            </TableHead>
             <TableHead className="w-[120px] px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
               <span>No. of Revisions</span>
             </TableHead>
@@ -260,7 +266,7 @@ export default function FileSpreadsheetTable({
         <TableBody>
           {files.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={5} className="px-4 py-12 text-center text-gray-500">
+              <TableCell colSpan={6} className="px-4 py-12 text-center text-gray-500">
                 No files found
               </TableCell>
             </TableRow>
@@ -272,7 +278,7 @@ export default function FileSpreadsheetTable({
                 <React.Fragment key={folderPath}>
                   {/* Folder Header Row */}
                   <TableRow className="bg-gray-50 hover:bg-gray-100 border-t-2 border-gray-200 cursor-pointer transition-colors">
-                    <TableCell colSpan={5} className="px-4 py-2" onClick={() => toggleFolder(folderPath)}>
+                    <TableCell colSpan={6} className="px-4 py-2" onClick={() => toggleFolder(folderPath)}>
                       <div className="flex items-center gap-2">
                         <ChevronDown
                           className={`w-4 h-4 text-gray-600 transition-transform duration-[250ms] ease-[cubic-bezier(0.4,0,0.2,1)] ${
@@ -415,6 +421,11 @@ export default function FileSpreadsheetTable({
                     {hasDescriptionError && (
                       <p className="text-xs text-red-600 mt-1">{descriptionError[file.id]}</p>
                     )}
+                  </TableCell>
+
+                  {/* Uploaded By Column */}
+                  <TableCell className="w-[150px] px-4 py-4 whitespace-nowrap text-sm text-gray-700">
+                    {file.createdByName || 'Unknown User'}
                   </TableCell>
 
                   {/* Revision Column */}

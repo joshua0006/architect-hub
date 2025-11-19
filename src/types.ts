@@ -30,6 +30,8 @@ export interface Document {
   dateModified: string;
   url: string;
   drawingNo?: string;
+  createdBy?: string;        // User ID of uploader
+  createdByName?: string;    // Display name of uploader
   comments?: DocumentComment[];
   metadata?: {
     size?: number;

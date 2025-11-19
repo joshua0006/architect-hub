@@ -155,6 +155,43 @@ export const documentService = {
     }
   },
 
+  // Get all uploader names and file counts for a project (lightweight query)
+  async getAllUploaderNames(projectId: string): Promise<Map<string, number>> {
+    try {
+      const uploaders = new Map<string, number>();
+
+      // Query all documents for the project, selecting only necessary fields
+      const q = query(
+        collection(db, 'documents'),
+        where('projectId', '==', projectId)
+      );
+
+      const snapshot = await getDocs(q);
+
+      snapshot.docs.forEach(doc => {
+        if (doc.id === '_metadata') return; // Skip metadata doc
+
+        const data = doc.data();
+        const uploaderName = data.createdByName || null;
+
+        if (uploaderName) {
+          // Document has createdByName field
+          uploaders.set(uploaderName, (uploaders.get(uploaderName) || 0) + 1);
+        } else {
+          // Legacy document without createdByName - will be handled by notification lookup
+          // Store document ID for potential legacy lookup
+          const unknownKey = `_legacy_${doc.id}`;
+          uploaders.set(unknownKey, (uploaders.get(unknownKey) || 0) + 1);
+        }
+      });
+
+      return uploaders;
+    } catch (error) {
+      console.error('Error getting all uploader names:', error);
+      throw new Error('Failed to get uploader names for project');
+    }
+  },
+
   // Subscribe to real-time document updates for a specific folder
   subscribeToDocuments(
     folderId: string,
@@ -319,6 +356,7 @@ export const documentService = {
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
           createdBy: uploader?.id || '', // Add the uploader ID if available
+          createdByName: uploader?.displayName || 'Unknown User', // Add the uploader display name
           metadata: {
             originalFilename: file.name,
             contentType: file.type,
@@ -396,7 +434,7 @@ export const documentService = {
             // Create notifications for all admin users
             await createAdminFileUploadNotification(
               document.name,
-              uploader?.displayName || 'Unknown user',
+              uploader?.displayName || 'Unknown User',
               uploader?.role || 'Unknown',
               file.type,
               folderId || '',
@@ -407,7 +445,7 @@ export const documentService = {
               adminUsers.map(user => user.id),
               projectName
             );
-            console.log(`Admin notifications sent for file upload by ${uploader?.displayName || 'Unknown user'}`);
+            console.log(`Admin notifications sent for file upload by ${uploader?.displayName || 'Unknown User'}`);
           }
         } catch (notificationError) {
           console.warn('Error sending admin notifications (non-critical):', notificationError);
@@ -594,7 +632,7 @@ export const documentService = {
           // Create notifications for all admin users
           await createAdminFileUploadNotification(
             document.name,
-            uploader?.displayName || 'Unknown user',
+            uploader?.displayName || 'Unknown User',
             uploader?.role || 'Unknown',
             file.type,
             folderId || '',
@@ -604,7 +642,7 @@ export const documentService = {
             new Date().toISOString(),
             adminUsers.map(user => user.id)
           );
-          console.log(`Admin notifications sent for file update by ${uploader?.displayName || 'Unknown user'}`);
+          console.log(`Admin notifications sent for file update by ${uploader?.displayName || 'Unknown User'}`);
         }
       } catch (notificationError) {
         console.warn('Error sending admin notifications for file update (non-critical):', notificationError);

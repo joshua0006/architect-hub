@@ -10,7 +10,8 @@ interface UploadResult {
 
 export const uploadPdfToFolder = async (
   folderId: string,
-  file: File
+  file: File,
+  uploader?: { id: string, displayName: string, role: string }
 ): Promise<UploadResult> => {
   try {
     // Generate unique filename
@@ -52,6 +53,8 @@ export const uploadPdfToFolder = async (
       dateModified: new Date().toISOString(),
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
+      createdBy: uploader?.id,
+      createdByName: uploader?.displayName || 'Unknown User',
       metadata: {
         originalFilename: file.name,
         contentType: file.type,
@@ -87,7 +90,8 @@ export const uploadPdfToFolder = async (
 // Function to handle uploading any file type (not just PDFs)
 export const uploadFileToFolder = async (
   folderId: string,
-  file: File
+  file: File,
+  uploader?: { id: string, displayName: string, role: string }
 ): Promise<UploadResult> => {
   try {
     // Generate unique filename
@@ -142,6 +146,8 @@ export const uploadFileToFolder = async (
       dateModified: new Date().toISOString(),
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
+      createdBy: uploader?.id,
+      createdByName: uploader?.displayName || 'Unknown User',
       metadata: {
         originalFilename: file.name,
         contentType: file.type,
