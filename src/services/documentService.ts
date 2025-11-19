@@ -156,9 +156,14 @@ export const documentService = {
   },
 
   // Get all uploader names and file counts for a project (lightweight query)
-  async getAllUploaderNames(projectId: string): Promise<Map<string, number>> {
+  // Returns both the uploader map and list of legacy document IDs needing notification lookup
+  async getAllUploaderNames(projectId: string): Promise<{
+    uploaders: Map<string, number>;
+    legacyDocumentIds: string[];
+  }> {
     try {
       const uploaders = new Map<string, number>();
+      const legacyDocumentIds: string[] = [];
 
       // Query all documents for the project, selecting only necessary fields
       const q = query(
@@ -178,14 +183,17 @@ export const documentService = {
           // Document has createdByName field
           uploaders.set(uploaderName, (uploaders.get(uploaderName) || 0) + 1);
         } else {
-          // Legacy document without createdByName - will be handled by notification lookup
-          // Store document ID for potential legacy lookup
+          // Legacy document without createdByName - needs notification lookup
+          legacyDocumentIds.push(doc.id);
+          // Store document ID with placeholder for now
           const unknownKey = `_legacy_${doc.id}`;
           uploaders.set(unknownKey, (uploaders.get(unknownKey) || 0) + 1);
         }
       });
 
-      return uploaders;
+      console.log(`Found ${legacyDocumentIds.length} legacy documents requiring notification lookup`);
+
+      return { uploaders, legacyDocumentIds };
     } catch (error) {
       console.error('Error getting all uploader names:', error);
       throw new Error('Failed to get uploader names for project');

@@ -18,7 +18,7 @@ import * as XLSX from 'xlsx';
 import { buildFullPath } from '../utils/folderTree';
 import { useAuth } from '../contexts/AuthContext';
 import { isVideo } from '../utils/mediaUtils';
-import { getUploaderNamesFromNotifications } from '../utils/uploaderUtils';
+import { getUploaderNamesWithFallback } from '../utils/uploaderUtils';
 import { QueryDocumentSnapshot, DocumentData } from 'firebase/firestore';
 
 // Helper function to format time ago
@@ -60,6 +60,7 @@ export default function FileSpreadsheetView() {
   const [uploaderFilter, setUploaderFilter] = useState<string[]>([]);
   const [dateRange, setDateRange] = useState<DateRange | undefined>();
   const [legacyUploaderNames, setLegacyUploaderNames] = useState<Map<string, string>>(new Map());
+  const [isLoadingLegacyNames, setIsLoadingLegacyNames] = useState(false);
   const [allProjectUploaders, setAllProjectUploaders] = useState<Map<string, number>>(new Map());
   const [showExportDialog, setShowExportDialog] = useState(false);
   const [exportType, setExportType] = useState<'csv' | 'excel'>('excel');
@@ -116,7 +117,7 @@ export default function FileSpreadsheetView() {
         }
 
         // Fetch project, folders, standalone entries, and ALL uploader names (these don't need pagination)
-        const [project, allFolders, standalone, uploaderNames] = await withTimeout(
+        const [project, allFolders, standalone, uploaderNamesResult] = await withTimeout(
           Promise.all([
             projectService.getById(projectId),
             folderService.getByProjectId(projectId),
@@ -125,6 +126,40 @@ export default function FileSpreadsheetView() {
           ]),
           15000
         );
+
+        // Resolve ALL legacy document names upfront (before showing filter)
+        console.log(`Resolving ${uploaderNamesResult.legacyDocumentIds.length} legacy document names upfront...`);
+        setIsLoadingLegacyNames(true);
+
+        let resolvedLegacyNames = new Map<string, string>();
+        if (uploaderNamesResult.legacyDocumentIds.length > 0) {
+          try {
+            resolvedLegacyNames = await getUploaderNamesWithFallback(
+              uploaderNamesResult.legacyDocumentIds
+            );
+            console.log(`✅ Multi-source resolution complete: ${resolvedLegacyNames.size} legacy uploader names resolved`);
+          } catch (error) {
+            console.error('Error resolving legacy uploader names:', error);
+          }
+        }
+
+        // Merge resolved legacy names into the uploaders map
+        const finalUploaders = new Map(uploaderNamesResult.uploaders);
+
+        // Remove _legacy_ placeholders and add actual names
+        uploaderNamesResult.legacyDocumentIds.forEach(docId => {
+          const legacyKey = `_legacy_${docId}`;
+          const count = finalUploaders.get(legacyKey) || 0;
+
+          // Remove placeholder
+          finalUploaders.delete(legacyKey);
+
+          // Add actual name
+          const actualName = resolvedLegacyNames.get(docId) || 'Unknown User';
+          finalUploaders.set(actualName, (finalUploaders.get(actualName) || 0) + count);
+        });
+
+        console.log(`Final uploader map has ${finalUploaders.size} unique uploaders`);
 
         // Fetch first page of documents (50 docs)
         const { documents: firstPageDocs, lastVisible: lastDoc, hasMore: more } =
@@ -145,7 +180,9 @@ export default function FileSpreadsheetView() {
           setHasMore(more);
           setTransmittalData(transmittalMap);
           setStandaloneEntries(standalone.filter(entry => !entry._deleted));
-          setAllProjectUploaders(uploaderNames);
+          setAllProjectUploaders(finalUploaders); // Now contains all resolved names
+          setLegacyUploaderNames(resolvedLegacyNames); // Store for document rows
+          setIsLoadingLegacyNames(false);
           setLoading(false);
         }
       } catch (error) {
@@ -168,34 +205,8 @@ export default function FileSpreadsheetView() {
     };
   }, [projectId]);
 
-  // Fetch legacy uploader names from notifications for documents without createdByName
-  useEffect(() => {
-    const fetchLegacyUploaderNames = async () => {
-      // Find documents that don't have createdByName (legacy documents)
-      const legacyDocs = documents.filter(doc => !doc.createdByName);
-
-      if (legacyDocs.length === 0) {
-        return; // No legacy documents, nothing to fetch
-      }
-
-      try {
-        // Get document IDs of legacy documents
-        const legacyDocIds = legacyDocs.map(doc => doc.id);
-
-        // Fetch uploader names from notifications
-        const uploaderNamesMap = await getUploaderNamesFromNotifications(legacyDocIds);
-
-        if (mountedRef.current) {
-          setLegacyUploaderNames(uploaderNamesMap);
-        }
-      } catch (error) {
-        console.error('Error fetching legacy uploader names:', error);
-        // Don't block the UI if this fails, just log the error
-      }
-    };
-
-    fetchLegacyUploaderNames();
-  }, [documents]);
+  // NOTE: Legacy uploader names are now resolved upfront in the initial data fetch
+  // No need for per-page resolution anymore
 
   // Load more documents (infinite scroll)
   const loadMoreDocuments = useCallback(async () => {
@@ -332,7 +343,7 @@ export default function FileSpreadsheetView() {
         revisionCount: doc.version,
         // Uploader information - use legacy uploader names as fallback
         createdBy: doc.createdBy,
-        createdByName: doc.createdByName || legacyUploaderNames.get(doc.id) || 'Unknown User',
+        createdByName: doc.createdByName || legacyUploaderNames.get(doc.id) || (isLoadingLegacyNames ? 'Loading...' : 'Unknown User'),
         // Transmittal overrides
         transmittalDrawingNo: transmittal?.drawingNo,
         transmittalTitle: transmittal?.title,
@@ -376,7 +387,7 @@ export default function FileSpreadsheetView() {
 
     // Merge and return both
     return [...documentRows, ...standaloneRows];
-  }, [documents, folderPathMap, transmittalData, standaloneEntries, legacyUploaderNames]);
+  }, [documents, folderPathMap, transmittalData, standaloneEntries, legacyUploaderNames, isLoadingLegacyNames]);
 
   // Filter and search
   const filteredFiles = useMemo(() => {
@@ -476,40 +487,11 @@ export default function FileSpreadsheetView() {
   // Get unique uploaders with file counts for filter dropdown
   // Use allProjectUploaders to show ALL uploaders, not just from loaded documents
   const uniqueUploaders = useMemo(() => {
-    // Start with all project uploaders (from initial fetch)
-    const uploaders = new Map<string, number>(allProjectUploaders);
-
-    // Filter out any legacy placeholder keys from allProjectUploaders
-    const filteredUploaders = new Map<string, number>();
-    uploaders.forEach((count, name) => {
-      if (!name.startsWith('_legacy_')) {
-        filteredUploaders.set(name, count);
-      }
-    });
-
-    // Handle legacy documents by checking if we have their names from notifications
-    allProjectUploaders.forEach((count, key) => {
-      if (key.startsWith('_legacy_')) {
-        const docId = key.replace('_legacy_', '');
-        const legacyName = legacyUploaderNames.get(docId);
-        if (legacyName) {
-          filteredUploaders.set(
-            legacyName,
-            (filteredUploaders.get(legacyName) || 0) + count
-          );
-        } else {
-          // Still waiting for notification lookup, show as Unknown User
-          filteredUploaders.set(
-            'Unknown User',
-            (filteredUploaders.get('Unknown User') || 0) + count
-          );
-        }
-      }
-    });
-
-    return Array.from(filteredUploaders.entries())
+    // allProjectUploaders now contains all resolved names (no _legacy_ placeholders)
+    // Legacy names were resolved upfront during initial data fetch
+    return Array.from(allProjectUploaders.entries())
       .sort((a, b) => a[0].localeCompare(b[0])); // A-Z sort
-  }, [allProjectUploaders, legacyUploaderNames]);
+  }, [allProjectUploaders]);
 
   // Handle file click - open in document viewer in new tab
   const handleFileClick = (fileId: string) => {

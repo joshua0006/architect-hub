@@ -1,11 +1,66 @@
 import { storage, db } from '../lib/firebase';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { collection, addDoc, doc, updateDoc, serverTimestamp, increment } from 'firebase/firestore';
+import { collection, addDoc, doc, updateDoc, serverTimestamp, increment, getDoc } from 'firebase/firestore';
 import { getUploadPath } from '../utils/uploadMiddleware';
 
 interface UploadResult {
   downloadUrl: string;
   documentId: string;
+}
+
+/**
+ * Validates and ensures uploader has a display name.
+ * If displayName is missing but userId exists, attempts to fetch from user document.
+ *
+ * @param uploader - The uploader object (may be undefined or incomplete)
+ * @returns Promise<string> - The uploader's display name or 'Unknown User' as last resort
+ */
+async function getValidatedUploaderName(
+  uploader?: { id: string, displayName: string, role: string }
+): Promise<string> {
+  // If no uploader provided at all
+  if (!uploader) {
+    console.warn('Upload attempted without uploader information');
+    return 'Unknown User';
+  }
+
+  // If displayName is provided and valid
+  if (uploader.displayName && uploader.displayName.trim()) {
+    return uploader.displayName.trim();
+  }
+
+  // If we have a user ID but no displayName, try to fetch from user document
+  if (uploader.id) {
+    console.warn(`Uploader ${uploader.id} missing displayName, attempting to fetch from user document`);
+
+    try {
+      const userDocRef = doc(db, 'users', uploader.id);
+      const userDoc = await getDoc(userDocRef);
+
+      if (userDoc.exists()) {
+        const userData = userDoc.data();
+        const fetchedName = userData.displayName || userData.name || userData.email;
+
+        if (fetchedName && typeof fetchedName === 'string' && fetchedName.trim()) {
+          console.log(`Successfully fetched displayName for user ${uploader.id}: ${fetchedName}`);
+          return fetchedName.trim();
+        }
+      }
+
+      console.error(`User document ${uploader.id} exists but has no valid displayName/name/email`);
+    } catch (error) {
+      console.error(`Failed to fetch user document for ${uploader.id}:`, error);
+    }
+  }
+
+  // Last resort - log the issue clearly
+  console.error('Upload proceeding with Unknown User - uploader data incomplete:', {
+    hasId: !!uploader.id,
+    hasDisplayName: !!uploader.displayName,
+    hasRole: !!uploader.role
+  });
+
+  return 'Unknown User';
 }
 
 export const uploadPdfToFolder = async (
@@ -43,7 +98,10 @@ export const uploadPdfToFolder = async (
     // 2. Create document record in Firestore
     const folderDocRef = doc(db, 'folders', folderId);
     const documentsCollectionRef = collection(folderDocRef, 'documents');
-    
+
+    // Validate and get uploader name (with fallback to user document if needed)
+    const uploaderName = await getValidatedUploaderName(uploader);
+
     const documentData = {
       name: file.name,
       type: 'pdf',
@@ -54,7 +112,7 @@ export const uploadPdfToFolder = async (
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
       createdBy: uploader?.id,
-      createdByName: uploader?.displayName || 'Unknown User',
+      createdByName: uploaderName,
       metadata: {
         originalFilename: file.name,
         contentType: file.type,
@@ -123,12 +181,12 @@ export const uploadFileToFolder = async (
     // 2. Create document record in Firestore
     const folderDocRef = doc(db, 'folders', folderId);
     const documentsCollectionRef = collection(folderDocRef, 'documents');
-    
+
     // Determine file type more accurately for the document record
     let docType = 'other';
     const fileType = file.type.toLowerCase();
     const extension = file.name.split('.').pop()?.toLowerCase();
-    
+
     if (fileType === 'application/pdf' || extension === 'pdf') {
       docType = 'pdf';
     } else if (extension === 'dwg') {
@@ -136,7 +194,10 @@ export const uploadFileToFolder = async (
     } else if (fileType.startsWith('image/') || ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg'].includes(extension || '')) {
       docType = 'image';
     }
-    
+
+    // Validate and get uploader name (with fallback to user document if needed)
+    const uploaderName = await getValidatedUploaderName(uploader);
+
     const documentData = {
       name: file.name,
       type: docType,
@@ -147,7 +208,7 @@ export const uploadFileToFolder = async (
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
       createdBy: uploader?.id,
-      createdByName: uploader?.displayName || 'Unknown User',
+      createdByName: uploaderName,
       metadata: {
         originalFilename: file.name,
         contentType: file.type,
