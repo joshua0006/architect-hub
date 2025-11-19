@@ -974,3 +974,7 @@ function analyzeSentiment(text: string = ''): string {
 ---
 
 This guide provides a comprehensive overview of implementing, testing, and deploying Firebase HTTPS functions with your current Firebase SDK. For more detailed information, refer to the [official Firebase documentation](https://firebase.google.com/docs/functions).
+
+
+
+

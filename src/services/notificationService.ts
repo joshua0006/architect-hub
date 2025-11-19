@@ -2068,7 +2068,7 @@ export const createAdminFileUploadNotification = async (
   projectName: string = ''
 ): Promise<string[]> => {
   // Format the uploader name for display in notification
-  const formattedUploaderName = uploaderName || 'Unknown user';
+  const formattedUploaderName = uploaderName || 'Unknown User';
   
   // Handle root folder name - replace _root with Project Root
   const displayFolderName = folderName === '_root' ? (projectName || 'Project Root') : folderName;

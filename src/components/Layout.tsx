@@ -2,14 +2,16 @@ import React, { ReactNode, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Settings as SettingsIcon, Users, ChevronLeft, ChevronRight } from 'lucide-react';
 import Header from './Header';
+import { Project } from '../types';
 
 interface LayoutProps {
   sidebar?: ReactNode;
   children: ReactNode;
   fullscreenMode?: boolean;
+  selectedProject?: Project;
 }
 
-export default function Layout({ sidebar, children, fullscreenMode = false }: LayoutProps) {
+export default function Layout({ sidebar, children, fullscreenMode = false, selectedProject }: LayoutProps) {
   const location = useLocation();
   const [minimized, setMinimized] = useState(false);
 
@@ -24,7 +26,7 @@ export default function Layout({ sidebar, children, fullscreenMode = false }: La
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <Header />
+      <Header selectedProject={selectedProject} />
       
       <div className="pt-16 flex">
         {sidebar && !fullscreenMode && (

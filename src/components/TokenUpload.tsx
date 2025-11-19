@@ -82,15 +82,16 @@ const processFilesBeforeUpload = async (files: File[]): Promise<File[]> => {
 
 // Custom document upload function for token uploads
 const uploadDocument = async (
-  folderId: string, 
+  folderId: string,
   docData: any,  // Renamed from 'document' to avoid shadowing the global object
-  file: File
+  file: File,
+  uploader?: { id: string, displayName: string, role: string }
 ): Promise<any> => {
   // Use the imported documentService but wrap it with error handling
   try {
     // Call the actual create method on documentService
     // @ts-ignore - Suppressing the TS error about missing method
-    const documentResult = await documentService.create(folderId, docData, file);
+    const documentResult = await documentService.create(folderId, docData, file, uploader);
     
     // Dispatch document upload event for real-time updates
     // This custom event will be picked up by DocumentList components
@@ -349,7 +350,12 @@ const TokenUpload: React.FC = () => {
                 uploadedBy: guestIdentifier.trim()
               } as any
             },
-            file
+            file,
+            {
+              id: 'guest',
+              displayName: guestIdentifier.trim(),
+              role: 'Guest'
+            }
           );
           
           setUploadProgress(prev => ({ ...prev, [fileId]: 100 }));

@@ -513,18 +513,17 @@ function ProjectListComponent({
       showToast("You don't have permission to access this project", "error");
       return;
     }
-    
+
     onSelect(project);
 
-    if (!isProjectTab) {
-      navigate("/", {
-        replace: true,
-        state: {
-          fromPath: location.pathname,
-          projectId: project.id,
-        },
-      });
-    }
+    // Navigate to project overview with project ID in URL
+    navigate(`/${project.id}/overview`, {
+      replace: !isProjectTab,
+      state: {
+        fromPath: location.pathname,
+        projectId: project.id,
+      },
+    });
   }, [onSelect, isProjectTab, navigate, location.pathname, user?.role, showToast]);
 
   const handleStatusChange = useCallback((

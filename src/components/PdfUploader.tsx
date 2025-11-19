@@ -2,6 +2,7 @@ import React, { useCallback, useState } from "react";
 import { useDropzone } from "react-dropzone";
 import { Upload, Loader2 } from "lucide-react";
 import { uploadPdfToFolder, uploadFileToFolder } from "../services/uploadService";
+import { useAuth } from "../contexts/AuthContext";
 
 interface FileUploaderProps {
   folderId: string;
@@ -32,6 +33,7 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
   title = "Upload Files",
   description = "Drag & drop your files here or click to browse",
 }) => {
+  const { user } = useAuth();
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
 
@@ -71,7 +73,14 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
       }, 300);
 
       // Use the general file upload function for any file type
-      const result = await uploadFileToFolder(folderId, file);
+      // Pass current user info if available
+      const uploaderInfo = user ? {
+        id: user.id,
+        displayName: user.displayName,
+        role: user.role
+      } : undefined;
+
+      const result = await uploadFileToFolder(folderId, file, uploaderInfo);
 
       clearInterval(progressInterval);
       setUploadProgress(100);

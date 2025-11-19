@@ -13,7 +13,11 @@ import {
   orderBy,
   setDoc,
   Timestamp,
-  onSnapshot
+  onSnapshot,
+  limit,
+  startAfter,
+  QueryDocumentSnapshot,
+  DocumentData
 } from 'firebase/firestore';
 import {
   ref,
@@ -36,7 +40,7 @@ export const documentService = {
   async getByFolderId(folderId: string): Promise<Document[]> {
     try {
       let q;
-      
+
       if (folderId) {
         // Query documents with specific folder ID
         q = query(
@@ -50,9 +54,9 @@ export const documentService = {
           where('folderId', '==', '')
         );
       }
-      
+
       const snapshot = await getDocs(q);
-      
+
       return snapshot.docs
         .filter(doc => doc.id !== '_metadata')
         .map(doc => ({
@@ -62,6 +66,137 @@ export const documentService = {
     } catch (error) {
       console.error('Error getting documents:', error);
       throw new Error('Failed to get documents');
+    }
+  },
+
+  // Get all documents for a project (optimized single query)
+  async getByProjectId(projectId: string): Promise<Document[]> {
+    try {
+      const q = query(
+        collection(db, 'documents'),
+        where('projectId', '==', projectId)
+      );
+
+      const snapshot = await getDocs(q);
+
+      return snapshot.docs
+        .filter(doc => doc.id !== '_metadata')
+        .map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        } as Document));
+    } catch (error) {
+      console.error('Error getting documents by projectId:', error);
+      throw new Error('Failed to get documents for project');
+    }
+  },
+
+  // Get paginated documents for a project with filters (for infinite scroll)
+  async getByProjectIdPaginated(
+    projectId: string,
+    pageSize: number = 50,
+    lastDoc?: QueryDocumentSnapshot<DocumentData> | null,
+    filters?: {
+      fileTypes?: string[];
+    }
+  ): Promise<{
+    documents: Document[];
+    lastVisible: QueryDocumentSnapshot<DocumentData> | null;
+    hasMore: boolean;
+  }> {
+    try {
+      // Build query constraints
+      const constraints: any[] = [
+        where('projectId', '==', projectId)
+      ];
+
+      // Apply file type filter if specified
+      // Note: Firestore doesn't support 'in' with large arrays efficiently
+      // So if multiple file types, we'll need to handle this client-side
+      // For now, we'll fetch all and filter client-side for multiple types
+
+      // Add ordering for consistent pagination
+      constraints.push(orderBy('createdAt', 'desc'));
+
+      // Add pagination
+      constraints.push(limit(pageSize));
+
+      // Add cursor if provided
+      if (lastDoc) {
+        constraints.push(startAfter(lastDoc));
+      }
+
+      const q = query(collection(db, 'documents'), ...constraints);
+      const snapshot = await getDocs(q);
+
+      const documents = snapshot.docs
+        .filter(doc => doc.id !== '_metadata')
+        .map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        } as Document));
+
+      // Get the last visible document for next page
+      const lastVisible = snapshot.docs.length > 0
+        ? snapshot.docs[snapshot.docs.length - 1]
+        : null;
+
+      // Check if there are more documents
+      const hasMore = snapshot.docs.length === pageSize;
+
+      return {
+        documents,
+        lastVisible,
+        hasMore
+      };
+    } catch (error) {
+      console.error('Error getting paginated documents:', error);
+      throw new Error('Failed to get paginated documents for project');
+    }
+  },
+
+  // Get all uploader names and file counts for a project (lightweight query)
+  // Returns both the uploader map and list of legacy document IDs needing notification lookup
+  async getAllUploaderNames(projectId: string): Promise<{
+    uploaders: Map<string, number>;
+    legacyDocumentIds: string[];
+  }> {
+    try {
+      const uploaders = new Map<string, number>();
+      const legacyDocumentIds: string[] = [];
+
+      // Query all documents for the project, selecting only necessary fields
+      const q = query(
+        collection(db, 'documents'),
+        where('projectId', '==', projectId)
+      );
+
+      const snapshot = await getDocs(q);
+
+      snapshot.docs.forEach(doc => {
+        if (doc.id === '_metadata') return; // Skip metadata doc
+
+        const data = doc.data();
+        const uploaderName = data.createdByName || null;
+
+        if (uploaderName) {
+          // Document has createdByName field
+          uploaders.set(uploaderName, (uploaders.get(uploaderName) || 0) + 1);
+        } else {
+          // Legacy document without createdByName - needs notification lookup
+          legacyDocumentIds.push(doc.id);
+          // Store document ID with placeholder for now
+          const unknownKey = `_legacy_${doc.id}`;
+          uploaders.set(unknownKey, (uploaders.get(unknownKey) || 0) + 1);
+        }
+      });
+
+      console.log(`Found ${legacyDocumentIds.length} legacy documents requiring notification lookup`);
+
+      return { uploaders, legacyDocumentIds };
+    } catch (error) {
+      console.error('Error getting all uploader names:', error);
+      throw new Error('Failed to get uploader names for project');
     }
   },
 
@@ -229,6 +364,7 @@ export const documentService = {
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
           createdBy: uploader?.id || '', // Add the uploader ID if available
+          createdByName: uploader?.displayName || 'Unknown User', // Add the uploader display name
           metadata: {
             originalFilename: file.name,
             contentType: file.type,
@@ -306,7 +442,7 @@ export const documentService = {
             // Create notifications for all admin users
             await createAdminFileUploadNotification(
               document.name,
-              uploader?.displayName || 'Unknown user',
+              uploader?.displayName || 'Unknown User',
               uploader?.role || 'Unknown',
               file.type,
               folderId || '',
@@ -317,7 +453,7 @@ export const documentService = {
               adminUsers.map(user => user.id),
               projectName
             );
-            console.log(`Admin notifications sent for file upload by ${uploader?.displayName || 'Unknown user'}`);
+            console.log(`Admin notifications sent for file upload by ${uploader?.displayName || 'Unknown User'}`);
           }
         } catch (notificationError) {
           console.warn('Error sending admin notifications (non-critical):', notificationError);
@@ -504,7 +640,7 @@ export const documentService = {
           // Create notifications for all admin users
           await createAdminFileUploadNotification(
             document.name,
-            uploader?.displayName || 'Unknown user',
+            uploader?.displayName || 'Unknown User',
             uploader?.role || 'Unknown',
             file.type,
             folderId || '',
@@ -514,7 +650,7 @@ export const documentService = {
             new Date().toISOString(),
             adminUsers.map(user => user.id)
           );
-          console.log(`Admin notifications sent for file update by ${uploader?.displayName || 'Unknown user'}`);
+          console.log(`Admin notifications sent for file update by ${uploader?.displayName || 'Unknown User'}`);
         }
       } catch (notificationError) {
         console.warn('Error sending admin notifications for file update (non-critical):', notificationError);

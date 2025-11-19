@@ -684,7 +684,7 @@ export default function UserGroupManagement({ currentUser }: UserGroupManagement
                         </div>
                       ) : (
                         <div key={userId} className="text-gray-400 text-sm">
-                          Unknown user ({userId})
+                          Unknown User ({userId})
                         </div>
                       );
                     })

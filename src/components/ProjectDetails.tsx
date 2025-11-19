@@ -4,7 +4,7 @@ import { Project, Task } from "../types";
 import CircularProgress from "./CircularProgress";
 import TaskSummary from "./TaskSummary";
 import MilestoneList from "./MilestoneList";
-import { Calendar, Users, Building2, Edit, MapPin, UserPlus, Shield } from "lucide-react";
+import { Calendar, Users, Building2, Edit, MapPin, UserPlus, Shield, ChevronDown, ChevronUp, FileSpreadsheet } from "lucide-react";
 import { useMilestoneManager } from "../hooks/useMilestoneManager";
 import { calculateMilestoneProgress } from "../utils/progressCalculator";
 import EditProject from "./EditProject";
@@ -30,6 +30,7 @@ export default function ProjectDetails({
   const [teamMembers, setTeamMembers] = useState<any[]>([]);
   const [loadingTeamMembers, setLoadingTeamMembers] = useState(false);
   const [showAddMemberDialog, setShowAddMemberDialog] = useState(false);
+  const [showTeamMembers, setShowTeamMembers] = useState(false);
 
   const { milestones, createMilestone, updateMilestone, deleteMilestone, reorderMilestones } =
     useMilestoneManager(project.id);
@@ -110,15 +111,26 @@ export default function ProjectDetails({
           <p className="text-gray-500">{project.client}</p>
         </div>
 
-        {canEditProject() && (
+        <div className="flex items-center space-x-3">
           <button
-            onClick={() => setShowEditProject(true)}
-            className="px-4 py-2 text-sm text-white bg-blue-500 rounded-md hover:bg-blue-600 transition-colors flex items-center space-x-2"
+            onClick={() => window.open(`/${project.id}/files-spreadsheet`, '_blank')}
+            className="hidden px-4 py-2 text-sm text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors flex items-center space-x-2"
+            title="View transmittal"
           >
-            <Edit className="w-4 h-4" />
-            <span>Edit Project</span>
+            <FileSpreadsheet className="w-4 h-4" />
+            <span>Transmittal</span>
           </button>
-        )}
+
+          {canEditProject() && (
+            <button
+              onClick={() => setShowEditProject(true)}
+              className="px-4 py-2 text-sm text-white bg-blue-500 rounded-md hover:bg-blue-600 transition-colors flex items-center space-x-2"
+            >
+              <Edit className="w-4 h-4" />
+              <span>Edit Project</span>
+            </button>
+          )}
+        </div>
       </motion.div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -219,45 +231,67 @@ export default function ProjectDetails({
                 <h3 className="text-sm font-medium text-gray-900">
                   Team Members ({project?.teamMemberIds?.length || 0})
                 </h3>
-                {user?.role === 'Staff' && (
-                  <button 
-                    onClick={() => setShowAddMemberDialog(true)}
-                    className="text-xs text-blue-600 hover:text-blue-800 flex items-center"
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setShowTeamMembers(!showTeamMembers)}
+                    className="text-xs text-gray-600 hover:text-gray-800 hover:bg-gray-50 hover:border-gray-400 flex items-center border border-gray-300 rounded-md px-3 py-1.5 transition-colors"
                   >
-                    <UserPlus className="w-3 h-3 mr-1" />
-                    Add Member
+                    {showTeamMembers ? (
+                      <>
+                        <ChevronUp className="w-3 h-3 mr-1" />
+                        Hide Members
+                      </>
+                    ) : (
+                      <>
+                        <ChevronDown className="w-3 h-3 mr-1" />
+                        View Members
+                      </>
+                    )}
                   </button>
-                )}
-              </div>
-              
-              {loadingTeamMembers ? (
-                <p className="text-sm text-gray-500">Loading team members...</p>
-              ) : teamMembers.length > 0 ? (
-                <div className="space-y-2">
-                  {teamMembers.map(member => (
-                    <div key={member.id} className="flex items-center justify-between py-1">
-                      <div className="flex items-center">
-                        {member.profile?.photoURL ? (
-                          <img 
-                            src={member.profile.photoURL} 
-                            alt={member.displayName}
-                            className="w-6 h-6 rounded-full mr-2"
-                          />
-                        ) : (
-                          <div className="w-6 h-6 rounded-full bg-gray-200 mr-2 flex items-center justify-center text-xs text-gray-600">
-                            {member.displayName && member.displayName.length > 0 ? member.displayName[0] : '?'}
-                          </div>
-                        )}
-                        <span className="text-sm">{member.displayName || 'Unknown User'}</span>
-                      </div>
-                      <span className="text-xs px-2 py-1 rounded-full bg-gray-100 text-gray-700">
-                        {member.role || 'Member'}
-                      </span>
-                    </div>
-                  ))}
+                  {user?.role === 'Staff' && (
+                    <button
+                      onClick={() => setShowAddMemberDialog(true)}
+                      className="text-xs text-blue-600 hover:text-blue-700 hover:bg-blue-50 hover:border-blue-600 flex items-center border border-blue-500 rounded-md px-3 py-1.5 transition-colors"
+                    >
+                      <UserPlus className="w-3 h-3 mr-1" />
+                      Add Member
+                    </button>
+                  )}
                 </div>
-              ) : (
-                <p className="text-sm text-gray-500 italic">No team members assigned yet</p>
+              </div>
+
+              {showTeamMembers && (
+                <>
+                  {loadingTeamMembers ? (
+                    <p className="text-sm text-gray-500">Loading team members...</p>
+                  ) : teamMembers.length > 0 ? (
+                    <div className="space-y-2">
+                      {teamMembers.map(member => (
+                        <div key={member.id} className="flex items-center justify-between py-1">
+                          <div className="flex items-center">
+                            {member.profile?.photoURL ? (
+                              <img
+                                src={member.profile.photoURL}
+                                alt={member.displayName}
+                                className="w-6 h-6 rounded-full mr-2"
+                              />
+                            ) : (
+                              <div className="w-6 h-6 rounded-full bg-gray-200 mr-2 flex items-center justify-center text-xs text-gray-600">
+                                {member.displayName && member.displayName.length > 0 ? member.displayName[0] : '?'}
+                              </div>
+                            )}
+                            <span className="text-sm">{member.displayName || 'Unknown User'}</span>
+                          </div>
+                          <span className="text-xs px-2 py-1 rounded-full bg-gray-100 text-gray-700">
+                            {member.role || 'Member'}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-gray-500 italic">No team members assigned yet</p>
+                  )}
+                </>
               )}
             </div>
           </div>

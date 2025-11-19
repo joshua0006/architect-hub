@@ -11,6 +11,7 @@ import Settings from './Settings';
 import TeamList from './TeamList';
 import TaskList from './TaskList';
 import AccountSettings from './AccountSettings';
+import FileSpreadsheetView from './FileSpreadsheetView';
 import { Project, Folder, Document, Task, TeamMember } from '../types';
 import { projectService } from '../services';
 import { sampleTasks, sampleTeamMembers } from '../data/sampleData';
@@ -394,6 +395,47 @@ const TaskDetailView: React.FC<TaskDetailViewProps> = ({
       onStatusChange={(taskId, status) => updateTask(taskId, { status })}
       onUpdateTask={updateTask}
       onDeleteTask={deleteTask}
+    />
+  ) : (
+    <div className="h-full flex items-center justify-center text-gray-500">
+      Loading project...
+    </div>
+  );
+};
+
+// Project Overview Wrapper component to handle URL-based project selection
+interface ProjectOverviewWrapperProps {
+  projects: Project[];
+  selectedProject?: Project;
+  setSelectedProject: (project?: Project) => void;
+  tasks: Task[];
+  loadProjects: () => Promise<void>;
+}
+
+const ProjectOverviewWrapper: React.FC<ProjectOverviewWrapperProps> = ({
+  projects,
+  selectedProject,
+  setSelectedProject,
+  tasks,
+  loadProjects
+}) => {
+  const { projectId } = useParams();
+
+  // Switch to the project from URL if needed
+  useEffect(() => {
+    if (projectId && (!selectedProject || selectedProject.id !== projectId)) {
+      const project = projects.find(p => p.id === projectId);
+      if (project) {
+        setSelectedProject(project);
+      }
+    }
+  }, [projectId, selectedProject, projects, setSelectedProject]);
+
+  return selectedProject ? (
+    <ProjectDetails
+      project={selectedProject}
+      tasks={tasks.filter(t => t.projectId === selectedProject.id)}
+      onProjectUpdate={loadProjects}
     />
   ) : (
     <div className="h-full flex items-center justify-center text-gray-500">
@@ -1090,10 +1132,45 @@ export default function AppContent() {
   return (
     <AnimatePresence mode="sync">
       <Routes>
+        {/* Project Overview Route with Project ID */}
+        <Route
+          path="/:projectId/overview"
+          element={
+            <Layout
+              selectedProject={selectedProject}
+              sidebar={
+                <ProjectList
+                  projects={projects}
+                  selectedId={selectedProject?.id}
+                  onSelect={setSelectedProject}
+                  onProjectsChange={loadProjects}
+                  onUpdateProject={handleUpdateProject}
+                  tasks={tasks}
+                />
+              }
+            >
+              <ProjectOverviewWrapper
+                projects={projects}
+                selectedProject={selectedProject}
+                setSelectedProject={setSelectedProject}
+                tasks={tasks}
+                loadProjects={loadProjects}
+              />
+            </Layout>
+          }
+        />
+
+        {/* Files Spreadsheet Route */}
+        <Route
+          path="/:projectId/files-spreadsheet"
+          element={<FileSpreadsheetView />}
+        />
+
         <Route
           path="/"
           element={
             <Layout
+              selectedProject={selectedProject}
               sidebar={
                 <ProjectList
                   projects={projects}
@@ -1106,7 +1183,7 @@ export default function AppContent() {
               }
             >
               {selectedProject ? (
-                <ProjectDetails 
+                <ProjectDetails
                   project={selectedProject}
                   tasks={tasks.filter(t => t.projectId === selectedProject.id)}
                   onProjectUpdate={loadProjects}
@@ -1124,6 +1201,7 @@ export default function AppContent() {
           path="/team"
           element={
             <Layout
+              selectedProject={selectedProject}
               sidebar={
                 <ProjectList
                   projects={projects}
@@ -1142,11 +1220,12 @@ export default function AppContent() {
             </Layout>
           }
         />
-        
+
         <Route
           path="/people"
           element={
             <Layout
+              selectedProject={selectedProject}
               sidebar={
                 <ProjectList
                   projects={projects}
@@ -1303,6 +1382,7 @@ export default function AppContent() {
           path="/tasks"
           element={
             <Layout
+              selectedProject={selectedProject}
               sidebar={
                 <ProjectList
                   projects={projects}
@@ -1332,11 +1412,12 @@ export default function AppContent() {
             </Layout>
           }
         />
-        
+
         <Route
           path="/tasks/:projectId/:taskId"
           element={
             <Layout
+              selectedProject={selectedProject}
               sidebar={
                 <ProjectList
                   projects={projects}
@@ -1348,7 +1429,7 @@ export default function AppContent() {
                 />
               }
             >
-              <TaskDetailView 
+              <TaskDetailView
                 projects={projects}
                 selectedProject={selectedProject}
                 setSelectedProject={setSelectedProject}
@@ -1361,11 +1442,12 @@ export default function AppContent() {
             </Layout>
           }
         />
-        
+
         <Route
           path="/settings"
           element={
             <Layout
+              selectedProject={selectedProject}
               sidebar={
                 <ProjectList
                   projects={projects}
@@ -1377,7 +1459,7 @@ export default function AppContent() {
                 />
               }
             >
-              <Settings 
+              <Settings
                 projects={projects}
                 onUpdateProject={handleUpdateProject}
               />
@@ -1389,6 +1471,7 @@ export default function AppContent() {
           path="/account"
           element={
             <Layout
+              selectedProject={selectedProject}
               sidebar={
                 <ProjectList
                   projects={projects}

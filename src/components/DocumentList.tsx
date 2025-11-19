@@ -3516,7 +3516,11 @@ export default function DocumentList({
         // Use document service to create the new document
         // Ensure destination_folder is not undefined when passing to create
         const destFolder = destination_folder || "";
-        await documentService.create(destFolder, newDocData, file);
+        await documentService.create(destFolder, newDocData, file, user ? {
+          id: user.id,
+          displayName: user.displayName,
+          role: user.role
+        } : undefined);
         
         // Show success message
         showToast(`Document ${sourceDocumentName} copied successfully`, 'success');
@@ -3542,7 +3546,11 @@ export default function DocumentList({
         // Use document service to create the new document in destination
         // Ensure destination_folder is not undefined when passing to create
         const destFolder = destination_folder || "";
-        await documentService.create(destFolder, newDocData, file);
+        await documentService.create(destFolder, newDocData, file, user ? {
+          id: user.id,
+          displayName: user.displayName,
+          role: user.role
+        } : undefined);
         
         // Delete the original document after successful move
         // Ensure sourceFolderId is not undefined when passing to delete
@@ -5160,7 +5168,8 @@ export default function DocumentList({
                   </motion.div>
                 ))}
 
-                {subFolders.length === 0 && currentDocs.length === 0 && (
+                {!loading && !isReloading && !rootLoading && !isNotificationLoading && !isProcessingNotification &&
+                 subFolders.length === 0 && currentDocs.length === 0 && (
                   <motion.div
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}

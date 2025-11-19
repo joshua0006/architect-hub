@@ -29,6 +29,9 @@ export interface Document {
   version: number;
   dateModified: string;
   url: string;
+  drawingNo?: string;
+  createdBy?: string;        // User ID of uploader
+  createdByName?: string;    // Display name of uploader
   comments?: DocumentComment[];
   metadata?: {
     size?: number;
@@ -49,6 +52,52 @@ export interface DocumentVersion {
     contentType: string;
     size: number;
   };
+}
+
+// Transmittal types - for transmittal-specific overrides that don't affect original documents
+export interface TransmittalData {
+  documentId: string;
+  projectId: string;
+  drawingNo?: string;        // Transmittal-specific drawing number
+  title?: string;             // Document title (non-editable, derived from document.name)
+  description?: string;       // User-editable description for transmittal
+  revision?: string;          // Manual revision identifier (e.g., "Rev A", "R01", "3.2")
+  editedAt?: string;
+  editedBy?: string;          // User ID who made the edit
+  editedByName?: string;      // Display name for UI
+}
+
+// Transmittal change history - audit trail of all transmittal edits
+export interface TransmittalHistoryEntry {
+  id: string;
+  documentId: string;
+  documentName: string;       // Snapshot of document name at time of edit
+  projectId: string;
+  changes: {
+    field: 'drawingNo' | 'title' | 'description' | 'revision';
+    oldValue: string;
+    newValue: string;
+  }[];
+  editedBy: string;           // User ID who made the edit
+  editedByName: string;       // Display name for UI
+  timestamp: string;          // ISO timestamp
+}
+
+// Standalone transmittal entry - exists independently without a linked document
+export interface StandaloneTransmittalEntry {
+  id: string;                 // Auto-generated unique ID
+  projectId: string;          // Project this entry belongs to
+  drawingNo?: string;         // Drawing number
+  title?: string;             // Entry title (user-defined)
+  description?: string;       // Entry description
+  revision?: string;          // Revision identifier
+  documentId?: string;        // Optional link to document (for future linking)
+  createdAt: string;          // ISO timestamp
+  createdBy: string;          // User ID who created the entry
+  createdByName: string;      // Display name for UI
+  editedAt?: string;          // Last edit timestamp
+  editedBy?: string;          // Last editor user ID
+  editedByName?: string;      // Last editor display name
 }
 
 // Project types
