@@ -1,4 +1,4 @@
-import { collection, query, where, getDocs, limit } from 'firebase/firestore';
+import { collection, query, where, getDocs, limit, doc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 
 // In-memory cache to avoid repeated queries for the same document
@@ -227,7 +227,9 @@ export async function getUploaderNamesWithFallback(
       }
 
       const docBatchPromises = batches.map(async (batch) => {
-        const q = query(documentsRef, where('__name__', 'in', batch));
+        // Convert string IDs to DocumentReference objects for __name__ query
+        const docRefs = batch.map(id => doc(db, 'documents', id));
+        const q = query(documentsRef, where('__name__', 'in', docRefs));
         return getDocs(q);
       });
 
