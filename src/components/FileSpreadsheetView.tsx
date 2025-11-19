@@ -1,8 +1,14 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Search, Download, FileSpreadsheet, ArrowLeft, AlertCircle, RefreshCw, ChevronDown, X, History, FilePlus, FileText, FileImage, File, Film, Loader2, Users } from 'lucide-react';
+import { Search, Download, FileSpreadsheet, ArrowLeft, AlertCircle, RefreshCw, ChevronDown, X, History, FilePlus, FileText, FileImage, File, Film, Loader2, Users, Calendar as CalendarIcon } from 'lucide-react';
+import { format } from 'date-fns';
+import { DateRange } from 'react-day-picker';
 import { Document, Folder, TransmittalData, TransmittalHistoryEntry, StandaloneTransmittalEntry } from '../types';
+import { Calendar } from './ui/calendar';
+import { Popover, PopoverContent, PopoverTrigger } from './ui/popover';
+import { Button } from './ui/button';
+import { cn } from '../lib/utils';
 import { documentService } from '../services/documentService';
 import { folderService } from '../services/folderService';
 import { projectService } from '../services';
@@ -51,9 +57,8 @@ export default function FileSpreadsheetView() {
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [fileTypeFilter, setFileTypeFilter] = useState<string[]>(['pdf', 'dwg']);
-  const [isFileTypeDropdownOpen, setIsFileTypeDropdownOpen] = useState(false);
   const [uploaderFilter, setUploaderFilter] = useState<string[]>([]);
-  const [isUploaderDropdownOpen, setIsUploaderDropdownOpen] = useState(false);
+  const [dateRange, setDateRange] = useState<DateRange | undefined>();
   const [legacyUploaderNames, setLegacyUploaderNames] = useState<Map<string, string>>(new Map());
   const [allProjectUploaders, setAllProjectUploaders] = useState<Map<string, number>>(new Map());
   const [showExportDialog, setShowExportDialog] = useState(false);
@@ -89,21 +94,6 @@ export default function FileSpreadsheetView() {
       )
     ]);
   };
-
-  // Close file type dropdown when clicking outside
-  useEffect(() => {
-    if (!isFileTypeDropdownOpen) return;
-
-    const handleClickOutside = (event: MouseEvent) => {
-      const target = event.target as HTMLElement;
-      if (!target.closest('.relative')) {
-        setIsFileTypeDropdownOpen(false);
-      }
-    };
-
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [isFileTypeDropdownOpen]);
 
   // Fetch project, folders, and initial page of documents
   useEffect(() => {
@@ -421,6 +411,31 @@ export default function FileSpreadsheetView() {
       });
     }
 
+    // Apply date range filter
+    if (dateRange?.from || dateRange?.to) {
+      result = result.filter(file => {
+        if (!file.dateModified) return false;
+
+        const fileDate = new Date(file.dateModified);
+        const fromDate = dateRange.from ? new Date(dateRange.from) : null;
+        const toDate = dateRange.to ? new Date(dateRange.to) : null;
+
+        // Set time to start/end of day for accurate comparison
+        if (fromDate) fromDate.setHours(0, 0, 0, 0);
+        if (toDate) toDate.setHours(23, 59, 59, 999);
+
+        if (fromDate && toDate) {
+          return fileDate >= fromDate && fileDate <= toDate;
+        } else if (fromDate) {
+          return fileDate >= fromDate;
+        } else if (toDate) {
+          return fileDate <= toDate;
+        }
+
+        return true;
+      });
+    }
+
     // Apply search
     if (searchTerm) {
       const term = searchTerm.toLowerCase();
@@ -432,7 +447,7 @@ export default function FileSpreadsheetView() {
     }
 
     return result;
-  }, [fileRows, searchTerm, fileTypeFilter, uploaderFilter, isVideoFile]);
+  }, [fileRows, searchTerm, fileTypeFilter, uploaderFilter, dateRange, isVideoFile]);
 
   // Sort files hierarchically: Folder hierarchy (A-Z with parent-child), then file name (A-Z)
   const sortedFiles = useMemo(() => {
@@ -817,232 +832,258 @@ export default function FileSpreadsheetView() {
 
             {/* Filter Buttons */}
             <div className="flex items-center gap-2">
-              {/* File Type Filter Dropdown */}
-              <div className="relative">
-                <button
-                  onClick={() => setIsFileTypeDropdownOpen(!isFileTypeDropdownOpen)}
-                  className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg bg-white hover:bg-gray-50 transition-colors text-sm font-medium text-gray-700 whitespace-nowrap"
-                >
-                  <File className="w-4 h-4" />
-                  <span>
-                    File Type: {fileTypeFilter.length === 0 ? 'All' : `${fileTypeFilter.length} selected`}
-                  </span>
-                  <ChevronDown className="w-4 h-4" />
-                </button>
-
-                {/* Dropdown Menu */}
-                {isFileTypeDropdownOpen && (
-                  <div className="absolute right-0 mt-2 w-64 bg-white rounded-lg shadow-lg border border-gray-200 z-50">
-                    <div className="p-2">
-                      {/* PDF Option */}
-                      <label className="flex items-center justify-between p-2 hover:bg-gray-50 rounded cursor-pointer">
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="checkbox"
-                            checked={fileTypeFilter.includes('pdf')}
-                            onChange={(e) => {
-                              if (e.target.checked) {
-                                setFileTypeFilter([...fileTypeFilter, 'pdf']);
-                              } else {
-                                setFileTypeFilter(fileTypeFilter.filter(t => t !== 'pdf'));
-                              }
-                            }}
-                            className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-                          />
-                          <FileText className="w-4 h-4 text-red-500" />
-                          <span className="text-sm font-medium text-gray-700">PDF</span>
-                        </div>
-                        <span className="text-xs text-gray-500">
-                          {fileRows.filter(f => f.type === 'pdf').length}
-                        </span>
-                      </label>
-
-                      {/* DWG Option */}
-                      <label className="flex items-center justify-between p-2 hover:bg-gray-50 rounded cursor-pointer">
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="checkbox"
-                            checked={fileTypeFilter.includes('dwg')}
-                            onChange={(e) => {
-                              if (e.target.checked) {
-                                setFileTypeFilter([...fileTypeFilter, 'dwg']);
-                              } else {
-                                setFileTypeFilter(fileTypeFilter.filter(t => t !== 'dwg'));
-                              }
-                            }}
-                            className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-                          />
-                          <File className="w-4 h-4 text-blue-500" />
-                          <span className="text-sm font-medium text-gray-700">DWG</span>
-                        </div>
-                        <span className="text-xs text-gray-500">
-                          {fileRows.filter(f => f.type === 'dwg').length}
-                        </span>
-                      </label>
-
-                      {/* Image Option */}
-                      <label className="flex items-center justify-between p-2 hover:bg-gray-50 rounded cursor-pointer">
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="checkbox"
-                            checked={fileTypeFilter.includes('image')}
-                            onChange={(e) => {
-                              if (e.target.checked) {
-                                setFileTypeFilter([...fileTypeFilter, 'image']);
-                              } else {
-                                setFileTypeFilter(fileTypeFilter.filter(t => t !== 'image'));
-                              }
-                            }}
-                            className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-                          />
-                          <FileImage className="w-4 h-4 text-green-500" />
-                          <span className="text-sm font-medium text-gray-700">Image</span>
-                        </div>
-                        <span className="text-xs text-gray-500">
-                          {fileRows.filter(f => f.type === 'image').length}
-                        </span>
-                      </label>
-
-                      {/* Video Option */}
-                      <label className="flex items-center justify-between p-2 hover:bg-gray-50 rounded cursor-pointer">
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="checkbox"
-                            checked={fileTypeFilter.includes('video')}
-                            onChange={(e) => {
-                              if (e.target.checked) {
-                                setFileTypeFilter([...fileTypeFilter, 'video']);
-                              } else {
-                                setFileTypeFilter(fileTypeFilter.filter(t => t !== 'video'));
-                              }
-                            }}
-                            className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-                          />
-                          <Film className="w-4 h-4 text-purple-500" />
-                          <span className="text-sm font-medium text-gray-700">Video</span>
-                        </div>
-                        <span className="text-xs text-gray-500">
-                          {fileRows.filter(f => isVideoFile(f)).length}
-                        </span>
-                      </label>
-
-                      {/* Other Option */}
-                      <label className="flex items-center justify-between p-2 hover:bg-gray-50 rounded cursor-pointer">
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="checkbox"
-                            checked={fileTypeFilter.includes('other')}
-                            onChange={(e) => {
-                              if (e.target.checked) {
-                                setFileTypeFilter([...fileTypeFilter, 'other']);
-                              } else {
-                                setFileTypeFilter(fileTypeFilter.filter(t => t !== 'other'));
-                              }
-                            }}
-                            className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-                          />
-                          <File className="w-4 h-4 text-gray-500" />
-                          <span className="text-sm font-medium text-gray-700">Other</span>
-                        </div>
-                        <span className="text-xs text-gray-500">
-                          {fileRows.filter(f => f.type === 'other').length}
-                        </span>
-                      </label>
-
-                      {/* Clear All */}
-                      {fileTypeFilter.length > 0 && (
+              {/* Date Range Filter */}
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    className={cn(
+                      "flex items-center gap-2 px-4 py-2 h-auto text-sm font-medium whitespace-nowrap",
+                      !dateRange && "text-muted-foreground"
+                    )}
+                  >
+                    <CalendarIcon className="w-4 h-4" />
+                    {dateRange?.from ? (
+                      dateRange.to ? (
                         <>
-                          <div className="border-t border-gray-200 my-2"></div>
-                          <button
-                            onClick={() => {
-                              setFileTypeFilter([]);
-                              setIsFileTypeDropdownOpen(false);
-                            }}
-                            className="w-full text-left px-2 py-2 text-sm text-red-600 hover:bg-red-50 rounded font-medium"
-                          >
-                            Clear All
-                          </button>
+                          {format(dateRange.from, "LLL dd, y")} - {format(dateRange.to, "LLL dd, y")}
                         </>
-                      )}
+                      ) : (
+                        format(dateRange.from, "LLL dd, y")
+                      )
+                    ) : (
+                      <span>All Dates</span>
+                    )}
+                    <ChevronDown className="w-4 h-4" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <Calendar
+                    initialFocus
+                    mode="range"
+                    defaultMonth={dateRange?.from}
+                    selected={dateRange}
+                    onSelect={setDateRange}
+                    numberOfMonths={2}
+                  />
+                </PopoverContent>
+              </Popover>
+
+              {/* File Type Filter Dropdown */}
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    className="flex items-center gap-2 px-4 py-2 h-auto text-sm font-medium whitespace-nowrap"
+                  >
+                    <File className="w-4 h-4" />
+                    <span>
+                      File Type: {fileTypeFilter.length === 0 ? 'All' : `${fileTypeFilter.length} selected`}
+                    </span>
+                    <ChevronDown className="w-4 h-4" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-64 p-2" align="start">
+                  {/* PDF Option */}
+                  <label className="flex items-center justify-between p-2 hover:bg-gray-50 rounded cursor-pointer">
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={fileTypeFilter.includes('pdf')}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setFileTypeFilter([...fileTypeFilter, 'pdf']);
+                          } else {
+                            setFileTypeFilter(fileTypeFilter.filter(t => t !== 'pdf'));
+                          }
+                        }}
+                        className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                      />
+                      <FileText className="w-4 h-4 text-red-500" />
+                      <span className="text-sm font-medium text-gray-700">PDF</span>
                     </div>
-                  </div>
-                )}
-              </div>
+                    <span className="text-xs text-gray-500">
+                      {fileRows.filter(f => f.type === 'pdf').length}
+                    </span>
+                  </label>
+
+                  {/* DWG Option */}
+                  <label className="flex items-center justify-between p-2 hover:bg-gray-50 rounded cursor-pointer">
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={fileTypeFilter.includes('dwg')}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setFileTypeFilter([...fileTypeFilter, 'dwg']);
+                          } else {
+                            setFileTypeFilter(fileTypeFilter.filter(t => t !== 'dwg'));
+                          }
+                        }}
+                        className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                      />
+                      <File className="w-4 h-4 text-blue-500" />
+                      <span className="text-sm font-medium text-gray-700">DWG</span>
+                    </div>
+                    <span className="text-xs text-gray-500">
+                      {fileRows.filter(f => f.type === 'dwg').length}
+                    </span>
+                  </label>
+
+                  {/* Image Option */}
+                  <label className="flex items-center justify-between p-2 hover:bg-gray-50 rounded cursor-pointer">
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={fileTypeFilter.includes('image')}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setFileTypeFilter([...fileTypeFilter, 'image']);
+                          } else {
+                            setFileTypeFilter(fileTypeFilter.filter(t => t !== 'image'));
+                          }
+                        }}
+                        className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                      />
+                      <FileImage className="w-4 h-4 text-green-500" />
+                      <span className="text-sm font-medium text-gray-700">Image</span>
+                    </div>
+                    <span className="text-xs text-gray-500">
+                      {fileRows.filter(f => f.type === 'image').length}
+                    </span>
+                  </label>
+
+                  {/* Video Option */}
+                  <label className="flex items-center justify-between p-2 hover:bg-gray-50 rounded cursor-pointer">
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={fileTypeFilter.includes('video')}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setFileTypeFilter([...fileTypeFilter, 'video']);
+                          } else {
+                            setFileTypeFilter(fileTypeFilter.filter(t => t !== 'video'));
+                          }
+                        }}
+                        className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                      />
+                      <Film className="w-4 h-4 text-purple-500" />
+                      <span className="text-sm font-medium text-gray-700">Video</span>
+                    </div>
+                    <span className="text-xs text-gray-500">
+                      {fileRows.filter(f => isVideoFile(f)).length}
+                    </span>
+                  </label>
+
+                  {/* Other Option */}
+                  <label className="flex items-center justify-between p-2 hover:bg-gray-50 rounded cursor-pointer">
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={fileTypeFilter.includes('other')}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setFileTypeFilter([...fileTypeFilter, 'other']);
+                          } else {
+                            setFileTypeFilter(fileTypeFilter.filter(t => t !== 'other'));
+                          }
+                        }}
+                        className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                      />
+                      <File className="w-4 h-4 text-gray-500" />
+                      <span className="text-sm font-medium text-gray-700">Other</span>
+                    </div>
+                    <span className="text-xs text-gray-500">
+                      {fileRows.filter(f => f.type === 'other').length}
+                    </span>
+                  </label>
+
+                  {/* Clear All */}
+                  {fileTypeFilter.length > 0 && (
+                    <>
+                      <div className="border-t border-gray-200 my-2"></div>
+                      <button
+                        onClick={() => setFileTypeFilter([])}
+                        className="w-full text-left px-2 py-2 text-sm text-red-600 hover:bg-red-50 rounded font-medium"
+                      >
+                        Clear All
+                      </button>
+                    </>
+                  )}
+                </PopoverContent>
+              </Popover>
 
               {/* Uploader Filter Dropdown */}
-              <div className="relative">
-                <button
-                  onClick={() => setIsUploaderDropdownOpen(!isUploaderDropdownOpen)}
-                  className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg bg-white hover:bg-gray-50 transition-colors text-sm font-medium text-gray-700 whitespace-nowrap"
-                >
-                  <Users className="w-4 h-4" />
-                  <span>
-                    Uploader: {uploaderFilter.length === 0 ? 'All' : `${uploaderFilter.length} selected`}
-                  </span>
-                  <ChevronDown className="w-4 h-4" />
-                </button>
-
-                {/* Dropdown Menu */}
-                {isUploaderDropdownOpen && (
-                  <div className="absolute right-0 mt-2 w-64 bg-white rounded-lg shadow-lg border border-gray-200 z-50">
-                    <div className="p-2 max-h-64 overflow-y-auto">
-                      {/* Show all uploaders */}
-                      {uniqueUploaders.length === 0 ? (
-                        <div className="px-2 py-2 text-sm text-gray-500">No uploaders found</div>
-                      ) : (
-                        uniqueUploaders.map(([uploaderName, count]) => (
-                          <label key={uploaderName} className="flex items-center justify-between p-2 hover:bg-gray-50 rounded cursor-pointer">
-                            <div className="flex items-center gap-2">
-                              <input
-                                type="checkbox"
-                                checked={uploaderFilter.includes(uploaderName)}
-                                onChange={(e) => {
-                                  if (e.target.checked) {
-                                    setUploaderFilter([...uploaderFilter, uploaderName]);
-                                  } else {
-                                    setUploaderFilter(uploaderFilter.filter(u => u !== uploaderName));
-                                  }
-                                }}
-                                className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-                              />
-                              <Users className="w-4 h-4 text-gray-400" />
-                              <span className="text-sm font-medium text-gray-700">{uploaderName}</span>
-                            </div>
-                            <span className="text-xs text-gray-500">{count}</span>
-                          </label>
-                        ))
-                      )}
-
-                      {/* Clear All */}
-                      {uploaderFilter.length > 0 && (
-                        <>
-                          <div className="border-t border-gray-200 my-2"></div>
-                          <button
-                            onClick={() => {
-                              setUploaderFilter([]);
-                              setIsUploaderDropdownOpen(false);
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    className="flex items-center gap-2 px-4 py-2 h-auto text-sm font-medium whitespace-nowrap"
+                  >
+                    <Users className="w-4 h-4" />
+                    <span>
+                      Uploader: {uploaderFilter.length === 0 ? 'All' : `${uploaderFilter.length} selected`}
+                    </span>
+                    <ChevronDown className="w-4 h-4" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-64 p-2 max-h-64 overflow-y-auto" align="start">
+                  {/* Show all uploaders */}
+                  {uniqueUploaders.length === 0 ? (
+                    <div className="px-2 py-2 text-sm text-gray-500">No uploaders found</div>
+                  ) : (
+                    uniqueUploaders.map(([uploaderName, count]) => (
+                      <label key={uploaderName} className="flex items-center justify-between p-2 hover:bg-gray-50 rounded cursor-pointer">
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={uploaderFilter.includes(uploaderName)}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setUploaderFilter([...uploaderFilter, uploaderName]);
+                              } else {
+                                setUploaderFilter(uploaderFilter.filter(u => u !== uploaderName));
+                              }
                             }}
-                            className="w-full text-left px-2 py-2 text-sm text-red-600 hover:bg-red-50 rounded font-medium"
-                          >
-                            Clear All
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
+                            className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                          />
+                          <Users className="w-4 h-4 text-gray-400" />
+                          <span className="text-sm font-medium text-gray-700">{uploaderName}</span>
+                        </div>
+                        <span className="text-xs text-gray-500">{count}</span>
+                      </label>
+                    ))
+                  )}
+
+                  {/* Clear All */}
+                  {uploaderFilter.length > 0 && (
+                    <>
+                      <div className="border-t border-gray-200 my-2"></div>
+                      <button
+                        onClick={() => setUploaderFilter([])}
+                        className="w-full text-left px-2 py-2 text-sm text-red-600 hover:bg-red-50 rounded font-medium"
+                      >
+                        Clear All
+                      </button>
+                    </>
+                  )}
+                </PopoverContent>
+              </Popover>
 
               {/* Clear All Filters Button - Shows when any filter is active */}
-              {(fileTypeFilter.length > 0 || uploaderFilter.length > 0) && (
+              {(searchTerm || fileTypeFilter.length > 0 || uploaderFilter.length > 0 || dateRange?.from || dateRange?.to) && (
                 <button
                   onClick={() => {
+                    setSearchTerm('');
                     setFileTypeFilter([]);
                     setUploaderFilter([]);
+                    setDateRange(undefined);
                   }}
-                  className="px-3 py-2 border border-red-200 rounded-lg bg-red-50 hover:bg-red-100 transition-colors text-sm font-medium text-red-600 hover:text-red-700 whitespace-nowrap"
+                  className="p-2 rounded-lg border border-red-200 bg-red-50 hover:bg-red-100 transition-colors text-red-600 hover:text-red-700"
+                  title="Clear All Filters"
                 >
-                  Clear All Filters
+                  <X className="w-5 h-5" />
                 </button>
               )}
             </div>
@@ -1090,7 +1131,7 @@ export default function FileSpreadsheetView() {
         </motion.div>
 
         {/* Results summary */}
-        {searchTerm || fileTypeFilter.length > 0 ? (
+        {searchTerm || fileTypeFilter.length > 0 || uploaderFilter.length > 0 || dateRange?.from || dateRange?.to ? (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
