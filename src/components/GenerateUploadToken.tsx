@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { createUploadToken, UploadToken, generateUploadUrl } from '../services/uploadTokenService';
 import { Check, Copy, RefreshCw, Share2 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { folderService } from '../services/folderService';
 
 interface TokenFormData {
   folderId: string;
@@ -63,6 +64,10 @@ const GenerateUploadToken: React.FC<GenerateUploadTokenProps> = ({
       // Convert the max file size to bytes
       const maxFileSizeBytes = formData.maxFileSize * 1024 * 1024; // Convert MB to bytes
 
+      // Fetch folder to get projectId
+      const folder = await folderService.getById(folderId);
+      const projectId = folder?.projectId || '';
+
       const token = await createUploadToken(
         folderId,
         user.id,
@@ -74,7 +79,8 @@ const GenerateUploadToken: React.FC<GenerateUploadTokenProps> = ({
           metadata: {
             title: formData.title,
             description: formData.description,
-            folderName
+            folderName,
+            projectId
           }
         }
       );

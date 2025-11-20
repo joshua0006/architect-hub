@@ -344,7 +344,8 @@ const TokenUpload: React.FC = () => {
               projectId: token.metadata?.projectId || '',
               folderId: token.folderId,
               version: 1,
-              dateModified: new Date().toISOString()
+              dateModified: new Date().toISOString(),
+              uploadedWithToken: token.id
             },
             file,
             {
@@ -455,9 +456,18 @@ const TokenUpload: React.FC = () => {
             console.error("Error sending upload notifications:", notificationError);
             // Continue with the upload even if notification fails
           }
-        } catch (error) {
+        } catch (error: any) {
           console.error(`Error uploading file ${file.name}:`, error);
-          setUploadStatus(prev => ({ ...prev, [fileId]: 'error' }));
+
+          // Check for Firestore permission errors
+          if (error?.code === 'permission-denied' || error?.message?.includes('permission-denied')) {
+            console.error('Firestore permission denied - check security rules for guest uploads');
+            setUploadStatus(prev => ({ ...prev, [fileId]: 'error' }));
+            // Display user-friendly error message
+            alert(`Upload permission denied for "${file.name}". Please contact support or try again later.`);
+          } else {
+            setUploadStatus(prev => ({ ...prev, [fileId]: 'error' }));
+          }
         }
       }
     } finally {

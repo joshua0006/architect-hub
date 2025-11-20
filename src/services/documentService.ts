@@ -365,6 +365,7 @@ export const documentService = {
           updatedAt: serverTimestamp(),
           createdBy: uploader?.id || '', // Add the uploader ID if available
           createdByName: uploader?.displayName || 'Unknown User', // Add the uploader display name
+          ...(document.uploadedWithToken && { uploadedWithToken: document.uploadedWithToken }),
           metadata: {
             originalFilename: file.name,
             contentType: file.type,

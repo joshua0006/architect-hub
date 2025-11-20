@@ -201,12 +201,23 @@ service cloud.firestore {
       allow read: if isSignedIn() && (
         isAdmin() ||
         isStaff() ||
-        isProjectMember(resource.data.projectId)
+        isProjectMember(resource.data.projectId) ||
+        resource.data.createdBy == 'guest'
       );
-      allow create: if isSignedIn() && (
-        isAdmin() ||
-        isStaff() ||
-        isProjectMember(request.resource.data.projectId)
+      allow create: if (
+        // Authenticated users
+        isSignedIn() && (
+          isAdmin() ||
+          isStaff() ||
+          isProjectMember(request.resource.data.projectId)
+        )
+      )
+      ||
+      (
+        // Guest uploads with valid upload token
+        request.resource.data.createdBy == 'guest' &&
+        request.resource.data.keys().hasAny(['uploadedWithToken']) &&
+        exists(/databases/$(database)/documents/uploadTokens/$(request.resource.data.uploadedWithToken))
       );
       allow update: if isSignedIn() && (
         isAdmin() ||
@@ -299,6 +310,26 @@ service cloud.firestore {
           hasRole(projectId, 'admin') ||
           hasRole(projectId, 'manager');
       }
+    }
+
+    // Upload Tokens collection (for guest uploads)
+    match /uploadTokens/{tokenId} {
+      // Allow anyone (including guests) to read tokens - needed for guest upload validation
+      allow read: if true;
+
+      // Allow authenticated users to create upload tokens
+      allow create: if isSignedIn();
+
+      // Allow anyone to update only the usedCount field (for tracking guest uploads)
+      // This is necessary because guests need to increment the count when uploading
+      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly(['usedCount']);
+
+      // Allow admins, staff, or the token creator to delete tokens
+      allow delete: if isSignedIn() && (
+        isAdmin() ||
+        isStaff() ||
+        request.auth.uid == resource.data.createdBy
+      );
     }
   }
 }

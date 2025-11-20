@@ -32,6 +32,7 @@ export interface Document {
   drawingNo?: string;
   createdBy?: string;        // User ID of uploader
   createdByName?: string;    // Display name of uploader
+  uploadedWithToken?: string; // Token ID for guest uploads (required for Firestore security rules)
   comments?: DocumentComment[];
   metadata?: {
     size?: number;
