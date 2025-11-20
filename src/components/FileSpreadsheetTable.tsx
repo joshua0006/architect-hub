@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Loader2, Edit3, Trash2, Folder, ChevronDown } from 'lucide-react';
+import { Loader2, Edit3, Trash2, Users, ChevronDown } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Document } from '../types';
 import {
@@ -53,13 +53,13 @@ export default function FileSpreadsheetTable({
   onUpdateTransmittal,
   onDeleteRow
 }: FileSpreadsheetTableProps) {
-  // State for folder expand/collapse
-  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
+  // State for uploader expand/collapse
+  const [expandedUploaders, setExpandedUploaders] = useState<Set<string>>(new Set());
 
-  // Initialize all folders as expanded when files change
+  // Initialize all uploaders as expanded when files change
   useEffect(() => {
-    const uniqueFolders = new Set(files.map(file => file.folderPath));
-    setExpandedFolders(uniqueFolders);
+    const uniqueUploaders = new Set(files.map(file => file.createdByName || 'Unknown User'));
+    setExpandedUploaders(uniqueUploaders);
   }, [files]);
 
   const [editingDrawingNo, setEditingDrawingNo] = useState<{[key: string]: string}>({});
@@ -74,30 +74,43 @@ export default function FileSpreadsheetTable({
   const [savingRevision, setSavingRevision] = useState<{[key: string]: boolean}>({});
   const [revisionError, setRevisionError] = useState<{[key: string]: string}>({});
 
-  // Toggle folder expand/collapse
-  const toggleFolder = (folderPath: string) => {
-    setExpandedFolders(prev => {
+  // Toggle uploader expand/collapse
+  const toggleUploader = (uploaderName: string) => {
+    setExpandedUploaders(prev => {
       const next = new Set(prev);
-      if (next.has(folderPath)) {
-        next.delete(folderPath);
+      if (next.has(uploaderName)) {
+        next.delete(uploaderName);
       } else {
-        next.add(folderPath);
+        next.add(uploaderName);
       }
       return next;
     });
   };
 
-  // Group files by folder for animation
-  const folderGroups = useMemo(() => {
+  // Group files by uploader and sort
+  const uploaderGroups = useMemo(() => {
     const groups = new Map<string, FileRowData[]>();
+
+    // Group files by uploader
     files.forEach(file => {
-      const folderPath = file.folderPath;
-      if (!groups.has(folderPath)) {
-        groups.set(folderPath, []);
+      const uploaderName = file.createdByName || 'Unknown User';
+      if (!groups.has(uploaderName)) {
+        groups.set(uploaderName, []);
       }
-      groups.get(folderPath)!.push(file);
+      groups.get(uploaderName)!.push(file);
     });
-    return Array.from(groups.entries());
+
+    // Sort files within each group alphabetically by name
+    groups.forEach(filesInGroup => {
+      filesInGroup.sort((a, b) => a.name.localeCompare(b.name));
+    });
+
+    // Convert to array and sort uploaders: alphabetically, with "Unknown User" at bottom
+    return Array.from(groups.entries()).sort(([uploaderA], [uploaderB]) => {
+      if (uploaderA === 'Unknown User') return 1;
+      if (uploaderB === 'Unknown User') return -1;
+      return uploaderA.localeCompare(uploaderB);
+    });
   }, [files]);
 
   const handleDrawingNoChange = (fileId: string, value: string) => {
@@ -252,8 +265,8 @@ export default function FileSpreadsheetTable({
             <TableHead className="w-auto min-w-[200px] px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
               <span>Description</span>
             </TableHead>
-            <TableHead className="w-[150px] px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
-              <span>Uploaded By</span>
+            <TableHead className="w-[250px] px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <span>File Directory</span>
             </TableHead>
             <TableHead className="w-[120px] px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
               <span>No. of Revisions</span>
@@ -271,32 +284,31 @@ export default function FileSpreadsheetTable({
               </TableCell>
             </TableRow>
           ) : (
-            folderGroups.map(([folderPath, folderFiles]) => {
-              const filesInFolder = folderFiles.length;
+            uploaderGroups.map(([uploaderName, uploaderFiles]) => {
+              const filesCount = uploaderFiles.length;
 
               return (
-                <React.Fragment key={folderPath}>
-                  {/* Folder Header Row */}
+                <React.Fragment key={uploaderName}>
+                  {/* Uploader Header Row */}
                   <TableRow className="bg-gray-50 hover:bg-gray-100 border-t-2 border-gray-200 cursor-pointer transition-colors">
-                    <TableCell colSpan={6} className="px-4 py-2" onClick={() => toggleFolder(folderPath)}>
+                    <TableCell colSpan={6} className="px-4 py-2" onClick={() => toggleUploader(uploaderName)}>
                       <div className="flex items-center gap-2">
                         <ChevronDown
                           className={`w-4 h-4 text-gray-600 transition-transform duration-[250ms] ease-[cubic-bezier(0.4,0,0.2,1)] ${
-                            expandedFolders.has(folderPath) ? 'rotate-0' : '-rotate-90'
+                            expandedUploaders.has(uploaderName) ? 'rotate-0' : '-rotate-90'
                           }`}
                         />
-                        <Folder className="w-4 h-4 text-gray-600" />
-                        <span className="text-sm font-medium text-gray-700">{folderPath}</span>
-                        <span className="text-xs text-gray-500 ml-1">({filesInFolder} {filesInFolder === 1 ? 'file' : 'files'})</span>
+                        <Users className="w-4 h-4 text-gray-600" />
+                        <span className="text-sm font-medium text-gray-700">{uploaderName}</span>
                       </div>
                     </TableCell>
                   </TableRow>
 
-                  {/* File Rows - animate entire folder content together */}
+                  {/* File Rows - animate entire uploader content together */}
                   <AnimatePresence initial={false}>
-                  {expandedFolders.has(folderPath) && (
+                  {expandedUploaders.has(uploaderName) && (
                     <>
-                    {folderFiles.map((file) => {
+                    {uploaderFiles.map((file) => {
                       // Drawing No. field - use transmittal override if available
                       const currentDrawingNo = editingDrawingNo[file.id] ?? file.transmittalDrawingNo ?? file.drawingNo ?? '';
                       const originalDrawingNo = file.transmittalDrawingNo ?? file.drawingNo ?? '';
@@ -423,9 +435,11 @@ export default function FileSpreadsheetTable({
                     )}
                   </TableCell>
 
-                  {/* Uploaded By Column */}
-                  <TableCell className="w-[150px] px-4 py-4 whitespace-nowrap text-sm text-gray-700">
-                    {file.createdByName || 'Unknown User'}
+                  {/* File Directory Column */}
+                  <TableCell className="w-[250px] px-4 py-4 whitespace-nowrap text-xs text-gray-700">
+                    <div className="truncate" title={file.folderPath}>
+                      {file.folderPath}
+                    </div>
                   </TableCell>
 
                   {/* Revision Column */}

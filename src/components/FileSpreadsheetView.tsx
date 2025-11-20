@@ -639,7 +639,7 @@ export default function FileSpreadsheetView() {
         row['Description'] = file.transmittalDescription || '';
       }
       if (exportColumns.uploader) {
-        row['Uploaded By'] = file.createdByName || 'Unknown User';
+        row['File Directory'] = file.folderPath;
       }
       if (exportColumns.revisions) {
         row['No. of Revisions'] = file.transmittalRevision || file.revisionCount.toString();
@@ -1174,6 +1174,16 @@ export default function FileSpreadsheetView() {
                   <label className="flex items-center space-x-3 cursor-pointer hover:bg-gray-50 p-2 rounded">
                     <input
                       type="checkbox"
+                      checked={exportColumns.uploader}
+                      onChange={(e) => setExportColumns(prev => ({ ...prev, uploader: e.target.checked }))}
+                      className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                    />
+                    <span className="text-sm font-medium text-gray-700">File Directory</span>
+                  </label>
+
+                  <label className="flex items-center space-x-3 cursor-pointer hover:bg-gray-50 p-2 rounded">
+                    <input
+                      type="checkbox"
                       checked={exportColumns.revisions}
                       onChange={(e) => setExportColumns(prev => ({ ...prev, revisions: e.target.checked }))}
                       className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
@@ -1184,7 +1194,7 @@ export default function FileSpreadsheetView() {
 
                 {/* Selected Count */}
                 <div className="mb-4 text-xs text-gray-500">
-                  {Object.values(exportColumns).filter(Boolean).length} of 4 columns selected
+                  {Object.values(exportColumns).filter(Boolean).length} of 5 columns selected
                 </div>
 
                 {/* Action Buttons */}
