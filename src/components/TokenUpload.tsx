@@ -90,7 +90,6 @@ const uploadDocument = async (
   // Use the imported documentService but wrap it with error handling
   try {
     // Call the actual create method on documentService
-    // @ts-ignore - Suppressing the TS error about missing method
     const documentResult = await documentService.create(folderId, docData, file, uploader);
     
     // Dispatch document upload event for real-time updates
@@ -346,9 +345,7 @@ const TokenUpload: React.FC = () => {
               folderId: token.folderId,
               version: 1,
               dateModified: new Date().toISOString(),
-              metadata: {
-                uploadedBy: guestIdentifier.trim()
-              } as any
+              uploadedWithToken: token.id
             },
             file,
             {
@@ -459,9 +456,18 @@ const TokenUpload: React.FC = () => {
             console.error("Error sending upload notifications:", notificationError);
             // Continue with the upload even if notification fails
           }
-        } catch (error) {
+        } catch (error: any) {
           console.error(`Error uploading file ${file.name}:`, error);
-          setUploadStatus(prev => ({ ...prev, [fileId]: 'error' }));
+
+          // Check for Firestore permission errors
+          if (error?.code === 'permission-denied' || error?.message?.includes('permission-denied')) {
+            console.error('Firestore permission denied - check security rules for guest uploads');
+            setUploadStatus(prev => ({ ...prev, [fileId]: 'error' }));
+            // Display user-friendly error message
+            alert(`Upload permission denied for "${file.name}". Please contact support or try again later.`);
+          } else {
+            setUploadStatus(prev => ({ ...prev, [fileId]: 'error' }));
+          }
         }
       }
     } finally {

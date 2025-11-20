@@ -1,4 +1,4 @@
-import { initializeApp } from 'firebase/app';
+import { initializeApp, getApps } from 'firebase/app';
 import { 
   getFirestore, 
   connectFirestoreEmulator,
@@ -49,8 +49,11 @@ export function getCurrentConfig() {
       Firebase configuration is missing required fields: ${missingFields.join(', ')}
       
       Please ensure your .env file or Netlify environment variables include:
-      
-      # Firebase Configuration
+
+      # Firebase Configuration Toggle
+      VITE_FIREBASE_ACTIVE=old  # or 'new' for chris-cole-test project
+
+      # Firebase Configuration (for old project)
       VITE_FIREBASE_API_KEY=your-api-key-here
       VITE_FIREBASE_AUTH_DOMAIN=your-auth-domain
       VITE_FIREBASE_PROJECT_ID=your-project-id
@@ -58,7 +61,12 @@ export function getCurrentConfig() {
       VITE_FIREBASE_MESSAGING_SENDER_ID=your-messaging-sender-id
       VITE_FIREBASE_APP_ID=your-app-id
       VITE_FIREBASE_MEASUREMENT_ID=your-measurement-id
-      
+
+      # Firebase Configuration (for new project - optional)
+      VITE_FIREBASE_API_KEY_NEW=your-api-key-here
+      VITE_FIREBASE_AUTH_DOMAIN_NEW=your-auth-domain
+      # ... (see .env for full list)
+
       # Firebase Configuration Flags
       VITE_USE_FIREBASE_EMULATORS=false
       
@@ -81,7 +89,13 @@ if (!firebaseConfig.apiKey) {
 // Initialize Firebase with additional error handling
 let app;
 try {
-  app = initializeApp(firebaseConfig);
+  // Check if app is already initialized to avoid duplicate app error
+  const existingApps = getApps();
+  if (existingApps.length > 0) {
+    app = existingApps[0];
+  } else {
+    app = initializeApp(firebaseConfig);
+  }
 } catch (error) {
   console.error('[FIREBASE ERROR] Failed to initialize Firebase app:', error);
   // Re-throw but with more helpful message
@@ -91,11 +105,16 @@ try {
 // Initialize Firestore
 export const db = getFirestore(app);
 
-// Configure persistence
-enableIndexedDbPersistence(db)
-  .catch((err) => {
-    console.error('Persistence failed:', err.code);
-  });
+// Configure persistence (only in browser environment)
+if (typeof window !== 'undefined') {
+  enableIndexedDbPersistence(db)
+    .catch((err) => {
+      if (err.code !== 'failed-precondition') {
+        console.error('Persistence failed:', err.code);
+      }
+      // failed-precondition means persistence was already enabled or can't be enabled
+    });
+}
 
 // Initialize other Firebase services
 export const storage = getStorage(app);
