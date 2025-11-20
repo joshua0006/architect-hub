@@ -100,9 +100,13 @@ export default function FileSpreadsheetTable({
       groups.get(uploaderName)!.push(file);
     });
 
-    // Sort files within each group alphabetically by name
+    // Sort files within each group by date (newest first)
     groups.forEach(filesInGroup => {
-      filesInGroup.sort((a, b) => a.name.localeCompare(b.name));
+      filesInGroup.sort((a, b) => {
+        const dateA = new Date(a.dateModified).getTime();
+        const dateB = new Date(b.dateModified).getTime();
+        return dateB - dateA; // Descending order (newest first)
+      });
     });
 
     // Convert to array and sort uploaders: alphabetically, with "Unknown User" at bottom
