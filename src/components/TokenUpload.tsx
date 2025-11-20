@@ -90,7 +90,6 @@ const uploadDocument = async (
   // Use the imported documentService but wrap it with error handling
   try {
     // Call the actual create method on documentService
-    // @ts-ignore - Suppressing the TS error about missing method
     const documentResult = await documentService.create(folderId, docData, file, uploader);
     
     // Dispatch document upload event for real-time updates
@@ -345,10 +344,7 @@ const TokenUpload: React.FC = () => {
               projectId: token.metadata?.projectId || '',
               folderId: token.folderId,
               version: 1,
-              dateModified: new Date().toISOString(),
-              metadata: {
-                uploadedBy: guestIdentifier.trim()
-              } as any
+              dateModified: new Date().toISOString()
             },
             file,
             {

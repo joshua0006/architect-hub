@@ -79,11 +79,12 @@ function getEnvValue(key: string, defaultValue: boolean): boolean {
 
 // Configuration flags - Read from environment variables with fallbacks
 export const ENV_FLAGS = {
-  useEmulators: getEnvValue('VITE_USE_FIREBASE_EMULATORS', false)
+  useEmulators: getEnvValue('VITE_USE_FIREBASE_EMULATORS', false),
+  activeFirebase: getEnvString('VITE_FIREBASE_ACTIVE', 'old') as 'old' | 'new'
 };
 
-// Single Firebase configuration from environment variables
-export const FIREBASE_CONFIG = {
+// Old (original) Firebase configuration
+const FIREBASE_CONFIG_OLD = {
   apiKey: getEnvString('VITE_FIREBASE_API_KEY'),
   authDomain: getEnvString('VITE_FIREBASE_AUTH_DOMAIN'),
   projectId: getEnvString('VITE_FIREBASE_PROJECT_ID'),
@@ -91,6 +92,29 @@ export const FIREBASE_CONFIG = {
   messagingSenderId: getEnvString('VITE_FIREBASE_MESSAGING_SENDER_ID'),
   appId: getEnvString('VITE_FIREBASE_APP_ID'),
   measurementId: getEnvString('VITE_FIREBASE_MEASUREMENT_ID', '')
+};
+
+// New Firebase configuration
+const FIREBASE_CONFIG_NEW = {
+  apiKey: getEnvString('VITE_FIREBASE_API_KEY_NEW'),
+  authDomain: getEnvString('VITE_FIREBASE_AUTH_DOMAIN_NEW'),
+  databaseURL: getEnvString('VITE_FIREBASE_DATABASE_URL_NEW'),
+  projectId: getEnvString('VITE_FIREBASE_PROJECT_ID_NEW'),
+  storageBucket: getEnvString('VITE_FIREBASE_STORAGE_BUCKET_NEW'),
+  messagingSenderId: getEnvString('VITE_FIREBASE_MESSAGING_SENDER_ID_NEW'),
+  appId: getEnvString('VITE_FIREBASE_APP_ID_NEW'),
+  measurementId: getEnvString('VITE_FIREBASE_MEASUREMENT_ID_NEW', '')
+};
+
+// Export active configuration based on VITE_FIREBASE_ACTIVE
+export const FIREBASE_CONFIG = ENV_FLAGS.activeFirebase === 'new'
+  ? FIREBASE_CONFIG_NEW
+  : FIREBASE_CONFIG_OLD;
+
+// Export both configs for migration scripts
+export const FIREBASE_CONFIGS = {
+  old: FIREBASE_CONFIG_OLD,
+  new: FIREBASE_CONFIG_NEW
 };
 
 // Firebase emulator configuration

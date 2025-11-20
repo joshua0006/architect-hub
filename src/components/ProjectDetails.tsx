@@ -114,7 +114,7 @@ export default function ProjectDetails({
         <div className="flex items-center space-x-3">
           <button
             onClick={() => window.open(`/${project.id}/files-spreadsheet`, '_blank')}
-            className="hidden px-4 py-2 text-sm text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors flex items-center space-x-2"
+            className="px-4 py-2 text-sm text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors flex items-center space-x-2"
             title="View transmittal"
           >
             <FileSpreadsheet className="w-4 h-4" />

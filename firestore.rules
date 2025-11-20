@@ -241,5 +241,64 @@ service cloud.firestore {
          hasRole(get(/databases/$(database)/documents/documents/$(documentId)).data.projectId, 'manager') ||
          request.auth.uid == get(/databases/$(database)/documents/documents/$(documentId)).data.createdBy);
     }
+
+    // Transmittals collection
+    match /transmittals/{projectId} {
+      // Transmittal documents subcollection
+      match /documents/{documentId} {
+        allow read: if isSignedIn() && (
+          isAdmin() ||
+          isStaff() ||
+          isProjectMember(projectId)
+        );
+        allow create, update: if isSignedIn() && (
+          isAdmin() ||
+          isStaff() ||
+          isProjectMember(projectId)
+        );
+        allow delete: if isAdmin() || isStaff() ||
+          hasRole(projectId, 'admin') ||
+          hasRole(projectId, 'manager');
+      }
+
+      // Transmittal history subcollection
+      match /history/{historyId} {
+        allow read: if isSignedIn() && (
+          isAdmin() ||
+          isStaff() ||
+          isProjectMember(projectId)
+        );
+        allow create: if isSignedIn() && (
+          isAdmin() ||
+          isStaff() ||
+          isProjectMember(projectId)
+        );
+        allow update, delete: if false; // History entries should not be modified or deleted
+      }
+
+      // Standalone transmittal entries subcollection
+      match /standalone/{entryId} {
+        allow read: if isSignedIn() && (
+          isAdmin() ||
+          isStaff() ||
+          isProjectMember(projectId)
+        );
+        allow create: if isSignedIn() && (
+          isAdmin() ||
+          isStaff() ||
+          isProjectMember(projectId)
+        );
+        allow update: if isSignedIn() && (
+          isAdmin() ||
+          isStaff() ||
+          hasRole(projectId, 'admin') ||
+          hasRole(projectId, 'manager') ||
+          request.auth.uid == resource.data.createdBy
+        );
+        allow delete: if isAdmin() || isStaff() ||
+          hasRole(projectId, 'admin') ||
+          hasRole(projectId, 'manager');
+      }
+    }
   }
 }

@@ -9,7 +9,8 @@ import {
   where,
   orderBy,
   serverTimestamp,
-  Timestamp
+  Timestamp,
+  documentId
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { TransmittalData, TransmittalHistoryEntry, StandaloneTransmittalEntry } from '../types';
@@ -65,6 +66,7 @@ export const transmittalService = {
 
   /**
    * Get transmittal data for specific document IDs (for pagination)
+   * Optimized to use batch queries instead of individual getDoc calls
    */
   async getTransmittalDataForDocuments(
     projectId: string,
@@ -78,24 +80,34 @@ export const transmittalService = {
         return transmittalMap;
       }
 
-      // Fetch transmittal data for each document ID
-      // Note: Firestore doesn't have a good way to batch get subcollection docs
-      // So we'll use Promise.all for parallel fetching
-      const promises = documentIds.map(async (docId) => {
-        const docRef = doc(db, 'transmittals', projectId, 'documents', docId);
-        const docSnap = await getDoc(docRef);
+      // Firestore 'in' operator supports max 10 items per query
+      // Batch document IDs into groups of 10
+      const batchSize = 10;
+      const batches: string[][] = [];
 
-        if (docSnap.exists()) {
+      for (let i = 0; i < documentIds.length; i += batchSize) {
+        batches.push(documentIds.slice(i, i + batchSize));
+      }
+
+      // Create queries for each batch and execute in parallel
+      const collectionRef = collection(db, 'transmittals', projectId, 'documents');
+
+      const batchPromises = batches.map(async (batch) => {
+        // Use documentId() to query by document ID in batches
+        const q = query(collectionRef, where(documentId(), 'in', batch));
+        const snapshot = await getDocs(q);
+
+        snapshot.docs.forEach(docSnap => {
           const data = docSnap.data();
-          transmittalMap.set(docId, {
-            documentId: docId,
+          transmittalMap.set(docSnap.id, {
+            documentId: docSnap.id,
             projectId,
             ...data
           } as TransmittalData);
-        }
+        });
       });
 
-      await Promise.all(promises);
+      await Promise.all(batchPromises);
 
       return transmittalMap;
     } catch (error) {
