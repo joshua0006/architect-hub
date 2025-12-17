@@ -233,30 +233,44 @@ export default function AdminPage() {
   };
 
   const handleDeleteUser = async (userId: string) => {
+    // Find the user to delete for confirmation message
+    const userToDelete = users.find(u => u.id === userId);
+    const userName = userToDelete?.displayName || userToDelete?.email || 'this user';
+
+    // Confirmation dialog
+    const confirmed = window.confirm(
+      `Are you sure you want to delete ${userName}?\n\n` +
+      'This will permanently delete:\n' +
+      '• Firebase Authentication account\n' +
+      '• User profile data from database\n\n' +
+      'This action cannot be undone.'
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
     try {
       setDeletingUser(userId);
       setError(null);
-      
-      // First try to delete the user's Firebase Auth account (this may not work client-side)
-      try {
-        await authService.deleteUserAccount(userId);
-      } catch (authError) {
-        console.warn('Could not delete Firebase Auth account:', authError);
-        // Continue anyway to delete the user data
-      }
-      
-      // Delete the user's data from Firestore
-      await userService.deleteUser(userId);
-      
+
+      // Delete user using Cloud Function (handles both Auth and Firestore)
+      await authService.deleteUserAccount(userId);
+
       // Update the users list
       const updatedUsers = users.filter(user => user.id !== userId);
       setUsers(updatedUsers);
-      
+
       // Also update filtered users
       setFilteredUsers(filteredUsers.filter(user => user.id !== userId));
-    } catch (err) {
+
+      // Show success message
+      toast.success(`Successfully deleted ${userName}`);
+    } catch (err: any) {
       console.error('Error deleting user:', err);
-      setError('Failed to delete user');
+      const errorMessage = err.message || 'Failed to delete user';
+      setError(errorMessage);
+      toast.error(errorMessage);
     } finally {
       setDeletingUser(null);
     }

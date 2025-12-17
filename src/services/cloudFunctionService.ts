@@ -1,6 +1,12 @@
 // src/services/cloudFunctionService.ts
 
+import { getFunctions, httpsCallable } from 'firebase/functions';
+import app from '../lib/firebase';
+
 const FIREBASE_CF_URL = import.meta.env.VITE_FIREBASE_CF_URL;
+
+// Initialize Firebase Functions
+const functions = getFunctions(app);
 
 
 // Define an interface for the payload for better type safety
@@ -74,9 +80,48 @@ export const cloudFunctionService = {
     }
   },
 
-  // You can add other cloud function calls here, e.g.:
-  // async getUser(userId: string) { /* ... */ },
-  // async updateUser(userId: string, payload: Partial<CreateUserPayload>) { /* ... */ },
+  /**
+   * Calls the deleteUser cloud function to delete a user from Firebase Auth and Firestore.
+   * Only admins can delete users. Uses Firebase callable functions for security.
+   * @param userId - The ID of the user to delete.
+   * @returns A promise that resolves when the user is deleted.
+   * @throws Will throw an error if the request fails, user is not authorized, or server returns an error.
+   */
+  async deleteUser(userId: string): Promise<{ success: boolean; message: string }> {
+    try {
+      // Use Firebase callable function for better security and error handling
+      const deleteUserFn = httpsCallable<
+        { userId: string },
+        { success: boolean; deletedUserId: string; message: string }
+      >(functions, 'deleteUser');
+
+      const result = await deleteUserFn({ userId });
+
+      return {
+        success: result.data.success,
+        message: result.data.message,
+      };
+    } catch (error: any) {
+      console.error('Error calling deleteUser cloud function:', error);
+
+      // Extract error message from Firebase Functions error
+      let errorMessage = 'An unexpected error occurred while deleting the user.';
+
+      if (error.code === 'unauthenticated') {
+        errorMessage = 'You must be logged in to delete users.';
+      } else if (error.code === 'permission-denied') {
+        errorMessage = 'Only administrators can delete user accounts.';
+      } else if (error.code === 'failed-precondition') {
+        errorMessage = 'You cannot delete your own account.';
+      } else if (error.code === 'invalid-argument') {
+        errorMessage = 'Invalid user ID provided.';
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+
+      throw new Error(errorMessage);
+    }
+  },
 };
 
 // Example of how to use this service in a component:
