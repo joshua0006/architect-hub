@@ -68,9 +68,9 @@ export default function AdminPage() {
     if (searchTerm.trim()) {
       const term = searchTerm.toLowerCase();
       result = result.filter(
-        user => 
-          user.displayName.toLowerCase().includes(term) || 
-          user.email.toLowerCase().includes(term)
+        user =>
+          (user.displayName || '').toLowerCase().includes(term) ||
+          (user.email || '').toLowerCase().includes(term)
       );
     }
     
@@ -92,7 +92,7 @@ export default function AdminPage() {
         const authUsers = usersData.map(user => ({
           id: user.id,
           email: user.email,
-          displayName: user.displayName,
+          displayName: user.displayName || user.email?.split('@')[0] || 'User',
           role: user.role as UserRole,
           projectIds: user.projectIds || [],
           profile: user.profile || {
@@ -597,7 +597,7 @@ export default function AdminPage() {
                                 />
                               ) : (
                                 <div className="h-10 w-10 rounded-full bg-gray-200 flex items-center justify-center text-gray-500">
-                                  {user.displayName.charAt(0).toUpperCase()}
+                                  {(user.displayName || 'U').charAt(0).toUpperCase()}
                                 </div>
                               )}
                             </div>

@@ -828,48 +828,48 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
             
             // Get all users at once to prevent multiple calls
             const allUsers = await userService.getAllUsers();
-            
+
             // First try strict case-insensitive match on the full display name
-            let match = allUsers.find(u => 
-              u.displayName.toLowerCase() === trimmedUsername.toLowerCase()
+            let match = allUsers.find(u =>
+              (u.displayName || '').toLowerCase() === trimmedUsername.toLowerCase()
             );
-            
+
             if (match) {
               return match.id;
             }
-            
+
             // Check if the mention is just the first part of a multi-word name
             // For example, when "@John Doe" is mentioned as "@John"
             const firstWord = trimmedUsername.split(/\s+/)[0].toLowerCase();
-            
+
             match = allUsers.find(u => {
-              const nameParts = u.displayName.toLowerCase().split(/\s+/);
+              const nameParts = (u.displayName || '').toLowerCase().split(/\s+/);
               return nameParts[0] === firstWord; // Match first name
             });
-            
+
             if (match) {
               return match.id;
             }
-            
+
             // Try partial match where display name starts with mention text
-            match = allUsers.find(u => 
-              u.displayName.toLowerCase().startsWith(trimmedUsername.toLowerCase())
+            match = allUsers.find(u =>
+              (u.displayName || '').toLowerCase().startsWith(trimmedUsername.toLowerCase())
             );
-            
+
             if (match) {
               return match.id;
             }
-            
+
             // Try finding any user whose display name contains the mention text completely
             match = allUsers.find(u => {
-              const displayName = u.displayName.toLowerCase();
+              const displayName = (u.displayName || '').toLowerCase();
               return displayName.includes(trimmedUsername.toLowerCase());
             });
-            
+
             if (match) {
               return match.id;
             }
-            
+
             return null;
           } catch (error) {
             console.error(`Error resolving username ${username}:`, error);
@@ -1002,47 +1002,47 @@ const DocumentViewer: React.FC<DocumentViewerProps> = ({
             
             // Get all users at once to prevent multiple calls
             const allUsers = await userService.getAllUsers();
-            
+
             // First try strict case-insensitive match on the full display name
-            let match = allUsers.find(u => 
-              u.displayName.toLowerCase() === trimmedUsername.toLowerCase()
+            let match = allUsers.find(u =>
+              (u.displayName || '').toLowerCase() === trimmedUsername.toLowerCase()
             );
-            
+
             if (match) {
               console.log(`Found exact display name match for @${trimmedUsername}: ${match.id}`);
               return match.id;
             }
-            
+
             // Check if the mention is just the first part of a multi-word name
             // For example, when "@John Doe" is mentioned as "@John"
             const firstWord = trimmedUsername.split(/\s+/)[0].toLowerCase();
-            
+
             match = allUsers.find(u => {
-              const nameParts = u.displayName.toLowerCase().split(/\s+/);
+              const nameParts = (u.displayName || '').toLowerCase().split(/\s+/);
               return nameParts[0] === firstWord; // Match first name
             });
-            
+
             if (match) {
               console.log(`Found first name match for @${trimmedUsername}: ${match.id} (${match.displayName})`);
               return match.id;
             }
-            
+
             // Try partial match where display name starts with mention text
-            match = allUsers.find(u => 
-              u.displayName.toLowerCase().startsWith(trimmedUsername.toLowerCase())
+            match = allUsers.find(u =>
+              (u.displayName || '').toLowerCase().startsWith(trimmedUsername.toLowerCase())
             );
-            
+
             if (match) {
               console.log(`Found display name starts with @${trimmedUsername}: ${match.id} (${match.displayName})`);
               return match.id;
             }
-            
+
             // Try finding any user whose display name contains the mention text completely
             match = allUsers.find(u => {
-              const displayName = u.displayName.toLowerCase();
+              const displayName = (u.displayName || '').toLowerCase();
               return displayName.includes(trimmedUsername.toLowerCase());
             });
-            
+
             if (match) {
               console.log(`Found display name contains @${trimmedUsername}: ${match.id} (${match.displayName})`);
               return match.id;

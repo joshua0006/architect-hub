@@ -114,8 +114,8 @@ const EnhancedCommentInput: React.FC<EnhancedCommentInputProps> = ({
           
           // Filter locally based on the query
           const filteredMembers = mentionState.mentionQuery.length > 0
-            ? users.filter(user => 
-                user.displayName.toLowerCase().includes(mentionState.mentionQuery.toLowerCase()))
+            ? users.filter(user =>
+                (user.displayName || '').toLowerCase().includes(mentionState.mentionQuery.toLowerCase()))
             : users;
           
           setSuggestedUsers(filteredMembers);
@@ -260,7 +260,7 @@ const EnhancedCommentInput: React.FC<EnhancedCommentInputProps> = ({
     
     // Focus the input and place cursor after the inserted mention
     if (inputRef.current) {
-      const newCursorPosition = mentionState.startPosition + user.displayName.length + 2; // +2 for @ and space
+      const newCursorPosition = mentionState.startPosition + (user.displayName || '').length + 2; // +2 for @ and space
       setTimeout(() => {
         if (inputRef.current) {
           inputRef.current.focus();
