@@ -106,7 +106,7 @@ export default function TeamList({
     });
 
     Object.values(groups).forEach((group) => {
-      group.sort((a, b) => a.displayName.localeCompare(b.displayName));
+      group.sort((a, b) => (a.displayName || '').localeCompare(b.displayName || ''));
     });
 
     return groups;
@@ -187,8 +187,8 @@ export default function TeamList({
   const filteredUsers = availableUsers.filter((user) => {
     const searchLower = searchQuery.toLowerCase();
     return (
-      user.displayName.toLowerCase().includes(searchLower) ||
-      user.email.toLowerCase().includes(searchLower)
+      (user.displayName || '').toLowerCase().includes(searchLower) ||
+      (user.email || '').toLowerCase().includes(searchLower)
     );
   });
 
@@ -343,7 +343,7 @@ export default function TeamList({
                             ) : (
                               <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center">
                                 <span className="text-lg font-medium text-gray-600">
-                                  {user.displayName[0].toUpperCase()}
+                                  {(user.displayName || 'U')[0].toUpperCase()}
                                 </span>
                               </div>
                             )}
@@ -484,7 +484,7 @@ export default function TeamList({
                               ) : (
                                 <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center">
                                   <span className="text-lg font-medium text-gray-600">
-                                    {member.displayName[0].toUpperCase()}
+                                    {(member.displayName || 'U')[0].toUpperCase()}
                                   </span>
                                 </div>
                               )}

@@ -11,6 +11,7 @@ import { CreateUserDto } from '../services/cloudFunctionService';
 import {cloudFunctionService} from '../services/cloudFunctionService';
 import toast, { Toaster } from 'react-hot-toast';
 import PermissionsTableModal from '../components/PermissionsTableModal';
+import UserDeleteConfirmModal from '../components/ui/UserDeleteConfirmModal';
 
 export default function AdminPage() {
   const { user } = useAuth();
@@ -19,6 +20,7 @@ export default function AdminPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [deletingUser, setDeletingUser] = useState<string | null>(null);
+  const [deleteModalUser, setDeleteModalUser] = useState<User | null>(null);
   const [editingRoleId, setEditingRoleId] = useState<string | null>(null);
   const [selectedRole, setSelectedRole] = useState<UserRole>(UserRole.CONTRACTOR);
   const [updatingRole, setUpdatingRole] = useState(false);
@@ -68,9 +70,9 @@ export default function AdminPage() {
     if (searchTerm.trim()) {
       const term = searchTerm.toLowerCase();
       result = result.filter(
-        user => 
-          user.displayName.toLowerCase().includes(term) || 
-          user.email.toLowerCase().includes(term)
+        user =>
+          (user.displayName || '').toLowerCase().includes(term) ||
+          (user.email || '').toLowerCase().includes(term)
       );
     }
     
@@ -92,7 +94,7 @@ export default function AdminPage() {
         const authUsers = usersData.map(user => ({
           id: user.id,
           email: user.email,
-          displayName: user.displayName,
+          displayName: user.displayName || user.email?.split('@')[0] || 'User',
           role: user.role as UserRole,
           projectIds: user.projectIds || [],
           profile: user.profile || {
@@ -232,31 +234,38 @@ export default function AdminPage() {
     }
   };
 
-  const handleDeleteUser = async (userId: string) => {
+  const handleDeleteUser = (userId: string) => {
+    const userToDelete = users.find(u => u.id === userId);
+    if (userToDelete) {
+      setDeleteModalUser(userToDelete);
+    }
+  };
+
+  const confirmDeleteUser = async () => {
+    if (!deleteModalUser) return;
+
     try {
-      setDeletingUser(userId);
+      setDeletingUser(deleteModalUser.id);
       setError(null);
-      
-      // First try to delete the user's Firebase Auth account (this may not work client-side)
-      try {
-        await authService.deleteUserAccount(userId);
-      } catch (authError) {
-        console.warn('Could not delete Firebase Auth account:', authError);
-        // Continue anyway to delete the user data
-      }
-      
-      // Delete the user's data from Firestore
-      await userService.deleteUser(userId);
-      
+
+      // Delete user using Cloud Function (handles both Auth and Firestore)
+      await authService.deleteUserAccount(deleteModalUser.id);
+
       // Update the users list
-      const updatedUsers = users.filter(user => user.id !== userId);
+      const updatedUsers = users.filter(user => user.id !== deleteModalUser.id);
       setUsers(updatedUsers);
-      
+
       // Also update filtered users
-      setFilteredUsers(filteredUsers.filter(user => user.id !== userId));
-    } catch (err) {
+      setFilteredUsers(filteredUsers.filter(user => user.id !== deleteModalUser.id));
+
+      // Show success message
+      toast.success(`Successfully deleted ${deleteModalUser.displayName}`);
+      setDeleteModalUser(null);
+    } catch (err: any) {
       console.error('Error deleting user:', err);
-      setError('Failed to delete user');
+      const errorMessage = err.message || 'Failed to delete user';
+      setError(errorMessage);
+      toast.error(errorMessage);
     } finally {
       setDeletingUser(null);
     }
@@ -583,7 +592,7 @@ export default function AdminPage() {
                                 />
                               ) : (
                                 <div className="h-10 w-10 rounded-full bg-gray-200 flex items-center justify-center text-gray-500">
-                                  {user.displayName.charAt(0).toUpperCase()}
+                                  {(user.displayName || 'U').charAt(0).toUpperCase()}
                                 </div>
                               )}
                             </div>
@@ -680,6 +689,14 @@ export default function AdminPage() {
           )}
         </div>
       </div>
+
+      {/* User Delete Confirmation Modal */}
+      <UserDeleteConfirmModal
+        isOpen={deleteModalUser !== null}
+        onClose={() => setDeleteModalUser(null)}
+        user={deleteModalUser || { id: '', displayName: '', email: '' }}
+        onDelete={confirmDeleteUser}
+      />
     </Layout>
   );
 } 

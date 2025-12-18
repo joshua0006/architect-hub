@@ -54,7 +54,7 @@ const MentionSuggestions: React.FC<MentionSuggestionsProps> = ({
               ) : (
                 <div className="w-6 h-6 rounded-full bg-gray-200 flex items-center justify-center mr-2">
                   <span className="text-xs font-medium text-gray-600">
-                    {user.displayName.charAt(0).toUpperCase()}
+                    {(user.displayName || 'U').charAt(0).toUpperCase()}
                   </span>
                 </div>
               )}

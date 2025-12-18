@@ -133,7 +133,7 @@ export const userService = {
       
       // Find a case-insensitive match
       const matchingUser = allUsers.find(
-        user => user.displayName.toLowerCase() === username.toLowerCase()
+        user => (user.displayName || '').toLowerCase() === username.toLowerCase()
       );
       
       return matchingUser || null;

@@ -158,18 +158,10 @@ export const authService = {
 
   async deleteUserAccount(uid: string): Promise<void> {
     try {
-      // Note: This function can only delete the currently signed-in user
-      // For admin functionality, you would need to use Firebase Admin SDK
-      // This is a limitation of the client-side Firebase Auth
-      
-      // In a real implementation with Firebase Admin SDK, you would:
-      // 1. Delete the user from Firebase Auth
-      // 2. Then delete their data from Firestore
-      
-      // For now, we'll just throw an informative error
-      throw new Error(
-        'Client-side Firebase cannot delete other users. In production, use Firebase Admin SDK.'
-      );
+      // Use Cloud Function with Firebase Admin SDK to delete user
+      // This properly deletes both Firebase Auth account and Firestore document
+      const { cloudFunctionService } = await import('./cloudFunctionService');
+      await cloudFunctionService.deleteUser(uid);
     } catch (error) {
       console.error('Error deleting user account:', error);
       throw error;

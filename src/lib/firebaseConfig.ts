@@ -121,6 +121,7 @@ export const FIREBASE_CONFIGS = {
 export const EMULATOR_PORTS = {
   firestore: 8080,
   auth: 9099,
-  storage: 9199
+  storage: 9199,
+  functions: 5001
 };
 

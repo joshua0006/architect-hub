@@ -1,6 +1,6 @@
 import { initializeApp, getApps } from 'firebase/app';
-import { 
-  getFirestore, 
+import {
+  getFirestore,
   connectFirestoreEmulator,
   enableIndexedDbPersistence,
   getDocs,
@@ -8,6 +8,7 @@ import {
 } from 'firebase/firestore';
 import { getStorage, connectStorageEmulator } from 'firebase/storage';
 import { getAuth, connectAuthEmulator } from 'firebase/auth';
+import { getFunctions, connectFunctionsEmulator } from 'firebase/functions';
 // @ts-ignore - Import from local module without type declarations
 import { FIREBASE_CONFIG, EMULATOR_PORTS, ENV_FLAGS } from './firebaseConfig';
 
@@ -119,6 +120,7 @@ if (typeof window !== 'undefined') {
 // Initialize other Firebase services
 export const storage = getStorage(app);
 export const auth = getAuth(app);
+export const functions = getFunctions(app, 'us-central1');
 
 // Connect to emulators if enabled
 if (useEmulators) {
@@ -126,6 +128,7 @@ if (useEmulators) {
     connectFirestoreEmulator(db, 'localhost', EMULATOR_PORTS.firestore);
     connectAuthEmulator(auth, `http://localhost:${EMULATOR_PORTS.auth}`);
     connectStorageEmulator(storage, 'localhost', EMULATOR_PORTS.storage);
+    connectFunctionsEmulator(functions, 'localhost', EMULATOR_PORTS.functions);
   } catch (error) {
     console.error('Failed to connect to emulators:', error);
   }
