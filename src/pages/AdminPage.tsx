@@ -11,6 +11,7 @@ import { CreateUserDto } from '../services/cloudFunctionService';
 import {cloudFunctionService} from '../services/cloudFunctionService';
 import toast, { Toaster } from 'react-hot-toast';
 import PermissionsTableModal from '../components/PermissionsTableModal';
+import UserDeleteConfirmModal from '../components/ui/UserDeleteConfirmModal';
 
 export default function AdminPage() {
   const { user } = useAuth();
@@ -19,6 +20,7 @@ export default function AdminPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [deletingUser, setDeletingUser] = useState<string | null>(null);
+  const [deleteModalUser, setDeleteModalUser] = useState<User | null>(null);
   const [editingRoleId, setEditingRoleId] = useState<string | null>(null);
   const [selectedRole, setSelectedRole] = useState<UserRole>(UserRole.CONTRACTOR);
   const [updatingRole, setUpdatingRole] = useState(false);
@@ -232,40 +234,33 @@ export default function AdminPage() {
     }
   };
 
-  const handleDeleteUser = async (userId: string) => {
-    // Find the user to delete for confirmation message
+  const handleDeleteUser = (userId: string) => {
     const userToDelete = users.find(u => u.id === userId);
-    const userName = userToDelete?.displayName || userToDelete?.email || 'this user';
-
-    // Confirmation dialog
-    const confirmed = window.confirm(
-      `Are you sure you want to delete ${userName}?\n\n` +
-      'This will permanently delete:\n' +
-      '• Firebase Authentication account\n' +
-      '• User profile data from database\n\n' +
-      'This action cannot be undone.'
-    );
-
-    if (!confirmed) {
-      return;
+    if (userToDelete) {
+      setDeleteModalUser(userToDelete);
     }
+  };
+
+  const confirmDeleteUser = async () => {
+    if (!deleteModalUser) return;
 
     try {
-      setDeletingUser(userId);
+      setDeletingUser(deleteModalUser.id);
       setError(null);
 
       // Delete user using Cloud Function (handles both Auth and Firestore)
-      await authService.deleteUserAccount(userId);
+      await authService.deleteUserAccount(deleteModalUser.id);
 
       // Update the users list
-      const updatedUsers = users.filter(user => user.id !== userId);
+      const updatedUsers = users.filter(user => user.id !== deleteModalUser.id);
       setUsers(updatedUsers);
 
       // Also update filtered users
-      setFilteredUsers(filteredUsers.filter(user => user.id !== userId));
+      setFilteredUsers(filteredUsers.filter(user => user.id !== deleteModalUser.id));
 
       // Show success message
-      toast.success(`Successfully deleted ${userName}`);
+      toast.success(`Successfully deleted ${deleteModalUser.displayName}`);
+      setDeleteModalUser(null);
     } catch (err: any) {
       console.error('Error deleting user:', err);
       const errorMessage = err.message || 'Failed to delete user';
@@ -694,6 +689,14 @@ export default function AdminPage() {
           )}
         </div>
       </div>
+
+      {/* User Delete Confirmation Modal */}
+      <UserDeleteConfirmModal
+        isOpen={deleteModalUser !== null}
+        onClose={() => setDeleteModalUser(null)}
+        user={deleteModalUser || { id: '', displayName: '', email: '' }}
+        onDelete={confirmDeleteUser}
+      />
     </Layout>
   );
 } 
