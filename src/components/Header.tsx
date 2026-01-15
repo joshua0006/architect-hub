@@ -62,9 +62,9 @@ export default function Header({ selectedProject }: HeaderProps) {
   }, []);
 
   const navItems = [
+    { path: '/documents', icon: FileText, label: 'Documents' },
     { path: '/', icon: Users, label: 'Project', onClick: handleProjectClick },
     { path: '/team', icon: Users, label: 'Team' },
-    { path: '/documents', icon: FileText, label: 'Documents' },
     { path: '/tasks', icon: ListTodo, label: 'Tasks' },
   ];
   
@@ -90,7 +90,11 @@ export default function Header({ selectedProject }: HeaderProps) {
                     <button
                       onClick={item.onClick}
                       className={`flex items-center space-x-2 px-3 py-2 rounded-md hover:bg-primary-50 ${
-                        isActiveRoute ? 'bg-primary-50 text-primary-600' : 'text-gray-600 hover:text-primary-600'
+                        isActiveRoute
+                          ? 'bg-primary-50 text-primary-600'
+                          : item.path === '/documents'
+                            ? 'text-gray-600 hover:text-primary-600 border-b-2 border-primary-200'
+                            : 'text-gray-600 hover:text-primary-600'
                       }`}
                     >
                       <Icon className="w-5 h-5" />
@@ -100,7 +104,11 @@ export default function Header({ selectedProject }: HeaderProps) {
                     <Link
                       to={item.path}
                       className={`flex items-center space-x-2 px-3 py-2 rounded-md hover:bg-primary-50 ${
-                        isActiveRoute ? 'bg-primary-50 text-primary-600' : 'text-gray-600 hover:text-primary-600'
+                        isActiveRoute
+                          ? 'bg-primary-50 text-primary-600'
+                          : item.path === '/documents'
+                            ? 'text-gray-600 hover:text-primary-600 border-b-2 border-primary-200'
+                            : 'text-gray-600 hover:text-primary-600'
                       }`}
                     >
                       <Icon className="w-5 h-5" />
