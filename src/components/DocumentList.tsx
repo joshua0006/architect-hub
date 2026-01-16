@@ -3784,6 +3784,7 @@ export default function DocumentList({
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [movingFiles, setMovingFiles] = useState(false);
   const [moveProgress, setMoveProgress] = useState(0);
+  const [itemTypeFilter, setItemTypeFilter] = useState<'document' | 'folder' | 'both'>('both');
   const [draggedItems, setDraggedItems] = useState<string[]>([]);
   const [dropTargetFolder, setDragTargetFolder] = useState<string | null>(null);
   const [fileBeingDragged, setFileBeingDragged] = useState<string | null>(null);
@@ -4387,23 +4388,49 @@ export default function DocumentList({
   useEffect(() => {
     const handleSelectFilesForDownload = (event: Event) => {
       const customEvent = event as CustomEvent;
-      
+
       // Clear any existing selection
       setSelectedFiles(new Set());
-      
+
       // Enter selection mode for download
       setIsSelectionMode(true);
       setSelectionMode('download');
-      
+
       console.log("[DocumentList] Entered file selection mode for download");
     };
-    
+
     // Add event listener
     document.addEventListener('select-files-for-download', handleSelectFilesForDownload as EventListener);
-    
+
     // Clean up
     return () => {
       document.removeEventListener('select-files-for-download', handleSelectFilesForDownload as EventListener);
+    };
+  }, []);
+
+  // Event listener for bulk move operation
+  useEffect(() => {
+    const handleSelectFilesForOperation = (event: Event) => {
+      const customEvent = event as CustomEvent;
+      const { operation, itemType } = customEvent.detail;
+
+      console.log(`[DocumentList] Entering selection mode for ${operation} operation on ${itemType}`);
+
+      // Enter selection mode
+      setIsSelectionMode(true);
+      setSelectionMode(operation); // 'move'
+      setItemTypeFilter(itemType); // 'document'
+
+      // Clear any existing selection
+      setSelectedFiles(new Set());
+    };
+
+    // Add event listener
+    document.addEventListener('select-files-for-operation', handleSelectFilesForOperation as EventListener);
+
+    // Cleanup
+    return () => {
+      document.removeEventListener('select-files-for-operation', handleSelectFilesForOperation as EventListener);
     };
   }, []);
 
@@ -4789,8 +4816,8 @@ export default function DocumentList({
                     onDrop={(e: any) => handleFolderDrop(e, folder.id)}
                   >
                     {/* Selection checkbox - only show in selection mode and not in download mode for folders */}
-                    {isSelectionMode && selectionMode !== 'download' && (
-                      <div 
+                    {isSelectionMode && selectionMode !== 'download' && itemTypeFilter !== 'document' && (
+                      <div
                         className="flex-shrink-0 mr-3 cursor-pointer"
                         onClick={(e) => {
                           e.stopPropagation();
@@ -4810,10 +4837,12 @@ export default function DocumentList({
                         // But prevent toggling in download mode for folders
                         if (isSelectionMode) {
                           e.preventDefault();
-                          if (selectionMode !== 'download') {
+                          if (selectionMode !== 'download' && itemTypeFilter !== 'document') {
                             toggleFileSelection(folder.id, e);
-                          } else {
+                          } else if (selectionMode === 'download') {
                             showToast("Folders cannot be selected for download, only files");
+                          } else if (itemTypeFilter === 'document') {
+                            showToast("Only documents can be selected in this mode");
                           }
                           return;
                         }
@@ -4963,8 +4992,8 @@ export default function DocumentList({
                     onDragStart={(e: any) => handleFileDragStart(e, doc.id)}
                   >
                     {/* Selection checkbox - only show in selection mode */}
-                    {isSelectionMode && (
-                      <div 
+                    {isSelectionMode && itemTypeFilter !== 'folder' && (
+                      <div
                         className="flex-shrink-0 mr-3 cursor-pointer"
                         onClick={(e) => {
                           e.stopPropagation();
@@ -5817,14 +5846,30 @@ export default function DocumentList({
               </div>
               
               <div className="mt-2 text-xs text-gray-500">
-                Selected destination: {selectedDestinationProjectId ? 
-                  `${availableProjects.find(p => p.id === selectedDestinationProjectId)?.name || "Unknown"} / ${selectedDestinationFolderId ? 
-                    getFolderNameById(selectedDestinationFolderId) : "Root"}` 
+                Selected destination: {selectedDestinationProjectId ?
+                  `${availableProjects.find(p => p.id === selectedDestinationProjectId)?.name || "Unknown"} / ${selectedDestinationFolderId ?
+                    getFolderNameById(selectedDestinationFolderId) : "Root"}`
                   : "Please select a destination"
                 }
               </div>
+
+              {/* Progress Bar for Bulk Move */}
+              {movingFiles && selectedFiles.size > 1 && (
+                <div className="mt-4 mb-2">
+                  <div className="flex justify-between text-sm text-gray-600 mb-2">
+                    <span>Moving {selectedFiles.size} documents...</span>
+                    <span>{moveProgress}%</span>
+                  </div>
+                  <div className="w-full bg-gray-200 rounded-full h-2.5">
+                    <div
+                      className="bg-primary-600 h-2.5 rounded-full transition-all duration-300"
+                      style={{ width: `${moveProgress}%` }}
+                    />
+                  </div>
+                </div>
+              )}
             </div>
-            
+
             {/* Footer */}
             <div className="flex justify-end gap-3 p-4 border-t border-gray-200/80 bg-gray-50/80 flex-shrink-0">
               <button
@@ -5844,15 +5889,87 @@ export default function DocumentList({
                 Cancel
               </button>
               <button
-                onClick={() => {
-                  if (folderToCopyOrMove && selectedDestinationProjectId && !isCopyingOrMoving) {
+                onClick={async () => {
+                  if (!selectedDestinationProjectId) {
+                    showToast("Please select a destination project", "error");
+                    return;
+                  }
+
+                  // Handle bulk move operation
+                  if (selectionMode === 'move' && selectedFiles.size > 0) {
+                    // Filter to only documents
+                    const selectedDocs = documents.filter(doc => selectedFiles.has(doc.id));
+
+                    if (selectedDocs.length === 0) {
+                      showToast("No documents selected", "error");
+                      return;
+                    }
+
+                    // Validate not moving to same folder
+                    if (selectedDestinationFolderId === currentFolder?.id) {
+                      showToast("Documents are already in this folder", "error");
+                      return;
+                    }
+
+                    setMovingFiles(true);
+                    setMoveProgress(0);
+
+                    let successCount = 0;
+                    let failCount = 0;
+
+                    try {
+                      for (let i = 0; i < selectedDocs.length; i++) {
+                        try {
+                          if (onCopyOrMoveFile) {
+                            await onCopyOrMoveFile(selectedDocs[i].id, selectedDestinationFolderId, 'move');
+                          }
+                          successCount++;
+
+                          // Update progress
+                          const progress = Math.round(((i + 1) / selectedDocs.length) * 100);
+                          setMoveProgress(progress);
+                        } catch (error) {
+                          failCount++;
+                          console.error(`Failed to move ${selectedDocs[i].name}:`, error);
+                        }
+                      }
+
+                      // Show feedback
+                      if (failCount === 0) {
+                        showToast(`Successfully moved ${successCount} document${successCount > 1 ? 's' : ''}`, "success");
+                      } else if (successCount > 0) {
+                        showToast(`Moved ${successCount} documents, ${failCount} failed`, "warning");
+                      } else {
+                        showToast("Failed to move documents", "error");
+                      }
+
+                      // Close dialog and exit selection mode
+                      setShowCopyMoveDialog(false);
+                      exitSelectionMode();
+
+                      // Refresh the view
+                      if (onRefresh) {
+                        await onRefresh();
+                      }
+                    } catch (error) {
+                      console.error("Bulk move error:", error);
+                      showToast("An error occurred during move operation", "error");
+                    } finally {
+                      setMovingFiles(false);
+                      setMoveProgress(0);
+                    }
+                  }
+                  // Handle single folder operation
+                  else if (folderToCopyOrMove && selectedDestinationProjectId && !isCopyingOrMoving) {
                     copyOrMoveFolder(
-                      folderToCopyOrMove.id, 
+                      folderToCopyOrMove.id,
                       selectedDestinationProjectId,
                       selectedDestinationFolderId,
                       copyMoveAction
                     );
-                  } else if (documentToCopyOrMove && selectedDestinationProjectId && !isCopyingOrMoving) {
+                  }
+                  // Handle single document operation
+                  else if (documentToCopyOrMove && selectedDestinationProjectId && !isCopyingOrMoving) {
                     copyOrMoveDocument(
                       documentToCopyOrMove.id,
                       selectedDestinationProjectId,
