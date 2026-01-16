@@ -2941,32 +2941,34 @@ export default function DocumentList({
           
           return (
             <div key={folder.id}>
-              <div 
-                className="flex items-center py-2 px-2 hover:bg-gray-100 rounded cursor-pointer"
+              <div
+                className="flex items-center py-2 px-2 hover:bg-gray-100 rounded cursor-pointer truncate"
                 onClick={(e) => {
                   e.stopPropagation(); // Prevent event propagation
                   handleDestinationFolderSelect(folder.id);
                 }}
               >
-                {hasChildren ? (
-                  <button 
-                    className="mr-1 p-1 rounded-full hover:bg-gray-200"
-                    onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
-                      e.stopPropagation(); // Prevent event propagation
-                      toggleFolderExpansion(folder.id, e);
-                    }}
-                  >
-                    {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-                  </button>
-                ) : (
-                  <span className="w-6" />
-                )}
-                <FolderOpen className="w-4 h-4 mr-2 text-gray-400" />
-                <span className={`truncate ${selectedDestinationFolderId === folder.id ? 'font-medium text-blue-600' : 'text-gray-700'}`}>
-                  {displayName}
-                </span>
+                <div className="flex items-center min-w-0 flex-1">
+                  {hasChildren ? (
+                    <button
+                      className="mr-1 p-1 rounded-full hover:bg-gray-200 flex-shrink-0"
+                      onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
+                        e.stopPropagation(); // Prevent event propagation
+                        toggleFolderExpansion(folder.id, e);
+                      }}
+                    >
+                      {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                    </button>
+                  ) : (
+                    <span className="w-6 flex-shrink-0" />
+                  )}
+                  <FolderOpen className="w-4 h-4 mr-2 text-gray-400 flex-shrink-0" />
+                  <span className={`truncate ${selectedDestinationFolderId === folder.id ? 'font-medium text-blue-600' : 'text-gray-700'}`}>
+                    {displayName}
+                  </span>
+                </div>
                 {selectedDestinationFolderId === folder.id && (
-                  <Check className="w-4 h-4 ml-2 text-blue-600" />
+                  <Check className="w-4 h-4 ml-2 flex-shrink-0 text-blue-600" />
                 )}
               </div>
               
@@ -4513,7 +4515,12 @@ export default function DocumentList({
                   {/* Move button - only in move mode */}
                   {selectionMode === 'move' && selectedFiles.size > 0 && (
                     <button
-                      onClick={() => setShowCopyMoveDialog(true)}
+                      onClick={() => {
+                        // Clear single-file states to prevent wrong dialog from showing
+                        setDocumentToCopyOrMove(null);
+                        setFolderToCopyOrMove(null);
+                        setShowCopyMoveDialog(true);
+                      }}
                       disabled={movingFiles}
                       className={`px-3 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 transition-colors flex items-center space-x-1 ${
                         movingFiles ? 'opacity-70 cursor-not-allowed' : ''
@@ -4536,7 +4543,12 @@ export default function DocumentList({
                   {/* Copy button - only in copy mode */}
                   {selectionMode === 'copy' && selectedFiles.size > 0 && (
                     <button
-                      onClick={() => setShowCopyMoveDialog(true)}
+                      onClick={() => {
+                        // Clear single-file states to prevent wrong dialog from showing
+                        setDocumentToCopyOrMove(null);
+                        setFolderToCopyOrMove(null);
+                        setShowCopyMoveDialog(true);
+                      }}
                       disabled={movingFiles}
                       className={`px-3 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 transition-colors flex items-center space-x-1 ${
                         movingFiles ? 'opacity-70 cursor-not-allowed' : ''
@@ -5294,7 +5306,8 @@ export default function DocumentList({
       />
 
       {/* Copy/Move dialog with folder selection */}
-      <div className={`fixed inset-0 flex items-center justify-center z-50 ${showCopyMoveDialog ? 'block' : 'hidden'}`}>
+      {showCopyMoveDialog && (folderToCopyOrMove || documentToCopyOrMove) && selectedFiles.size === 0 && (
+      <div className="fixed inset-0 flex items-center justify-center z-50">
         {/* Backdrop with blur effect */}
         <div 
           className="fixed inset-0 bg-black/40 backdrop-blur-[2px] transition-opacity duration-200" 
@@ -5526,6 +5539,7 @@ export default function DocumentList({
           </div>
         </div>
       </div>
+      )}
 
       {/* Render popup */}
       {renderEditPopup()}
@@ -5706,10 +5720,11 @@ export default function DocumentList({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4"
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4 sm:p-6 overflow-y-auto"
           >
-            <div className="bg-white rounded-lg shadow-lg p-6 w-full max-w-md">
-              <div className="flex items-center justify-between mb-4">
+            <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
+              {/* Header */}
+              <div className="flex items-center justify-between p-6 border-b border-gray-200 flex-shrink-0">
                 <h2 className="text-xl font-semibold">
                   {selectionMode === 'copy' ? 'Copy' : 'Move'} {selectedFiles.size} Files
                 </h2>
@@ -5720,10 +5735,12 @@ export default function DocumentList({
                   <X className="w-5 h-5" />
                 </button>
               </div>
-              
-              <p className="text-gray-600 mb-4">
-                Select destination folder:
-              </p>
+
+              {/* Scrollable Content */}
+              <div className="flex-1 overflow-y-auto p-6">
+                <p className="text-gray-600 mb-4">
+                  Select destination folder:
+                </p>
               
               {/* Project selection */}
               <div className="mb-4">
@@ -5746,14 +5763,9 @@ export default function DocumentList({
                   </button>
                   
                   {showProjectDropdown && (
-                    <div 
+                    <div
                       ref={projectDropdownRef}
-                      className="fixed z-50 mt-1 bg-white shadow-lg rounded-md py-1 max-h-60 overflow-auto" 
-                      style={{
-                        width: 'calc(100% - 48px)',
-                        left: '50%',
-                        transform: 'translateX(-50%)'
-                      }}
+                      className="absolute z-50 mt-1 w-full bg-white shadow-lg rounded-md py-1 max-h-60 overflow-auto border border-gray-200"
                     >
                       {isLoadingProjects ? (
                         <div className="flex justify-center items-center p-4">
@@ -5813,14 +5825,9 @@ export default function DocumentList({
                   </button>
                   
                   {showFolderDropdown && selectedDestinationProjectId && (
-                    <div 
+                    <div
                       ref={folderDropdownRef}
-                      className="fixed z-50 mt-1 bg-white shadow-lg rounded-md py-1 max-h-[300px] overflow-auto" 
-                      style={{
-                        width: 'calc(100% - 48px)',
-                        left: '50%',
-                        transform: 'translateX(-50%)'
-                      }}
+                      className="absolute z-50 mt-1 w-full bg-white shadow-lg rounded-md py-1 max-h-[300px] overflow-auto border border-gray-200"
                     >
                       {isLoadingFolders ? (
                         <div className="flex justify-center items-center p-4">
@@ -5868,10 +5875,10 @@ export default function DocumentList({
                   </div>
                 </div>
               )}
-            </div>
+              </div>
 
-            {/* Footer */}
-            <div className="flex justify-end gap-3 p-4 border-t border-gray-200/80 bg-gray-50/80 flex-shrink-0">
+              {/* Footer - Inside dialog container */}
+              <div className="flex justify-end gap-3 p-4 border-t border-gray-200 bg-gray-50 flex-shrink-0">
               <button
                 onClick={() => {
                   setShowCopyMoveDialog(false);
@@ -5996,6 +6003,7 @@ export default function DocumentList({
                   <>{copyMoveAction === 'copy' ? "Copy" : "Move"}</>
                 )}
               </button>
+            </div>
             </div>
           </motion.div>
         )}
