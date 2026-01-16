@@ -430,6 +430,17 @@ export default function DocumentActions({
     setShowDropdown(false);
   };
 
+  // Handle bulk move button click
+  const handleBulkMove = () => {
+    // Dispatch event to enter selection mode for move operation
+    const selectFilesEvent = new CustomEvent('select-files-for-operation', {
+      bubbles: true,
+      detail: { operation: 'move', itemType: 'document' }
+    });
+    document.dispatchEvent(selectFilesEvent);
+    setShowDropdown(false);
+  };
+
   // Execute the bulk rename operation
   const executeBulkRename = async () => {
     if (!onBulkRename || selectedItemsForRename.length === 0) return;
@@ -584,12 +595,30 @@ export default function DocumentActions({
             <span className="hidden sm:inline">Bulk Rename</span>
           </button>
           <div className="absolute top-full mb-2 left-1/2 transform -translate-x-1/2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap">
-            {hasFolderWritePermission() 
-              ? "Select multiple items to rename" 
+            {hasFolderWritePermission()
+              ? "Select multiple items to rename"
               : "You don't have permission!"}
           </div>
         </div>
-       
+
+        {/* Bulk Move Documents */}
+        <div className="group relative">
+          <button
+            onClick={handleBulkMove}
+            className="px-3 py-2 flex items-center space-x-2 bg-slate-300 text-gray-700 rounded-md hover:bg-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Move multiple documents"
+            disabled={!hasFolderWritePermission()}
+          >
+            <Move className="w-5 h-5" />
+            <span className="hidden sm:inline">Move Files</span>
+          </button>
+          <div className="absolute top-full mb-2 left-1/2 transform -translate-x-1/2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap z-10">
+            {hasFolderWritePermission()
+              ? "Select documents to move to another folder"
+              : "You don't have permission to move files"}
+          </div>
+        </div>
+
       </div>
 
       {/* File input (hidden) */}

@@ -2754,9 +2754,13 @@ export default function DocumentList({
   const [showProjectDropdown, setShowProjectDropdown] = useState(false);
   const [showFolderDropdown, setShowFolderDropdown] = useState(false);
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
+  const [projectDropdownPos, setProjectDropdownPos] = useState({ top: 0, left: 0, width: 0 });
+  const [folderDropdownPos, setFolderDropdownPos] = useState({ top: 0, left: 0, width: 0 });
 
   const projectDropdownRef = useRef<HTMLDivElement>(null);
   const folderDropdownRef = useRef<HTMLDivElement>(null);
+  const projectButtonRef = useRef<HTMLButtonElement>(null);
+  const folderButtonRef = useRef<HTMLButtonElement>(null);
   
   // Toggle folder expansion in the folder tree
   const toggleFolderExpansion = (folderId: string, e: React.MouseEvent<HTMLButtonElement>) => {
@@ -2941,32 +2945,34 @@ export default function DocumentList({
           
           return (
             <div key={folder.id}>
-              <div 
-                className="flex items-center py-2 px-2 hover:bg-gray-100 rounded cursor-pointer"
+              <div
+                className="flex items-center py-2 px-2 hover:bg-gray-100 rounded cursor-pointer truncate"
                 onClick={(e) => {
                   e.stopPropagation(); // Prevent event propagation
                   handleDestinationFolderSelect(folder.id);
                 }}
               >
-                {hasChildren ? (
-                  <button 
-                    className="mr-1 p-1 rounded-full hover:bg-gray-200"
-                    onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
-                      e.stopPropagation(); // Prevent event propagation
-                      toggleFolderExpansion(folder.id, e);
-                    }}
-                  >
-                    {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-                  </button>
-                ) : (
-                  <span className="w-6" />
-                )}
-                <FolderOpen className="w-4 h-4 mr-2 text-gray-400" />
-                <span className={`truncate ${selectedDestinationFolderId === folder.id ? 'font-medium text-blue-600' : 'text-gray-700'}`}>
-                  {displayName}
-                </span>
+                <div className="flex items-center min-w-0 flex-1">
+                  {hasChildren ? (
+                    <button
+                      className="mr-1 p-1 rounded-full hover:bg-gray-200 flex-shrink-0"
+                      onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
+                        e.stopPropagation(); // Prevent event propagation
+                        toggleFolderExpansion(folder.id, e);
+                      }}
+                    >
+                      {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                    </button>
+                  ) : (
+                    <span className="w-6 flex-shrink-0" />
+                  )}
+                  <FolderOpen className="w-4 h-4 mr-2 text-gray-400 flex-shrink-0" />
+                  <span className={`truncate ${selectedDestinationFolderId === folder.id ? 'font-medium text-blue-600' : 'text-gray-700'}`}>
+                    {displayName}
+                  </span>
+                </div>
                 {selectedDestinationFolderId === folder.id && (
-                  <Check className="w-4 h-4 ml-2 text-blue-600" />
+                  <Check className="w-4 h-4 ml-2 flex-shrink-0 text-blue-600" />
                 )}
               </div>
               
@@ -3457,6 +3463,30 @@ export default function DocumentList({
     };
   }, [showProjectDropdown, showFolderDropdown]);
 
+  // Calculate project dropdown position when opened
+  useEffect(() => {
+    if (showProjectDropdown && projectButtonRef.current) {
+      const rect = projectButtonRef.current.getBoundingClientRect();
+      setProjectDropdownPos({
+        top: rect.bottom + 4,
+        left: rect.left,
+        width: rect.width
+      });
+    }
+  }, [showProjectDropdown]);
+
+  // Calculate folder dropdown position when opened
+  useEffect(() => {
+    if (showFolderDropdown && folderButtonRef.current) {
+      const rect = folderButtonRef.current.getBoundingClientRect();
+      setFolderDropdownPos({
+        top: rect.bottom + 4,
+        left: rect.left,
+        width: rect.width
+      });
+    }
+  }, [showFolderDropdown]);
+
   // Function to copy or move a document
   const copyOrMoveDocument = async (source_document: string, destination_project_id: string, destination_folder: string, action: 'move' | 'copy') => {
     try {
@@ -3784,6 +3814,7 @@ export default function DocumentList({
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [movingFiles, setMovingFiles] = useState(false);
   const [moveProgress, setMoveProgress] = useState(0);
+  const [itemTypeFilter, setItemTypeFilter] = useState<'document' | 'folder' | 'both'>('both');
   const [draggedItems, setDraggedItems] = useState<string[]>([]);
   const [dropTargetFolder, setDragTargetFolder] = useState<string | null>(null);
   const [fileBeingDragged, setFileBeingDragged] = useState<string | null>(null);
@@ -3841,14 +3872,14 @@ export default function DocumentList({
       }
     });
     
-    // Add folders only if not in download mode
-    if (selectionMode !== 'download') {
+    // Add folders only in rename mode (not in download/copy/move modes)
+    if (selectionMode === 'rename') {
       filteredFolders.forEach(folder => {
         if (folder.id) {
           newSelection.add(folder.id);
         }
       });
-    } else if (filteredFolders.length > 0) {
+    } else if (filteredFolders.length > 0 && selectionMode === 'download') {
       // Show a message that folders can't be selected in download mode
       showToast("Selecting all files. Folders can't be included in downloads.");
     }
@@ -4387,23 +4418,49 @@ export default function DocumentList({
   useEffect(() => {
     const handleSelectFilesForDownload = (event: Event) => {
       const customEvent = event as CustomEvent;
-      
+
       // Clear any existing selection
       setSelectedFiles(new Set());
-      
+
       // Enter selection mode for download
       setIsSelectionMode(true);
       setSelectionMode('download');
-      
+
       console.log("[DocumentList] Entered file selection mode for download");
     };
-    
+
     // Add event listener
     document.addEventListener('select-files-for-download', handleSelectFilesForDownload as EventListener);
-    
+
     // Clean up
     return () => {
       document.removeEventListener('select-files-for-download', handleSelectFilesForDownload as EventListener);
+    };
+  }, []);
+
+  // Event listener for bulk move operation
+  useEffect(() => {
+    const handleSelectFilesForOperation = (event: Event) => {
+      const customEvent = event as CustomEvent;
+      const { operation, itemType } = customEvent.detail;
+
+      console.log(`[DocumentList] Entering selection mode for ${operation} operation on ${itemType}`);
+
+      // Enter selection mode
+      setIsSelectionMode(true);
+      setSelectionMode(operation); // 'move'
+      setItemTypeFilter(itemType); // 'document'
+
+      // Clear any existing selection
+      setSelectedFiles(new Set());
+    };
+
+    // Add event listener
+    document.addEventListener('select-files-for-operation', handleSelectFilesForOperation as EventListener);
+
+    // Cleanup
+    return () => {
+      document.removeEventListener('select-files-for-operation', handleSelectFilesForOperation as EventListener);
     };
   }, []);
 
@@ -4486,7 +4543,12 @@ export default function DocumentList({
                   {/* Move button - only in move mode */}
                   {selectionMode === 'move' && selectedFiles.size > 0 && (
                     <button
-                      onClick={() => setShowCopyMoveDialog(true)}
+                      onClick={() => {
+                        // Clear single-file states to prevent wrong dialog from showing
+                        setDocumentToCopyOrMove(null);
+                        setFolderToCopyOrMove(null);
+                        setShowCopyMoveDialog(true);
+                      }}
                       disabled={movingFiles}
                       className={`px-3 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 transition-colors flex items-center space-x-1 ${
                         movingFiles ? 'opacity-70 cursor-not-allowed' : ''
@@ -4509,7 +4571,12 @@ export default function DocumentList({
                   {/* Copy button - only in copy mode */}
                   {selectionMode === 'copy' && selectedFiles.size > 0 && (
                     <button
-                      onClick={() => setShowCopyMoveDialog(true)}
+                      onClick={() => {
+                        // Clear single-file states to prevent wrong dialog from showing
+                        setDocumentToCopyOrMove(null);
+                        setFolderToCopyOrMove(null);
+                        setShowCopyMoveDialog(true);
+                      }}
                       disabled={movingFiles}
                       className={`px-3 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 transition-colors flex items-center space-x-1 ${
                         movingFiles ? 'opacity-70 cursor-not-allowed' : ''
@@ -4789,8 +4856,8 @@ export default function DocumentList({
                     onDrop={(e: any) => handleFolderDrop(e, folder.id)}
                   >
                     {/* Selection checkbox - only show in selection mode and not in download mode for folders */}
-                    {isSelectionMode && selectionMode !== 'download' && (
-                      <div 
+                    {isSelectionMode && selectionMode !== 'download' && itemTypeFilter !== 'document' && (
+                      <div
                         className="flex-shrink-0 mr-3 cursor-pointer"
                         onClick={(e) => {
                           e.stopPropagation();
@@ -4810,10 +4877,12 @@ export default function DocumentList({
                         // But prevent toggling in download mode for folders
                         if (isSelectionMode) {
                           e.preventDefault();
-                          if (selectionMode !== 'download') {
+                          if (selectionMode !== 'download' && itemTypeFilter !== 'document') {
                             toggleFileSelection(folder.id, e);
-                          } else {
+                          } else if (selectionMode === 'download') {
                             showToast("Folders cannot be selected for download, only files");
+                          } else if (itemTypeFilter === 'document') {
+                            showToast("Only documents can be selected in this mode");
                           }
                           return;
                         }
@@ -4963,8 +5032,8 @@ export default function DocumentList({
                     onDragStart={(e: any) => handleFileDragStart(e, doc.id)}
                   >
                     {/* Selection checkbox - only show in selection mode */}
-                    {isSelectionMode && (
-                      <div 
+                    {isSelectionMode && itemTypeFilter !== 'folder' && (
+                      <div
                         className="flex-shrink-0 mr-3 cursor-pointer"
                         onClick={(e) => {
                           e.stopPropagation();
@@ -5265,7 +5334,8 @@ export default function DocumentList({
       />
 
       {/* Copy/Move dialog with folder selection */}
-      <div className={`fixed inset-0 flex items-center justify-center z-50 ${showCopyMoveDialog ? 'block' : 'hidden'}`}>
+      {showCopyMoveDialog && (folderToCopyOrMove || documentToCopyOrMove) && selectedFiles.size === 0 && (
+      <div className="fixed inset-0 flex items-center justify-center z-50">
         {/* Backdrop with blur effect */}
         <div 
           className="fixed inset-0 bg-black/40 backdrop-blur-[2px] transition-opacity duration-200" 
@@ -5497,6 +5567,7 @@ export default function DocumentList({
           </div>
         </div>
       </div>
+      )}
 
       {/* Render popup */}
       {renderEditPopup()}
@@ -5677,10 +5748,11 @@ export default function DocumentList({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4"
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4 sm:p-6 overflow-y-auto"
           >
-            <div className="bg-white rounded-lg shadow-lg p-6 w-full max-w-md">
-              <div className="flex items-center justify-between mb-4">
+            <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-visible">
+              {/* Header */}
+              <div className="flex items-center justify-between p-6 border-b border-gray-200 flex-shrink-0">
                 <h2 className="text-xl font-semibold">
                   {selectionMode === 'copy' ? 'Copy' : 'Move'} {selectedFiles.size} Files
                 </h2>
@@ -5691,10 +5763,12 @@ export default function DocumentList({
                   <X className="w-5 h-5" />
                 </button>
               </div>
-              
-              <p className="text-gray-600 mb-4">
-                Select destination folder:
-              </p>
+
+              {/* Scrollable Content */}
+              <div className="flex-1 overflow-y-auto p-6">
+                <p className="text-gray-600 mb-4">
+                  Select destination folder:
+                </p>
               
               {/* Project selection */}
               <div className="mb-4">
@@ -5704,26 +5778,27 @@ export default function DocumentList({
                 
                 <div className="relative">
                   <button
+                    ref={projectButtonRef}
                     className="w-full flex items-center justify-between px-3 py-2 border border-gray-300 rounded-md shadow-sm bg-white text-left focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     onClick={() => setShowProjectDropdown(!showProjectDropdown)}
                   >
                     <span className="truncate">
-                      {selectedDestinationProjectId 
+                      {selectedDestinationProjectId
                         ? availableProjects.find(p => p.id === selectedDestinationProjectId)?.name || "Unknown project"
                         : "Select a project"
                       }
                     </span>
                     <ChevronDown className="w-4 h-4 text-gray-400" />
                   </button>
-                  
+
                   {showProjectDropdown && (
-                    <div 
+                    <div
                       ref={projectDropdownRef}
-                      className="fixed z-50 mt-1 bg-white shadow-lg rounded-md py-1 max-h-60 overflow-auto" 
+                      className="fixed z-50 bg-white shadow-lg rounded-md py-1 max-h-60 overflow-auto border border-gray-200"
                       style={{
-                        width: 'calc(100% - 48px)',
-                        left: '50%',
-                        transform: 'translateX(-50%)'
+                        top: `${projectDropdownPos.top}px`,
+                        left: `${projectDropdownPos.left}px`,
+                        width: `${projectDropdownPos.width}px`
                       }}
                     >
                       {isLoadingProjects ? (
@@ -5763,6 +5838,7 @@ export default function DocumentList({
                 
                 <div className="relative">
                   <button
+                    ref={folderButtonRef}
                     className="w-full flex items-center justify-between px-3 py-2 border border-gray-300 rounded-md shadow-sm bg-white text-left focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     onClick={(e) => {
                       e.stopPropagation(); // Prevent event propagation
@@ -5775,22 +5851,22 @@ export default function DocumentList({
                     disabled={!selectedDestinationProjectId}
                   >
                     <span className="truncate">
-                      {selectedDestinationFolderId 
+                      {selectedDestinationFolderId
                         ? getFolderNameById(selectedDestinationFolderId)
                         : "Root"
                       }
                     </span>
                     <ChevronDown className="w-4 h-4 text-gray-400" />
                   </button>
-                  
+
                   {showFolderDropdown && selectedDestinationProjectId && (
-                    <div 
+                    <div
                       ref={folderDropdownRef}
-                      className="fixed z-50 mt-1 bg-white shadow-lg rounded-md py-1 max-h-[300px] overflow-auto" 
+                      className="fixed z-50 bg-white shadow-lg rounded-md py-1 max-h-[300px] overflow-auto border border-gray-200"
                       style={{
-                        width: 'calc(100% - 48px)',
-                        left: '50%',
-                        transform: 'translateX(-50%)'
+                        top: `${folderDropdownPos.top}px`,
+                        left: `${folderDropdownPos.left}px`,
+                        width: `${folderDropdownPos.width}px`
                       }}
                     >
                       {isLoadingFolders ? (
@@ -5817,16 +5893,32 @@ export default function DocumentList({
               </div>
               
               <div className="mt-2 text-xs text-gray-500">
-                Selected destination: {selectedDestinationProjectId ? 
-                  `${availableProjects.find(p => p.id === selectedDestinationProjectId)?.name || "Unknown"} / ${selectedDestinationFolderId ? 
-                    getFolderNameById(selectedDestinationFolderId) : "Root"}` 
+                Selected destination: {selectedDestinationProjectId ?
+                  `${availableProjects.find(p => p.id === selectedDestinationProjectId)?.name || "Unknown"} / ${selectedDestinationFolderId ?
+                    getFolderNameById(selectedDestinationFolderId) : "Root"}`
                   : "Please select a destination"
                 }
               </div>
-            </div>
-            
-            {/* Footer */}
-            <div className="flex justify-end gap-3 p-4 border-t border-gray-200/80 bg-gray-50/80 flex-shrink-0">
+
+              {/* Progress Bar for Bulk Move */}
+              {movingFiles && selectedFiles.size > 1 && (
+                <div className="mt-4 mb-2">
+                  <div className="flex justify-between text-sm text-gray-600 mb-2">
+                    <span>Moving {selectedFiles.size} documents...</span>
+                    <span>{moveProgress}%</span>
+                  </div>
+                  <div className="w-full bg-gray-200 rounded-full h-2.5">
+                    <div
+                      className="bg-primary-600 h-2.5 rounded-full transition-all duration-300"
+                      style={{ width: `${moveProgress}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+              </div>
+
+              {/* Footer - Inside dialog container */}
+              <div className="flex justify-end gap-3 p-4 border-t border-gray-200 bg-gray-50 flex-shrink-0">
               <button
                 onClick={() => {
                   setShowCopyMoveDialog(false);
@@ -5844,15 +5936,87 @@ export default function DocumentList({
                 Cancel
               </button>
               <button
-                onClick={() => {
-                  if (folderToCopyOrMove && selectedDestinationProjectId && !isCopyingOrMoving) {
+                onClick={async () => {
+                  if (!selectedDestinationProjectId) {
+                    showToast("Please select a destination project", "error");
+                    return;
+                  }
+
+                  // Handle bulk move operation
+                  if (selectionMode === 'move' && selectedFiles.size > 0) {
+                    // Filter to only documents
+                    const selectedDocs = documents.filter(doc => selectedFiles.has(doc.id));
+
+                    if (selectedDocs.length === 0) {
+                      showToast("No documents selected", "error");
+                      return;
+                    }
+
+                    // Validate not moving to same folder
+                    if (selectedDestinationFolderId === currentFolder?.id) {
+                      showToast("Documents are already in this folder", "error");
+                      return;
+                    }
+
+                    setMovingFiles(true);
+                    setMoveProgress(0);
+
+                    let successCount = 0;
+                    let failCount = 0;
+
+                    try {
+                      for (let i = 0; i < selectedDocs.length; i++) {
+                        try {
+                          if (onCopyOrMoveFile) {
+                            await onCopyOrMoveFile(selectedDocs[i].id, selectedDestinationFolderId, 'move');
+                          }
+                          successCount++;
+
+                          // Update progress
+                          const progress = Math.round(((i + 1) / selectedDocs.length) * 100);
+                          setMoveProgress(progress);
+                        } catch (error) {
+                          failCount++;
+                          console.error(`Failed to move ${selectedDocs[i].name}:`, error);
+                        }
+                      }
+
+                      // Show feedback
+                      if (failCount === 0) {
+                        showToast(`Successfully moved ${successCount} document${successCount > 1 ? 's' : ''}`, "success");
+                      } else if (successCount > 0) {
+                        showToast(`Moved ${successCount} documents, ${failCount} failed`, "warning");
+                      } else {
+                        showToast("Failed to move documents", "error");
+                      }
+
+                      // Close dialog and exit selection mode
+                      setShowCopyMoveDialog(false);
+                      exitSelectionMode();
+
+                      // Refresh the view
+                      if (onRefresh) {
+                        await onRefresh();
+                      }
+                    } catch (error) {
+                      console.error("Bulk move error:", error);
+                      showToast("An error occurred during move operation", "error");
+                    } finally {
+                      setMovingFiles(false);
+                      setMoveProgress(0);
+                    }
+                  }
+                  // Handle single folder operation
+                  else if (folderToCopyOrMove && selectedDestinationProjectId && !isCopyingOrMoving) {
                     copyOrMoveFolder(
-                      folderToCopyOrMove.id, 
+                      folderToCopyOrMove.id,
                       selectedDestinationProjectId,
                       selectedDestinationFolderId,
                       copyMoveAction
                     );
-                  } else if (documentToCopyOrMove && selectedDestinationProjectId && !isCopyingOrMoving) {
+                  }
+                  // Handle single document operation
+                  else if (documentToCopyOrMove && selectedDestinationProjectId && !isCopyingOrMoving) {
                     copyOrMoveDocument(
                       documentToCopyOrMove.id,
                       selectedDestinationProjectId,
@@ -5879,6 +6043,7 @@ export default function DocumentList({
                   <>{copyMoveAction === 'copy' ? "Copy" : "Move"}</>
                 )}
               </button>
+            </div>
             </div>
           </motion.div>
         )}

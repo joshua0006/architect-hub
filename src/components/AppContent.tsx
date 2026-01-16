@@ -326,11 +326,16 @@ const DocumentsPage: React.FC<{
           onUpdateFolderPermission={updateFolderPermission}
           onFullscreenChange={setIsFullscreen}
           onBulkRename={(items, pattern) => bulkRenameItems(items, pattern)}
-          onCopyOrMoveFile={(sourceDocumentId, destinationFolderId, action) => {
+          onCopyOrMoveFile={async (sourceDocumentId, destinationFolderId, action) => {
             if (action === 'copy') {
-              return documentService.copyDocument(sourceDocumentId, destinationFolderId);
+              throw new Error('Copy operation not yet implemented');
             } else {
-              return documentService.moveDocument(sourceDocumentId, destinationFolderId);
+              // Move document by updating its folderId
+              await documentService.update(
+                destinationFolderId,
+                sourceDocumentId,
+                { folderId: destinationFolderId }
+              );
             }
           }}
         />
