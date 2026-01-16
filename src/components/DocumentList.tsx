@@ -3872,14 +3872,14 @@ export default function DocumentList({
       }
     });
     
-    // Add folders only if not in download mode
-    if (selectionMode !== 'download') {
+    // Add folders only in rename mode (not in download/copy/move modes)
+    if (selectionMode === 'rename') {
       filteredFolders.forEach(folder => {
         if (folder.id) {
           newSelection.add(folder.id);
         }
       });
-    } else if (filteredFolders.length > 0) {
+    } else if (filteredFolders.length > 0 && selectionMode === 'download') {
       // Show a message that folders can't be selected in download mode
       showToast("Selecting all files. Folders can't be included in downloads.");
     }
