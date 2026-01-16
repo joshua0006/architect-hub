@@ -2754,9 +2754,13 @@ export default function DocumentList({
   const [showProjectDropdown, setShowProjectDropdown] = useState(false);
   const [showFolderDropdown, setShowFolderDropdown] = useState(false);
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
+  const [projectDropdownPos, setProjectDropdownPos] = useState({ top: 0, left: 0, width: 0 });
+  const [folderDropdownPos, setFolderDropdownPos] = useState({ top: 0, left: 0, width: 0 });
 
   const projectDropdownRef = useRef<HTMLDivElement>(null);
   const folderDropdownRef = useRef<HTMLDivElement>(null);
+  const projectButtonRef = useRef<HTMLButtonElement>(null);
+  const folderButtonRef = useRef<HTMLButtonElement>(null);
   
   // Toggle folder expansion in the folder tree
   const toggleFolderExpansion = (folderId: string, e: React.MouseEvent<HTMLButtonElement>) => {
@@ -3458,6 +3462,30 @@ export default function DocumentList({
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, [showProjectDropdown, showFolderDropdown]);
+
+  // Calculate project dropdown position when opened
+  useEffect(() => {
+    if (showProjectDropdown && projectButtonRef.current) {
+      const rect = projectButtonRef.current.getBoundingClientRect();
+      setProjectDropdownPos({
+        top: rect.bottom + 4,
+        left: rect.left,
+        width: rect.width
+      });
+    }
+  }, [showProjectDropdown]);
+
+  // Calculate folder dropdown position when opened
+  useEffect(() => {
+    if (showFolderDropdown && folderButtonRef.current) {
+      const rect = folderButtonRef.current.getBoundingClientRect();
+      setFolderDropdownPos({
+        top: rect.bottom + 4,
+        left: rect.left,
+        width: rect.width
+      });
+    }
+  }, [showFolderDropdown]);
 
   // Function to copy or move a document
   const copyOrMoveDocument = async (source_document: string, destination_project_id: string, destination_folder: string, action: 'move' | 'copy') => {
@@ -5722,7 +5750,7 @@ export default function DocumentList({
             exit={{ opacity: 0 }}
             className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4 sm:p-6 overflow-y-auto"
           >
-            <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
+            <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-visible">
               {/* Header */}
               <div className="flex items-center justify-between p-6 border-b border-gray-200 flex-shrink-0">
                 <h2 className="text-xl font-semibold">
@@ -5750,22 +5778,28 @@ export default function DocumentList({
                 
                 <div className="relative">
                   <button
+                    ref={projectButtonRef}
                     className="w-full flex items-center justify-between px-3 py-2 border border-gray-300 rounded-md shadow-sm bg-white text-left focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     onClick={() => setShowProjectDropdown(!showProjectDropdown)}
                   >
                     <span className="truncate">
-                      {selectedDestinationProjectId 
+                      {selectedDestinationProjectId
                         ? availableProjects.find(p => p.id === selectedDestinationProjectId)?.name || "Unknown project"
                         : "Select a project"
                       }
                     </span>
                     <ChevronDown className="w-4 h-4 text-gray-400" />
                   </button>
-                  
+
                   {showProjectDropdown && (
                     <div
                       ref={projectDropdownRef}
-                      className="absolute z-50 mt-1 w-full bg-white shadow-lg rounded-md py-1 max-h-60 overflow-auto border border-gray-200"
+                      className="fixed z-50 bg-white shadow-lg rounded-md py-1 max-h-60 overflow-auto border border-gray-200"
+                      style={{
+                        top: `${projectDropdownPos.top}px`,
+                        left: `${projectDropdownPos.left}px`,
+                        width: `${projectDropdownPos.width}px`
+                      }}
                     >
                       {isLoadingProjects ? (
                         <div className="flex justify-center items-center p-4">
@@ -5804,6 +5838,7 @@ export default function DocumentList({
                 
                 <div className="relative">
                   <button
+                    ref={folderButtonRef}
                     className="w-full flex items-center justify-between px-3 py-2 border border-gray-300 rounded-md shadow-sm bg-white text-left focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     onClick={(e) => {
                       e.stopPropagation(); // Prevent event propagation
@@ -5816,18 +5851,23 @@ export default function DocumentList({
                     disabled={!selectedDestinationProjectId}
                   >
                     <span className="truncate">
-                      {selectedDestinationFolderId 
+                      {selectedDestinationFolderId
                         ? getFolderNameById(selectedDestinationFolderId)
                         : "Root"
                       }
                     </span>
                     <ChevronDown className="w-4 h-4 text-gray-400" />
                   </button>
-                  
+
                   {showFolderDropdown && selectedDestinationProjectId && (
                     <div
                       ref={folderDropdownRef}
-                      className="absolute z-50 mt-1 w-full bg-white shadow-lg rounded-md py-1 max-h-[300px] overflow-auto border border-gray-200"
+                      className="fixed z-50 bg-white shadow-lg rounded-md py-1 max-h-[300px] overflow-auto border border-gray-200"
+                      style={{
+                        top: `${folderDropdownPos.top}px`,
+                        left: `${folderDropdownPos.left}px`,
+                        width: `${folderDropdownPos.width}px`
+                      }}
                     >
                       {isLoadingFolders ? (
                         <div className="flex justify-center items-center p-4">
