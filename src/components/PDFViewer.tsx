@@ -51,47 +51,99 @@ const pageBufferCache = new Map<number, {
   viewport: any;
   timestamp: number;
   pageNumber: number;
+  containerWidth: number;
+  containerHeight: number;
 }>();
 
 // Track the last opened document ID
 let lastDocumentId: string | null = null;
 
 // Centralized container measurement utility to ensure consistent scaling
-const getContainerWidth = (containerRef: React.RefObject<HTMLDivElement>): { width: number; height: number; availableWidth: number } => {
+const getContainerWidth = (containerRef: React.RefObject<HTMLDivElement>): { width: number; height: number; availableWidth: number; hasScrollbar: boolean } => {
   const PADDING = 32; // Consistent padding across all measurements
   const DEFAULT_WIDTH = 800;
   const DEFAULT_HEIGHT = 1200;
-  
+
   if (!containerRef.current) {
     console.warn('[PDFViewer] Container ref not available, using defaults');
     return {
       width: DEFAULT_WIDTH,
       height: DEFAULT_HEIGHT,
-      availableWidth: DEFAULT_WIDTH - PADDING
+      availableWidth: DEFAULT_WIDTH - PADDING,
+      hasScrollbar: false
     };
   }
 
   const rect = containerRef.current.getBoundingClientRect();
   const width = rect.width || containerRef.current.clientWidth;
   const height = rect.height || containerRef.current.clientHeight;
-  
+
   // Validate measurements
   if (width <= 0 || height <= 0) {
     console.warn('[PDFViewer] Invalid container dimensions, using defaults', { width, height });
     return {
       width: DEFAULT_WIDTH,
-      height: DEFAULT_HEIGHT, 
-      availableWidth: DEFAULT_WIDTH - PADDING
+      height: DEFAULT_HEIGHT,
+      availableWidth: DEFAULT_WIDTH - PADDING,
+      hasScrollbar: false
     };
   }
 
-  console.log('[PDFViewer] Container measurements:', { width, height, availableWidth: width - PADDING });
-  
+  // Detect scrollbar presence - check if content overflows
+  const scrollContainer = containerRef.current.querySelector('.overflow-auto') as HTMLElement;
+  const hasScrollbar = scrollContainer
+    ? scrollContainer.scrollHeight > scrollContainer.clientHeight
+    : false;
+
+  // Reserve space for scrollbar if present (typical scrollbar width is 15-17px)
+  const SCROLLBAR_WIDTH = hasScrollbar ? 17 : 0;
+  const availableWidth = width - PADDING - SCROLLBAR_WIDTH;
+
+  console.log('[PDFViewer] Container measurements:', {
+    width,
+    height,
+    availableWidth,
+    hasScrollbar,
+    scrollbarWidth: SCROLLBAR_WIDTH
+  });
+
   return {
     width,
     height,
-    availableWidth: width - PADDING
+    availableWidth,
+    hasScrollbar
   };
+};
+
+// Centralized DPI-aware canvas configuration to ensure consistent scaling across all render paths
+const configureCanvasForRendering = (
+  canvas: HTMLCanvasElement,
+  viewport: any,
+  qualityMultiplier: number = 1.0
+): { width: number; height: number } => {
+  const devicePixelRatio = window.devicePixelRatio || 1;
+
+  // Set buffer size (actual pixels) with consistent rounding
+  const bufferWidth = Math.round(viewport.width * devicePixelRatio * qualityMultiplier);
+  const bufferHeight = Math.round(viewport.height * devicePixelRatio * qualityMultiplier);
+
+  canvas.width = bufferWidth;
+  canvas.height = bufferHeight;
+
+  // Set display size (CSS pixels) - must match viewport exactly
+  const displayWidth = Math.round(viewport.width * qualityMultiplier);
+  const displayHeight = Math.round(viewport.height * qualityMultiplier);
+
+  canvas.style.width = `${displayWidth}px`;
+  canvas.style.height = `${displayHeight}px`;
+
+  // Scale context to match device pixel ratio
+  const ctx = canvas.getContext('2d');
+  if (ctx) {
+    ctx.scale(devicePixelRatio * qualityMultiplier, devicePixelRatio * qualityMultiplier);
+  }
+
+  return { width: displayWidth, height: displayHeight };
 };
 
 // Export this function to allow clearing caches from outside
@@ -415,17 +467,35 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     preloadingRef.current.add(pageNum);
     
     try {
+      // Get current container dimensions for cache validation
+      const currentContainer = getContainerWidth(containerRef);
+
       // Check if we already have this page in buffer cache
       if (pageBufferCache.has(pageNum)) {
         const cachedPage = pageBufferCache.get(pageNum);
         if (cachedPage) {
-          // Update timestamp to keep this page in cache longer
-          cachedPage.timestamp = Date.now();
-          // Remove from preloading set
-          preloadingRef.current.delete(pageNum);
-          return cachedPage;
+          // Validate that container dimensions haven't changed significantly
+          const widthDiff = Math.abs(cachedPage.containerWidth - currentContainer.width);
+          const heightDiff = Math.abs(cachedPage.containerHeight - currentContainer.height);
+
+          // Cache is valid if dimensions changed by less than 2px
+          if (widthDiff < 2 && heightDiff < 2) {
+            // Update timestamp to keep this page in cache longer
+            cachedPage.timestamp = Date.now();
+            // Remove from preloading set
+            preloadingRef.current.delete(pageNum);
+            console.log(`[PDFViewer] Using cached page ${pageNum} with matching dimensions`);
+            return cachedPage;
+          } else {
+            // Container resized, invalidate cache
+            console.log(`[PDFViewer] Invalidating cache for page ${pageNum}: container dimensions changed (width: ${widthDiff}px, height: ${heightDiff}px)`);
+            pageBufferCache.delete(pageNum);
+          }
         }
       }
+
+      // Get current container measurements for new cache entry
+      const containerMeasurements = getContainerWidth(containerRef);
       
       // Create off-screen canvas
       const offscreenCanvas = document.createElement('canvas');
@@ -438,17 +508,12 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
       // Get the page
       const nextPage = await pdf.getPage(pageNum);
       const viewport = nextPage.getViewport({ scale: targetScale });
-      
-      // Set dimensions with device pixel ratio for high-quality rendering
-      const devicePixelRatio = window.devicePixelRatio || 1;
-      offscreenCanvas.width = viewport.width * devicePixelRatio;
-      offscreenCanvas.height = viewport.height * devicePixelRatio;
-      
-      // Scale context to account for device pixel ratio
-      offscreenCtx.scale(devicePixelRatio, devicePixelRatio);
-      
+
+      // Configure canvas with centralized DPI scaling (quality multiplier = 1.0 for preload)
+      const { width, height } = configureCanvasForRendering(offscreenCanvas, viewport, 1.0);
+
       // Clear canvas
-      offscreenCtx.clearRect(0, 0, viewport.width, viewport.height);
+      offscreenCtx.clearRect(0, 0, width, height);
       
       // Enable high-quality image rendering
       (offscreenCtx as any).imageSmoothingEnabled = true;
@@ -462,17 +527,23 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
       });
       
       await renderTask.promise;
-      
-      // Create buffer object
+
+      // Create buffer object with container dimensions
       const buffer = {
         canvas: offscreenCanvas,
         viewport,
         pageNumber: pageNum,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        containerWidth: containerMeasurements.width,
+        containerHeight: containerMeasurements.height
       };
-      
+
       // Cache the buffer
       pageBufferCache.set(pageNum, buffer);
+      console.log(`[PDFViewer] Cached page ${pageNum} with container dimensions:`, {
+        width: containerMeasurements.width,
+        height: containerMeasurements.height
+      });
       
       // Cleanup preloading set
       preloadingRef.current.delete(pageNum);
@@ -517,6 +588,10 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     // Set navigation transition flag to block immediate rendering
     navigationTransitionRef.current = true;
     pageTransitionRef.current = true;
+
+    // Reset render tracking refs for the new page
+    initialRenderCompletedRef.current = false;
+    hasRenderedOnceRef.current[prevPage] = false;
 
     // Cancel any current render
     if (renderTaskRef.current) {
@@ -568,11 +643,19 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     });
 
     // Set a timeout to clear the transition flags after navigation is complete
+    // Reduced from 300ms to 100ms to minimize race condition windows
+    const NAVIGATION_SETTLE_TIME = 100;
     setTimeout(() => {
+      // Force reflow to ensure container measurements are stable
+      if (containerRef.current) {
+        void containerRef.current.offsetHeight;
+      }
+
+      // Clear all navigation flags atomically
       navigationTransitionRef.current = false;
       pageTransitionRef.current = false;
       nextPageInProgress.current = false;
-    }, 300);
+    }, NAVIGATION_SETTLE_TIME);
   }, [currentPage, isExporting, scale, prepareNextPage]);
 
   const handleNextPage = useCallback(() => {
@@ -593,7 +676,11 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     // Set navigation transition flag to block immediate rendering
     navigationTransitionRef.current = true;
     pageTransitionRef.current = true;
-    
+
+    // Reset render tracking refs for the new page
+    initialRenderCompletedRef.current = false;
+    hasRenderedOnceRef.current[nextPage] = false;
+
     // Cancel any current render task robustly
     if (renderTaskRef.current && typeof renderTaskRef.current.cancel === 'function') {
       try {
@@ -643,11 +730,19 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
     });
 
     // Set a timeout to clear the transition flags after navigation is complete
+    // Reduced from 300ms to 100ms to minimize race condition windows
+    const NAVIGATION_SETTLE_TIME = 100;
     setTimeout(() => {
+      // Force reflow to ensure container measurements are stable
+      if (containerRef.current) {
+        void containerRef.current.offsetHeight;
+      }
+
+      // Clear all navigation flags atomically
       navigationTransitionRef.current = false;
       pageTransitionRef.current = false;
       nextPageInProgress.current = false;
-    }, 300);
+    }, NAVIGATION_SETTLE_TIME);
   }, [currentPage, pdf?.numPages, isExporting, scale, prepareNextPage]);
 
   // Add these refs near the top with other refs
@@ -844,25 +939,33 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ file, documentId }) => {
             // Calculate viewport considering quality multiplier
             viewport = page.getViewport({ scale: displayScale * qualityMultiplier });
 
-            // Set canvas buffer size considering device pixel ratio
-            canvas.width = viewport.width * devicePixelRatio;
-            canvas.height = viewport.height * devicePixelRatio;
-            
-            // Set canvas display size (CSS pixels) dividing by qualityMultiplier
-            canvas.style.width = `${viewport.width / qualityMultiplier}px`;
-            canvas.style.height = `${viewport.height / qualityMultiplier}px`;
+            // Configure canvas with centralized DPI scaling
+            const { width: displayWidth, height: displayHeight } = configureCanvasForRendering(canvas, viewport, qualityMultiplier);
+
+            // Log comprehensive render measurements for diagnostics
+            console.log('[PDFViewer] Render measurements:', {
+              page: currentPage,
+              containerWidth: containerMeasurements.width,
+              containerHeight: containerMeasurements.height,
+              availableWidth: containerMeasurements.availableWidth,
+              hasScrollbar: containerMeasurements.hasScrollbar,
+              viewport: { width: viewport.width, height: viewport.height },
+              scale: displayScale,
+              qualityMultiplier,
+              devicePixelRatio,
+              canvasBuffer: { width: canvas.width, height: canvas.height },
+              canvasDisplay: { width: displayWidth, height: displayHeight },
+              timestamp: Date.now()
+            });
+
+            // Set canvas background color
             canvas.style.backgroundColor = '#FFFFFF';
-            
-            // Explicitly clear the canvas *before* scaling the context
-            // Use the canvas buffer dimensions (already includes devicePixelRatio)
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-            // Set white background for consistent appearance
+            // Explicitly clear the canvas and set white background
+            // Use the display dimensions for clearing (context is already scaled by helper)
+            ctx.clearRect(0, 0, displayWidth, displayHeight);
             ctx.fillStyle = "#FFFFFF";
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-            // Scale the context to account for device pixel ratio
-            ctx.scale(devicePixelRatio, devicePixelRatio);
+            ctx.fillRect(0, 0, displayWidth, displayHeight);
 
             // Define render parameters with enhanced text rendering
             const renderContext = {

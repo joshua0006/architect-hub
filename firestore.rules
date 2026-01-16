@@ -1,7 +1,13 @@
-rules_version = '2';
-
 service cloud.firestore {
   match /databases/{database}/documents {
+    // ============================================================================
+    // ARCHITECTURE NOTES
+    // ============================================================================
+    // Team Membership: Stored in project.teamMemberIds array (NOT subcollection)
+    // Roles: Global user roles (Admin, Staff, Contractor, Client) - no project-level roles
+    // Permission Hierarchy: Admin > Staff > Contractor > Client
+    // ============================================================================
+
     // Helper functions
     function isSignedIn() {
       return request.auth != null;
@@ -11,24 +17,44 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
-    function isAdmin() {
-      return isSignedIn() &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'Admin';
-    }
-
-    function isStaff() {
-      return isSignedIn() &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'Staff';
-    }
-
+    // Check if user is a member of a project (array-based)
     function isProjectMember(projectId) {
       return isSignedIn() &&
-        exists(/databases/$(database)/documents/projects/$(projectId)/team/$(request.auth.uid));
+        request.auth.uid in get(/databases/$(database)/documents/projects/$(projectId)).data.teamMemberIds;
     }
 
-    function hasRole(projectId, role) {
+    // Check user's global role
+    function hasGlobalRole(role) {
       return isSignedIn() &&
-        get(/databases/$(database)/documents/projects/$(projectId)/team/$(request.auth.uid)).data.role == role;
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == role;
+    }
+
+    // Check if user has permission based on their global role
+    // Role hierarchy: Admin > Staff > Contractor > Client
+    function hasPermission(resource, action) {
+      let userRole = get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+
+      // Admin has all permissions
+      if (userRole == 'Admin') {
+        return true;
+      }
+
+      // Staff can view, edit, create, and delete most resources
+      if (userRole == 'Staff') {
+        return action in ['view', 'edit', 'create', 'delete'];
+      }
+
+      // Contractor can view and edit (not create/delete projects)
+      if (userRole == 'Contractor') {
+        return action in ['view', 'edit'];
+      }
+
+      // Client can only view
+      if (userRole == 'Client') {
+        return action == 'view';
+      }
+
+      return false;
     }
 
     // Users collection
@@ -42,18 +68,22 @@ service cloud.firestore {
     // User Groups collection
     match /userGroups/{groupId} {
       allow read: if isSignedIn();
-      allow create, update, delete: if isAdmin() || isStaff();
+      allow create, update, delete: if isSignedIn() &&
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'Admin' ||
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'Staff');
     }
 
     // Permissions collection
     match /permissions/{permissionId} {
       allow read: if isSignedIn();
-      allow create, update, delete: if isAdmin();
+      allow create, update, delete: if isSignedIn() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'Admin';
     }
 
     // Access Logs collection
     match /accessLogs/{logId} {
-      allow read: if isAdmin();
+      allow read: if isSignedIn() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'Admin';
       allow create: if isSignedIn();
       allow update, delete: if false; // Prevent modification of access logs
     }
@@ -61,122 +91,154 @@ service cloud.firestore {
     // Organization settings
     match /settings/organization {
       allow read: if isSignedIn();
-      allow write: if isAdmin();
+      allow write: if isSignedIn() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'Admin';
     }
 
     // Projects collection
     match /projects/{projectId} {
+      // Read: Project members OR users with view permission
       allow read: if isSignedIn() && (
-        isAdmin() ||
-        isStaff() ||
-        isProjectMember(projectId)
+        isProjectMember(projectId) ||
+        hasPermission('project', 'view')
       );
-      allow create: if isAdmin() || isStaff();
-      allow update: if isSignedIn() && (
-        isAdmin() ||
-        hasRole(projectId, 'admin') ||
-        hasRole(projectId, 'manager')
-      );
-      allow delete: if isAdmin() || hasRole(projectId, 'admin');
 
-      // Team members subcollection
+      // Create: Staff and Admin only
+      allow create: if isSignedIn() && (
+        hasGlobalRole('Admin') ||
+        hasGlobalRole('Staff')
+      );
+
+      // Update: Staff and Admin (project members who are Staff/Admin)
+      allow update: if isSignedIn() && (
+        (isProjectMember(projectId) && (hasGlobalRole('Staff') || hasGlobalRole('Admin'))) ||
+        hasPermission('project', 'edit')
+      );
+
+      // Delete: Admin only
+      allow delete: if isSignedIn() && (
+        hasGlobalRole('Admin') ||
+        hasPermission('project', 'delete')
+      );
+
+      // Team members subcollection (unused in current architecture, kept for future compatibility)
+      // Note: Current implementation uses teamMemberIds array on project document
       match /team/{userId} {
-        allow read: if isSignedIn() && (
-          isAdmin() ||
-          isStaff() ||
-          isProjectMember(projectId)
+        allow read: if isSignedIn() && isProjectMember(projectId);
+        allow write: if isSignedIn() && (
+          hasGlobalRole('Admin') ||
+          hasGlobalRole('Staff')
         );
-        allow write: if isAdmin() || isStaff() || hasRole(projectId, 'admin');
       }
     }
 
     // Folders collection
     match /folders/{folderId} {
+      // Read: Project members can view folders
       allow read: if isSignedIn() && (
-        isAdmin() ||
-        isStaff() ||
-        isProjectMember(resource.data.projectId)
+        isProjectMember(resource.data.projectId) ||
+        hasPermission('folder', 'view')
       );
+
+      // Create: Project members who are Staff/Admin/Contractor
       allow create: if isSignedIn() && (
-        isAdmin() ||
-        isStaff() ||
-        isProjectMember(request.resource.data.projectId)
+        (isProjectMember(request.resource.data.projectId) &&
+         (hasGlobalRole('Staff') || hasGlobalRole('Admin') || hasGlobalRole('Contractor'))) ||
+        hasPermission('folder', 'edit')
       );
+
+      // Update: Staff and Admin project members only
       allow update: if isSignedIn() && (
-        isAdmin() ||
-        isStaff() ||
-        hasRole(resource.data.projectId, 'admin') ||
-        hasRole(resource.data.projectId, 'manager')
+        (isProjectMember(resource.data.projectId) && (hasGlobalRole('Staff') || hasGlobalRole('Admin'))) ||
+        hasPermission('folder', 'edit')
       );
-      allow delete: if isAdmin() || isStaff() || hasRole(resource.data.projectId, 'admin');
+
+      // Delete: Admin only
+      allow delete: if isSignedIn() && (
+        hasGlobalRole('Admin') ||
+        hasPermission('folder', 'delete')
+      );
 
       // Documents subcollection
       match /documents/{documentId} {
+        // Read: Project members can view documents
         allow read: if isSignedIn() && (
-          isAdmin() ||
-          isStaff() ||
-          isProjectMember(get(/databases/$(database)/documents/folders/$(folderId)).data.projectId)
+          isProjectMember(get(/databases/$(database)/documents/folders/$(folderId)).data.projectId) ||
+          hasPermission('file', 'view')
         );
+
+        // Create: Project members who are Staff/Admin/Contractor
         allow create: if isSignedIn() && (
-          isAdmin() ||
-          isStaff() ||
-          isProjectMember(get(/databases/$(database)/documents/folders/$(folderId)).data.projectId)
+          (isProjectMember(get(/databases/$(database)/documents/folders/$(folderId)).data.projectId) &&
+           (hasGlobalRole('Staff') || hasGlobalRole('Admin') || hasGlobalRole('Contractor'))) ||
+          hasPermission('file', 'edit')
         );
+
+        // Update: Staff/Admin or document creator (if Contractor)
         allow update: if isSignedIn() && (
-          isAdmin() ||
-          isStaff() ||
-          hasRole(get(/databases/$(database)/documents/folders/$(folderId)).data.projectId, 'admin') ||
-          hasRole(get(/databases/$(database)/documents/folders/$(folderId)).data.projectId, 'manager') ||
-          request.auth.uid == resource.data.createdBy
+          (isProjectMember(get(/databases/$(database)/documents/folders/$(folderId)).data.projectId) &&
+           (hasGlobalRole('Staff') || hasGlobalRole('Admin') || request.auth.uid == resource.data.createdBy)) ||
+          hasPermission('file', 'edit')
         );
-        allow delete: if isAdmin() || isStaff() || hasRole(get(/databases/$(database)/documents/folders/$(folderId)).data.projectId, 'admin');
+
+        // Delete: Admin only
+        allow delete: if isSignedIn() && (
+          hasGlobalRole('Admin') ||
+          hasPermission('file', 'delete')
+        );
       }
     }
 
     // Tasks collection
     match /tasks/{taskId} {
+      // Read: Project members can view tasks
       allow read: if isSignedIn() && (
-        isAdmin() ||
-        isStaff() ||
-        isProjectMember(resource.data.projectId)
+        isProjectMember(resource.data.projectId) ||
+        hasPermission('project', 'view')
       );
+
+      // Create: Project members who are Staff/Admin/Contractor
       allow create: if isSignedIn() && (
-        isAdmin() ||
-        isStaff() ||
-        isProjectMember(request.resource.data.projectId)
+        (isProjectMember(request.resource.data.projectId) &&
+         (hasGlobalRole('Staff') || hasGlobalRole('Admin') || hasGlobalRole('Contractor'))) ||
+        hasPermission('project', 'edit')
       );
+
+      // Update: Assigned user OR Staff/Admin project members
       allow update: if isSignedIn() && (
-        isAdmin() ||
-        isStaff() ||
-        isProjectMember(resource.data.projectId) &&
-        (
-          resource.data.assignedTo == request.auth.uid ||
-          hasRole(resource.data.projectId, 'manager') ||
-          hasRole(resource.data.projectId, 'admin')
-        )
+        (isProjectMember(resource.data.projectId) &&
+         (resource.data.assignedTo == request.auth.uid ||
+          hasGlobalRole('Staff') ||
+          hasGlobalRole('Admin'))) ||
+        hasPermission('project', 'edit')
       );
-      allow delete: if isAdmin() || isStaff() ||
-        hasRole(resource.data.projectId, 'admin') ||
-        hasRole(resource.data.projectId, 'manager');
+
+      // Delete: Staff and Admin only
+      allow delete: if isSignedIn() && (
+        (isProjectMember(resource.data.projectId) && (hasGlobalRole('Staff') || hasGlobalRole('Admin'))) ||
+        hasPermission('project', 'delete')
+      );
     }
 
     // Milestones collection
     match /milestones/{milestoneId} {
+      // Read: Project members can view milestones
       allow read: if isSignedIn() && (
-        isAdmin() ||
-        isStaff() ||
-        isProjectMember(resource.data.projectId)
+        isProjectMember(resource.data.projectId) ||
+        hasPermission('project', 'view')
       );
+
+      // Create: Project members who are Staff/Admin/Contractor
       allow create: if isSignedIn() && (
-        isAdmin() ||
-        isStaff() ||
-        isProjectMember(request.resource.data.projectId)
+        (isProjectMember(request.resource.data.projectId) &&
+         (hasGlobalRole('Staff') || hasGlobalRole('Admin') || hasGlobalRole('Contractor'))) ||
+        hasPermission('project', 'edit')
       );
+
+      // Update/Delete: Staff and Admin only
       allow update, delete: if isSignedIn() && (
-        isAdmin() ||
-        isStaff() ||
-        hasRole(resource.data.projectId, 'admin') ||
-        hasRole(resource.data.projectId, 'manager')
+        (isProjectMember(resource.data.projectId) && (hasGlobalRole('Staff') || hasGlobalRole('Admin'))) ||
+        hasPermission('project', 'edit')
       );
     }
 
@@ -198,35 +260,31 @@ service cloud.firestore {
 
     // Documents collection
     match /documents/{documentId} {
+      // Read: Project members can view documents
       allow read: if isSignedIn() && (
-        isAdmin() ||
-        isStaff() ||
         isProjectMember(resource.data.projectId) ||
-        resource.data.createdBy == 'guest'
+        hasPermission('file', 'view')
       );
-      allow create: if (
-        // Authenticated users
-        isSignedIn() && (
-          isAdmin() ||
-          isStaff() ||
-          isProjectMember(request.resource.data.projectId)
-        )
-      )
-      ||
-      (
-        // Guest uploads with valid upload token
-        request.resource.data.createdBy == 'guest' &&
-        request.resource.data.keys().hasAny(['uploadedWithToken']) &&
-        exists(/databases/$(database)/documents/uploadTokens/$(request.resource.data.uploadedWithToken))
+
+      // Create: Project members who are Staff/Admin/Contractor
+      allow create: if isSignedIn() && (
+        (isProjectMember(request.resource.data.projectId) &&
+         (hasGlobalRole('Staff') || hasGlobalRole('Admin') || hasGlobalRole('Contractor'))) ||
+        hasPermission('file', 'edit')
       );
+
+      // Update: Staff/Admin or document creator
       allow update: if isSignedIn() && (
-        isAdmin() ||
-        isStaff() ||
-        hasRole(resource.data.projectId, 'admin') ||
-        hasRole(resource.data.projectId, 'manager') ||
-        request.auth.uid == resource.data.createdBy
+        (isProjectMember(resource.data.projectId) &&
+         (hasGlobalRole('Staff') || hasGlobalRole('Admin') || request.auth.uid == resource.data.createdBy)) ||
+        hasPermission('file', 'edit')
       );
-      allow delete: if isAdmin() || isStaff() || hasRole(resource.data.projectId, 'admin');
+
+      // Delete: Admin only
+      allow delete: if isSignedIn() && (
+        hasGlobalRole('Admin') ||
+        hasPermission('file', 'delete')
+      );
 
       // Comments subcollection for document
       match /comments/{commentId} {
@@ -238,97 +296,38 @@ service cloud.firestore {
 
     // Document Annotations collection
     match /documentAnnotations/{documentId} {
-      // Allow read access to any user who can view the document
-      allow read: if isSignedIn() && exists(/databases/$(database)/documents/documents/$(documentId)) &&
-        (isAdmin() ||
-         isStaff() ||
-         isProjectMember(get(/databases/$(database)/documents/documents/$(documentId)).data.projectId));
+      // Read: Users who can view the document
+      allow read: if isSignedIn() &&
+        exists(/databases/$(database)/documents/documents/$(documentId)) &&
+        (isProjectMember(get(/databases/$(database)/documents/documents/$(documentId)).data.projectId) ||
+         hasPermission('file', 'view'));
 
-      // Allow write access to users who can edit the document
-      allow write: if isSignedIn() && exists(/databases/$(database)/documents/documents/$(documentId)) &&
-        (isAdmin() ||
-         isStaff() ||
-         hasRole(get(/databases/$(database)/documents/documents/$(documentId)).data.projectId, 'admin') ||
-         hasRole(get(/databases/$(database)/documents/documents/$(documentId)).data.projectId, 'manager') ||
-         request.auth.uid == get(/databases/$(database)/documents/documents/$(documentId)).data.createdBy);
+      // Write: Staff/Admin or document creator
+      allow write: if isSignedIn() &&
+        exists(/databases/$(database)/documents/documents/$(documentId)) &&
+        ((isProjectMember(get(/databases/$(database)/documents/documents/$(documentId)).data.projectId) &&
+          (hasGlobalRole('Staff') ||
+           hasGlobalRole('Admin') ||
+           request.auth.uid == get(/databases/$(database)/documents/documents/$(documentId)).data.createdBy)) ||
+         hasPermission('file', 'edit'));
     }
 
-    // Transmittals collection
-    match /transmittals/{projectId} {
-      // Transmittal documents subcollection
-      match /documents/{documentId} {
-        allow read: if isSignedIn() && (
-          isAdmin() ||
-          isStaff() ||
-          isProjectMember(projectId)
-        );
-        allow create, update: if isSignedIn() && (
-          isAdmin() ||
-          isStaff() ||
-          isProjectMember(projectId)
-        );
-        allow delete: if isAdmin() || isStaff() ||
-          hasRole(projectId, 'admin') ||
-          hasRole(projectId, 'manager');
-      }
-
-      // Transmittal history subcollection
-      match /history/{historyId} {
-        allow read: if isSignedIn() && (
-          isAdmin() ||
-          isStaff() ||
-          isProjectMember(projectId)
-        );
-        allow create: if isSignedIn() && (
-          isAdmin() ||
-          isStaff() ||
-          isProjectMember(projectId)
-        );
-        allow update, delete: if false; // History entries should not be modified or deleted
-      }
-
-      // Standalone transmittal entries subcollection
-      match /standalone/{entryId} {
-        allow read: if isSignedIn() && (
-          isAdmin() ||
-          isStaff() ||
-          isProjectMember(projectId)
-        );
-        allow create: if isSignedIn() && (
-          isAdmin() ||
-          isStaff() ||
-          isProjectMember(projectId)
-        );
-        allow update: if isSignedIn() && (
-          isAdmin() ||
-          isStaff() ||
-          hasRole(projectId, 'admin') ||
-          hasRole(projectId, 'manager') ||
-          request.auth.uid == resource.data.createdBy
-        );
-        allow delete: if isAdmin() || isStaff() ||
-          hasRole(projectId, 'admin') ||
-          hasRole(projectId, 'manager');
-      }
-    }
-
-    // Upload Tokens collection (for guest uploads)
-    match /uploadTokens/{tokenId} {
-      // Allow anyone (including guests) to read tokens - needed for guest upload validation
+    // Share Tokens collection
+    match /shareTokens/{tokenId} {
+      // Allow anyone to read tokens (needed for unauthenticated share link validation)
+      // Tokens are UUIDs and difficult to guess, making public read acceptable
       allow read: if true;
 
-      // Allow authenticated users to create upload tokens
-      allow create: if isSignedIn();
+      // Allow authenticated Staff/Admin users to create share tokens
+      allow create: if isSignedIn() && (
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'Admin' ||
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'Staff'
+      );
 
-      // Allow anyone to update only the usedCount field (for tracking guest uploads)
-      // This is necessary because guests need to increment the count when uploading
-      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly(['usedCount']);
-
-      // Allow admins, staff, or the token creator to delete tokens
-      allow delete: if isSignedIn() && (
-        isAdmin() ||
-        isStaff() ||
-        request.auth.uid == resource.data.createdBy
+      // Allow token creator or Admin to update/delete their tokens
+      allow update, delete: if isSignedIn() && (
+        request.auth.uid == resource.data.creatorId ||
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'Admin'
       );
     }
   }

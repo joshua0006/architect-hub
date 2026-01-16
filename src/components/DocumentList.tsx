@@ -1106,8 +1106,19 @@ export default function DocumentList({
   
   // Add a function to close the popup
   const closePopup = () => {
+    // Reset popup visibility and item reference
     setPopupPosition(null);
     setPopupItem(null);
+
+    // Reset form fields to clean state
+    setEditNameField("");
+    setSelectedPermission('STAFF_ONLY');
+    setInitialPermissionOnPopupOpen('STAFF_ONLY');
+
+    // Reset all loading/saving states
+    setIsFetchingPermission(false);
+    setIsSavingPermission(false);
+    setIsSavingName(false);
   };
   
   // Add effect to close popup when clicking outside
