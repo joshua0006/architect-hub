@@ -4448,7 +4448,8 @@ export default function DocumentList({
 
       // Enter selection mode
       setIsSelectionMode(true);
-      setSelectionMode(operation); // 'move'
+      setSelectionMode(operation); // 'move' or 'copy'
+      setCopyMoveAction(operation); // Sync copyMoveAction with selectionMode to show correct button text
       setItemTypeFilter(itemType); // 'document'
 
       // Clear any existing selection
@@ -5959,6 +5960,7 @@ export default function DocumentList({
                     }
 
                     setMovingFiles(true);
+                    setIsCopyingOrMoving(true);  // Disable button during bulk operation
                     setMoveProgress(0);
 
                     let successCount = 0;
@@ -6003,6 +6005,7 @@ export default function DocumentList({
                       showToast("An error occurred during move operation", "error");
                     } finally {
                       setMovingFiles(false);
+                      setIsCopyingOrMoving(false);  // Re-enable button after operation
                       setMoveProgress(0);
                     }
                   }
