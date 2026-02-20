@@ -173,7 +173,7 @@ export default function SharedContent() {
             animate={{ opacity: 1, x: 0 }}
             className="flex items-center space-x-2"
           >
-            <img src="/assets/images/logo.jpg" alt="CHRIS COLE ARCHITECT" className="h-10" />
+            <img src="/assets/images/new-logo.jpg" alt="CHRIS COLE ARCHITECT" className="h-10" />
           </motion.div>
         </div>
       </header>

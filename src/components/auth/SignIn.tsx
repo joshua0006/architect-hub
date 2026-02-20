@@ -42,7 +42,7 @@ export default function SignIn() {
       <div className="max-w-xl mx-auto bg-white rounded-2xl shadow-xl p-8">
         <div className="text-center">
           <div className="flex justify-center items-center gap-3 mb-6">
-            <img src="/assets/images/logo.jpg" alt="Chris Cole Architect" className="h-14" />
+            <img src="/assets/images/new-logo.jpg" alt="Chris Cole Architect" className="h-14" />
           </div>
           <p className="text-gray-500 mb-8">Sign in to your account to continue</p>
         </div>
