@@ -72,7 +72,7 @@ export default function Header({ selectedProject }: HeaderProps) {
   const isAdmin = user?.role === 'Admin';
   
   return (
-    <header className="fixed top-0 left-0 right-0 h-16 glass-effect z-50">
+    <header className="fixed top-0 left-0 right-0 h-20 glass-effect z-50">
       <div className="h-full  mx-auto px-4 flex items-center justify-between">
         <div className="flex items-center space-x-2 justify-center">
           <img src="/assets/images/new-logo.jpg" alt="Chris Cole Architect" className="h-20" />

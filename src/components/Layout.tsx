@@ -28,7 +28,7 @@ export default function Layout({ sidebar, children, fullscreenMode = false, sele
     <div className="min-h-screen bg-gray-50">
       <Header selectedProject={selectedProject} />
       
-      <div className="pt-16 flex">
+      <div className="pt-20 flex">
         {sidebar && !fullscreenMode && (
           <aside
             className={`relative ${minimized ? 'w-16' : 'w-1/4 min-w-[280px] max-w-sm'} h-[calc(100vh-4rem)] bg-white border-r border-gray-200 transition-all duration-300`}
