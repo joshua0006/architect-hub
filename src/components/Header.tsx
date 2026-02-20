@@ -75,7 +75,7 @@ export default function Header({ selectedProject }: HeaderProps) {
     <header className="fixed top-0 left-0 right-0 h-16 glass-effect z-50">
       <div className="h-full  mx-auto px-4 flex items-center justify-between">
         <div className="flex items-center space-x-2 justify-center">
-          <img src="/assets/images/new-logo.jpg" alt="Chris Cole Architect" className="h-10" />
+          <img src="/assets/images/new-logo.jpg" alt="Chris Cole Architect" className="h-20" />
         </div>
         
         <div className="flex items-center space-x-8">
